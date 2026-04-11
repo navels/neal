@@ -32,6 +32,37 @@ pnpm --dir ~/code/personal/codex-chunked start -- /absolute/or/relative/PLAN.md
 
 `pnpm build` also refreshes the globally linked `codex-chunked` binary.
 
+## Sandbox E2E
+
+Use the in-repo sandbox plan when you want to exercise `forge` without touching a real project:
+
+```bash
+cd /Users/lee.nave/code/personal/codex-chunked
+forge notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
+```
+
+The sandbox scope is intentionally limited to `src/testing-fixture/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the chunk queue.
+
+`forge` treats `.forge/`, `REVIEW.md`, and archived `notes/REVIEW-*.md` files as transient wrapper artifacts. On successful completion it archives the full review to `notes/REVIEW-<final-commit>.md` and rewrites root `REVIEW.md` as a short pointer to the archived file.
+
+Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 120-second inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window.
+
+For review quality, `forge` uses a hybrid diff strategy: smaller diffs are inlined directly into Claude’s prompt, while larger diffs fall back to diff stat plus changed-file guidance so Claude can inspect files with `Read`, `Grep`, and `Glob` instead of relying on a truncated patch.
+
+Each `forge` run also writes persistent diagnostics under `.forge/runs/<timestamp>-<id>/`:
+
+- `meta.json`: static run metadata
+- `events.ndjson`: structured phase, notification, and failure events
+- `stderr.log`: tee of Codex/Claude progress plus wrapper diagnostics
+
+The final CLI JSON output includes `runDir` so you can jump straight to the relevant log directory after a failure.
+
+If you want to force the large-diff fallback path during local validation, lower the inline file threshold:
+
+```bash
+CLAUDE_INLINE_DIFF_FILE_LIMIT=1 forge notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
+```
+
 ## Notifications
 
 The tool no longer depends on the `work-autonomously` skill. By default it:

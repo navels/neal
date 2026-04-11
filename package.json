@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "bin": {
-    "codex-chunked": "dist/index.js"
+    "codex-chunked": "dist/index.js",
+    "forge": "dist/codex-claude-chunked/index.js",
+    "codex-claude-chunked": "dist/codex-claude-chunked/index.js"
   },
   "engines": {
     "node": ">=18"
@@ -15,6 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.101",
     "@openai/codex-sdk": "0.118.0"
   },
   "devDependencies": {

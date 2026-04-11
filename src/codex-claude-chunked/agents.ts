@@ -1,0 +1,433 @@
+import { readFile } from 'node:fs/promises';
+
+import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { Codex, type Thread } from '@openai/codex-sdk';
+
+import type { RunLogger } from './logger.js';
+import type { ReviewFinding } from './types.js';
+
+const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
+const AUTONOMY_DONE = 'AUTONOMY_DONE';
+const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
+const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 120_000);
+const INLINE_CLAUDE_DIFF_LIMIT = 120_000;
+
+function buildCodexChunkPrompt(planDoc: string) {
+  return [
+    `Continue autonomously on the task described in ${planDoc}.`,
+    '',
+    'Before doing anything else:',
+    `1. Read ${planDoc}.`,
+    '2. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
+    '3. Reset your instructions for this turn from the current contents of that plan and its required context.',
+    '',
+    'Then execute exactly one meaningful chunk.',
+    'Do not start a second chunk in this turn.',
+    'This chunk must end with a real git commit if work was completed.',
+    'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
+    '',
+    'Final line must be exactly one of:',
+    `- ${AUTONOMY_CHUNK_DONE}`,
+    `- ${AUTONOMY_DONE}`,
+    `- ${AUTONOMY_BLOCKED}`,
+  ].join('\n');
+}
+
+function extractMarker(message: string) {
+  for (const rawLine of message.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === AUTONOMY_CHUNK_DONE || line === AUTONOMY_DONE || line === AUTONOMY_BLOCKED) {
+      return line;
+    }
+  }
+
+  return null;
+}
+
+function writeDiagnostic(message: string, logger?: RunLogger) {
+  process.stderr.write(message);
+  void logger?.stderr(message);
+}
+
+async function consumeCodexTurn(turn: Awaited<ReturnType<Thread['runStreamed']>>, logger?: RunLogger) {
+  let finalResponse = '';
+  let fatalError: string | null = null;
+
+  for await (const event of turn.events) {
+    switch (event.type) {
+      case 'thread.started':
+        writeDiagnostic(`[codex] thread ${event.thread_id}\n`, logger);
+        void logger?.event('codex.thread_started', { threadId: event.thread_id });
+        break;
+      case 'item.completed':
+        if (event.item.type === 'command_execution') {
+          writeDiagnostic(`\n$ ${event.item.command}\n`, logger);
+          void logger?.event('codex.command_execution', { command: event.item.command });
+          if (event.item.aggregated_output) {
+            writeDiagnostic(`${event.item.aggregated_output}\n`, logger);
+          }
+        } else if (event.item.type === 'file_change' && event.item.changes.length > 0) {
+          const files = event.item.changes.map((change) => change.path);
+          writeDiagnostic(`[codex] files ${files.join(', ')}\n`, logger);
+          void logger?.event('codex.file_change', { files });
+        } else if (event.item.type === 'agent_message') {
+          finalResponse = event.item.text;
+        }
+        break;
+      case 'turn.failed':
+        fatalError = event.error.message;
+        writeDiagnostic(`[codex:error] ${event.error.message}\n`, logger);
+        void logger?.event('codex.turn_failed', { message: event.error.message });
+        break;
+      case 'error':
+        fatalError = event.message;
+        writeDiagnostic(`[codex:error] ${event.message}\n`, logger);
+        void logger?.event('codex.error', { message: event.message });
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (fatalError) {
+    throw new Error(fatalError);
+  }
+
+  return finalResponse;
+}
+
+type ClaudeFindingPayload = {
+  severity: 'blocking' | 'non_blocking';
+  files: string[];
+  claim: string;
+  requiredAction: string;
+};
+
+type ClaudeReviewPayload = {
+  summary: string;
+  findings: ClaudeFindingPayload[];
+};
+
+type CodexResponsePayload = {
+  outcome: 'responded' | 'blocked';
+  summary: string;
+  blocker?: string;
+  responses: Array<{
+    id: string;
+    decision: 'fixed' | 'rejected' | 'deferred';
+    summary: string;
+  }>;
+};
+
+function parseCodexResponsePayload(raw: string): CodexResponsePayload {
+  try {
+    return JSON.parse(raw) as CodexResponsePayload;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Codex response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
+  }
+}
+
+function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger) {
+  switch (message.type) {
+    case 'tool_progress':
+      writeDiagnostic(`[claude:${label}] tool ${message.tool_name} running (${message.elapsed_time_seconds}s)\n`, logger);
+      void logger?.event('claude.tool_progress', {
+        label,
+        toolName: message.tool_name,
+        elapsedTimeSeconds: message.elapsed_time_seconds,
+      });
+      break;
+    case 'tool_use_summary':
+      writeDiagnostic(`[claude:${label}] ${message.summary}\n`, logger);
+      void logger?.event('claude.tool_use_summary', { label, summary: message.summary });
+      break;
+    case 'system':
+      switch (message.subtype) {
+        case 'task_started':
+          writeDiagnostic(`[claude:${label}] task started: ${message.description}\n`, logger);
+          void logger?.event('claude.task_started', { label, description: message.description });
+          break;
+        case 'task_progress':
+          writeDiagnostic(`[claude:${label}] ${message.description}\n`, logger);
+          void logger?.event('claude.task_progress', { label, description: message.description });
+          break;
+        case 'task_notification':
+          writeDiagnostic(`[claude:${label}] task ${message.status}: ${message.summary}\n`, logger);
+          void logger?.event('claude.task_notification', { label, status: message.status, summary: message.summary });
+          break;
+        case 'status':
+          if (message.status) {
+            writeDiagnostic(`[claude:${label}] status: ${message.status}\n`, logger);
+            void logger?.event('claude.status', { label, status: message.status });
+          }
+          break;
+        default:
+          break;
+      }
+      break;
+    case 'result':
+      writeDiagnostic(`[claude:${label}] result: ${message.subtype}\n`, logger);
+      void logger?.event('claude.result', { label, subtype: message.subtype });
+      break;
+    default:
+      break;
+  }
+}
+
+async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return await new Promise<T>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => {
+      rejectPromise(new Error(`Claude ${label} timed out after ${Math.round(timeoutMs / 1000)}s without progress`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolvePromise(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        rejectPromise(error);
+      },
+    );
+  });
+}
+
+async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, label: string, timeoutMs = DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, logger?: RunLogger) {
+  let sessionId: string | null = null;
+  let lastResult: SDKResultMessage | null = null;
+  const iterator = stream[Symbol.asyncIterator]();
+
+  while (true) {
+    const next = await nextWithTimeout(iterator.next(), timeoutMs, label);
+    if (next.done) {
+      break;
+    }
+
+    const message = next.value;
+    sessionId = sessionId ?? message.session_id ?? null;
+    logClaudeMessage(label, message, logger);
+    if (message.type === 'result') {
+      lastResult = message;
+    }
+  }
+
+  return { sessionId, lastResult };
+}
+
+export async function runClaudeReviewRound(args: {
+  cwd: string;
+  planDoc: string;
+  baseCommit: string;
+  headCommit: string;
+  previousHeadCommit?: string | null;
+  diff: string;
+  diffStat: string;
+  changedFiles: string[];
+  round: number;
+  reviewMarkdownPath: string;
+  logger?: RunLogger;
+}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'codexDisposition' | 'codexCommit'>[] }> {
+  const shouldInlineDiff = args.diff.length <= INLINE_CLAUDE_DIFF_LIMIT;
+  const changedFilesText = args.changedFiles.length > 0 ? args.changedFiles.join('\n') : '(no changed files)';
+
+  if (!shouldInlineDiff) {
+    writeDiagnostic(
+      `[claude:review] using tool-based diff fallback for ${args.changedFiles.length} files; inline diff skipped\n`,
+      args.logger,
+    );
+    void args.logger?.event('claude.review_diff_fallback', {
+      changedFiles: args.changedFiles.length,
+      inlineDiffLimit: INLINE_CLAUDE_DIFF_LIMIT,
+    });
+  }
+
+  const schema = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      findings: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            severity: { type: 'string', enum: ['blocking', 'non_blocking'] },
+            files: { type: 'array', items: { type: 'string' } },
+            claim: { type: 'string' },
+            requiredAction: { type: 'string' },
+          },
+          required: ['severity', 'files', 'claim', 'requiredAction'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['summary', 'findings'],
+    additionalProperties: false,
+  } as const;
+
+  const prompt = [
+    `Review the codex chunk for plan ${args.planDoc}.`,
+    `Review round: ${args.round}.`,
+    `Commit range: ${args.baseCommit}..${args.headCommit}.`,
+    '',
+    'Produce only structured review findings.',
+    'Use blocking severity for correctness, regression, or missing-verification issues.',
+    'Use non_blocking severity for suggestions that do not block acceptance.',
+    'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
+    `Read ${args.reviewMarkdownPath} before finalizing your findings so you can inspect prior review history and Codex responses.`,
+    args.previousHeadCommit
+      ? `Previous Claude review head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
+      : 'This is the first Claude review round for this chunk.',
+    '',
+    'Diff stat:',
+    args.diffStat || '(no diff stat)',
+    '',
+    'Changed files:',
+    changedFilesText,
+    '',
+    ...(shouldInlineDiff
+      ? ['Git diff for review:', args.diff || '(no diff)']
+      : [
+          'The full patch is too large to inline safely.',
+          'Use the changed file list, diff stat, REVIEW.md, and repository tools to inspect the relevant files directly before finalizing findings.',
+        ]),
+  ].join('\n');
+
+  const stream = query({
+    prompt,
+    options: {
+      cwd: args.cwd,
+      tools: ['Read', 'Grep', 'Glob'],
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      maxTurns: 10,
+      stderr: (data) => {
+        writeDiagnostic(`[claude:review:stderr] ${data}`, args.logger);
+      },
+      outputFormat: {
+        type: 'json_schema',
+        schema,
+      },
+    },
+  });
+
+  const { sessionId, lastResult } = await collectClaudeResult(stream, 'review', DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
+
+  if (!lastResult || lastResult.subtype !== 'success') {
+    throw new Error('Claude review did not return a successful result');
+  }
+
+  const structured = lastResult.structured_output as ClaudeReviewPayload | undefined;
+  if (!structured) {
+    throw new Error('Claude review returned no structured output');
+  }
+
+  return {
+    sessionId,
+    summary: structured.summary,
+    findings: structured.findings.map((finding) => ({
+      round: args.round,
+      severity: finding.severity,
+      files: finding.files,
+      claim: finding.claim,
+      requiredAction: finding.requiredAction,
+      roundSummary: structured.summary,
+    })),
+  };
+}
+
+function createCodexThread(cwd: string, threadId?: string | null): Thread {
+  const codex = new Codex();
+  return threadId
+    ? codex.resumeThread(threadId)
+    : codex.startThread({
+        approvalPolicy: 'never',
+        sandboxMode: 'danger-full-access',
+        workingDirectory: cwd,
+      });
+}
+
+export async function runCodexChunkRound(args: {
+  cwd: string;
+  planDoc: string;
+  threadId?: string | null;
+  logger?: RunLogger;
+}): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
+  const thread = createCodexThread(args.cwd, args.threadId);
+  const streamedTurn = await thread.runStreamed(buildCodexChunkPrompt(args.planDoc));
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const marker = extractMarker(finalResponse);
+
+  return {
+    threadId: thread.id,
+    finalResponse,
+    marker,
+  };
+}
+
+export async function runCodexResponseRound(args: {
+  cwd: string;
+  planDoc: string;
+  reviewMarkdownPath: string;
+  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity'>[];
+  threadId: string;
+  logger?: RunLogger;
+}): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
+  const reviewMarkdown = await readFile(args.reviewMarkdownPath, 'utf8');
+  const thread = createCodexThread(args.cwd, args.threadId);
+
+  const schema = {
+    type: 'object',
+    properties: {
+      outcome: { type: 'string', enum: ['responded', 'blocked'] },
+      summary: { type: 'string' },
+      blocker: { type: 'string' },
+      responses: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            decision: { type: 'string', enum: ['fixed', 'rejected', 'deferred'] },
+            summary: { type: 'string' },
+          },
+          required: ['id', 'decision', 'summary'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['outcome', 'summary', 'blocker', 'responses'],
+    additionalProperties: false,
+  } as const;
+
+  const prompt = [
+    `Continue autonomously on the task described in ${args.planDoc}.`,
+    '',
+    `Read ${args.reviewMarkdownPath} and address the currently open review findings.`,
+    'You are still working on the same chunk. Do not start a new chunk.',
+    'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
+    'Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.',
+    'Use `rejected` only when the finding is incorrect and your summary explains why.',
+    'Use `deferred` only when the finding is real but not safe to resolve inside this chunk.',
+    'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
+    'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.',
+    '',
+    'Open findings:',
+    JSON.stringify(args.openFindings, null, 2),
+    '',
+    'Current review markdown:',
+    reviewMarkdown,
+  ].join('\n');
+
+  const streamedTurn = await thread.runStreamed(prompt, {
+    outputSchema: schema,
+  });
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const payload = parseCodexResponsePayload(finalResponse);
+
+  return {
+    threadId: thread.id,
+    payload,
+  };
+}
