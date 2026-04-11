@@ -6,24 +6,37 @@ import process from 'node:process';
 
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
+import type { ExecutionMode } from './types.js';
 
 function usage(): never {
-  console.error('Usage: forge <plan-doc>');
+  console.error('Usage: forge [--chunked] <plan-doc>');
   console.error('   or: forge --resume [state-file]');
   process.exit(1);
 }
 
 async function main() {
-  const firstArg = process.argv[2];
+  const args = process.argv.slice(2);
+  if (args.length === 0) {
+    usage();
+  }
+
+  let executionMode: ExecutionMode = 'one_shot';
+  let planDoc: string | null = null;
+  let resumeStatePath: string | undefined;
+  let index = 0;
+
+  if (args[index] === '--chunked') {
+    executionMode = 'chunked';
+    index += 1;
+  }
+
+  const firstArg = args[index];
   if (!firstArg) {
     usage();
   }
 
-  let planDoc: string | null = null;
-  let resumeStatePath: string | undefined;
-
   if (firstArg === '--resume') {
-    resumeStatePath = resolve(process.argv[3] ?? '.forge/session.json');
+    resumeStatePath = resolve(args[index + 1] ?? '.forge/session.json');
     await access(resumeStatePath);
   } else {
     planDoc = resolve(firstArg);
@@ -31,7 +44,7 @@ async function main() {
   }
 
   const resolvedPlanDoc = resumeStatePath ? null : planDoc;
-  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath);
+  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, executionMode);
   runLogger = logger;
   const finalState = await runOnePass(state, statePath, logger);
 
@@ -42,6 +55,7 @@ async function main() {
         phase: finalState.phase,
         status: finalState.status,
         planDoc: finalState.planDoc,
+        executionMode: finalState.executionMode,
         statePath,
         runDir: finalState.runDir,
         reviewMarkdownPath: finalState.reviewMarkdownPath,

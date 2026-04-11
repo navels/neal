@@ -6,6 +6,8 @@ export type OrchestrationPhase =
   | 'done'
   | 'blocked';
 
+export type ExecutionMode = 'one_shot' | 'chunked';
+
 export type FindingSeverity = 'blocking' | 'non_blocking';
 export type FindingStatus = 'open' | 'fixed' | 'rejected' | 'deferred';
 
@@ -39,6 +41,7 @@ export type OrchestrationState = {
   planDoc: string;
   cwd: string;
   runDir: string;
+  executionMode: ExecutionMode;
   phase: OrchestrationPhase;
   createdAt: string;
   updatedAt: string;
@@ -61,4 +64,5 @@ export type OrchestratorInit = {
   runDir: string;
   reviewMarkdownPath: string;
   maxRounds: number;
+  executionMode: ExecutionMode;
 };

@@ -7,11 +7,11 @@ import { getChangedFilesForRange, getCommitRange, getCommitSubjects, getDiffForR
 import { createRunLogger, type RunLogger } from './logger.js';
 import { renderReviewMarkdown, writeReviewMarkdown, writeReviewPointer } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
-import type { FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
+import type { ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const MAX_INLINE_DIFF_FILES = Number(process.env.CLAUDE_INLINE_DIFF_FILE_LIMIT ?? 40);
 
-export async function initializeOrchestration(planDoc: string, cwd: string) {
+export async function initializeOrchestration(planDoc: string, cwd: string, executionMode: ExecutionMode) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.forge');
   const reviewMarkdownPath = join(cwd, 'REVIEW.md');
@@ -19,6 +19,7 @@ export async function initializeOrchestration(planDoc: string, cwd: string) {
     cwd,
     stateDir,
     planDoc: absolutePlanDoc,
+    executionMode,
   });
 
   const init: OrchestratorInit = {
@@ -28,6 +29,7 @@ export async function initializeOrchestration(planDoc: string, cwd: string) {
     runDir: logger.runDir,
     reviewMarkdownPath,
     maxRounds: 3,
+    executionMode,
   };
 
   await mkdir(stateDir, { recursive: true });
@@ -41,6 +43,7 @@ export async function initializeOrchestration(planDoc: string, cwd: string) {
     statePath,
     baseCommit,
     reviewMarkdownPath,
+    executionMode,
   });
 
   return {
@@ -83,6 +86,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   const codex = await runCodexChunkRound({
     cwd: state.cwd,
     planDoc: state.planDoc,
+    executionMode: state.executionMode,
     threadId: state.codexThreadId,
     logger,
   });
@@ -100,6 +104,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   await writeReviewMarkdown(nextState.reviewMarkdownPath, nextState);
   await logger?.event('phase.complete', {
     phase: 'codex_chunk',
+    executionMode: state.executionMode,
     marker: codex.marker,
     threadId: codex.threadId,
     createdCommits,
@@ -449,13 +454,19 @@ export async function runOnePass(state: OrchestrationState, statePath: string, l
   return currentState;
 }
 
-export async function loadOrInitialize(planDoc: string | null, cwd: string, resumeStatePath?: string) {
+export async function loadOrInitialize(
+  planDoc: string | null,
+  cwd: string,
+  resumeStatePath?: string,
+  executionMode: ExecutionMode = 'one_shot',
+) {
   if (resumeStatePath) {
     const state = await loadState(resumeStatePath);
     const logger = await createRunLogger({
       cwd: state.cwd,
       stateDir: dirname(resumeStatePath),
       planDoc: state.planDoc,
+      executionMode: state.executionMode,
       runDir: state.runDir,
       resumedFromStatePath: resumeStatePath,
     });
@@ -475,5 +486,5 @@ export async function loadOrInitialize(planDoc: string | null, cwd: string, resu
     throw new Error('planDoc is required when initializing a new orchestration');
   }
 
-  return initializeOrchestration(planDoc, cwd);
+  return initializeOrchestration(planDoc, cwd, executionMode);
 }

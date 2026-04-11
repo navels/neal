@@ -2,6 +2,8 @@ import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+import type { ExecutionMode } from './types.js';
+
 type LoggerEvent = {
   ts: string;
   type: string;
@@ -12,6 +14,7 @@ export type RunLoggerInit = {
   cwd: string;
   stateDir: string;
   planDoc: string;
+  executionMode: ExecutionMode;
   runDir?: string;
   resumedFromStatePath?: string;
 };
@@ -53,6 +56,7 @@ export class RunLogger {
             cwd: init.cwd,
             planDoc: init.planDoc,
             planName: basename(init.planDoc),
+            executionMode: init.executionMode,
             resumedFromStatePath: init.resumedFromStatePath ?? null,
             runDir: this.runDir,
           },

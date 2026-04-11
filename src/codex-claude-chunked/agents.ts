@@ -4,7 +4,7 @@ import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/cla
 import { Codex, type Thread } from '@openai/codex-sdk';
 
 import type { RunLogger } from './logger.js';
-import type { ReviewFinding } from './types.js';
+import type { ExecutionMode, ReviewFinding } from './types.js';
 
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
 const AUTONOMY_DONE = 'AUTONOMY_DONE';
@@ -12,7 +12,27 @@ const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
 const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 120_000);
 const INLINE_CLAUDE_DIFF_LIMIT = 120_000;
 
-function buildCodexChunkPrompt(planDoc: string) {
+function buildOneShotPrompt(planDoc: string) {
+  return [
+    `Continue autonomously on the task described in ${planDoc}.`,
+    '',
+    'Before doing anything else:',
+    `1. Read ${planDoc}.`,
+    '2. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
+    '3. Reset your instructions for this turn from the current contents of that plan and its required context.',
+    '',
+    'Then complete the plan end-to-end if feasible.',
+    'Verify the relevant work before you finish.',
+    'Create real git commit(s) for completed work.',
+    'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
+    '',
+    'Final line must be exactly one of:',
+    `- ${AUTONOMY_DONE}`,
+    `- ${AUTONOMY_BLOCKED}`,
+  ].join('\n');
+}
+
+function buildChunkedPrompt(planDoc: string) {
   return [
     `Continue autonomously on the task described in ${planDoc}.`,
     '',
@@ -351,11 +371,13 @@ function createCodexThread(cwd: string, threadId?: string | null): Thread {
 export async function runCodexChunkRound(args: {
   cwd: string;
   planDoc: string;
+  executionMode: ExecutionMode;
   threadId?: string | null;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
   const thread = createCodexThread(args.cwd, args.threadId);
-  const streamedTurn = await thread.runStreamed(buildCodexChunkPrompt(args.planDoc));
+  const prompt = args.executionMode === 'one_shot' ? buildOneShotPrompt(args.planDoc) : buildChunkedPrompt(args.planDoc);
+  const streamedTurn = await thread.runStreamed(prompt);
   const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
   const marker = extractMarker(finalResponse);
 

@@ -14,6 +14,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     planDoc: init.planDoc,
     cwd: init.cwd,
     runDir: init.runDir,
+    executionMode: init.executionMode,
     phase: 'codex_chunk',
     createdAt: now,
     updatedAt: now,
@@ -59,6 +60,10 @@ function validateState(value: unknown): asserts value is OrchestrationState {
 
   if (typeof state.planDoc !== 'string' || typeof state.cwd !== 'string') {
     throw new Error('Invalid session state: missing planDoc or cwd');
+  }
+
+  if (state.executionMode !== 'one_shot' && state.executionMode !== 'chunked') {
+    throw new Error('Invalid session state: missing or invalid executionMode');
   }
 
   if (typeof state.phase !== 'string' || typeof state.status !== 'string') {
@@ -125,6 +130,7 @@ export async function loadState(path: string) {
   return {
     ...parsed,
     runDir,
+    executionMode: parsed.executionMode,
     rounds: parsed.rounds.map(hydrateRound),
     findings: parsed.findings.map(hydrateFinding),
   };
