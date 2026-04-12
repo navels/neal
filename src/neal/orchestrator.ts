@@ -15,6 +15,7 @@ import {
 import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
+import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
@@ -920,6 +921,10 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     archivedReviewPath,
     blocker: null,
   });
+  const retrospectiveState = {
+    ...archivedReviewState,
+    completedScopes,
+  };
   const continueChunked = state.executionMode === 'chunked' && state.lastCodexMarker === 'AUTONOMY_CHUNK_DONE';
   const nextState = await saveState(
     statePath,
@@ -950,6 +955,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   );
 
   await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
+  await writeCheckpointRetrospective(retrospectiveState, continueChunked ? 'chunk_accepted' : 'done');
   if (continueChunked) {
     await writeExecutionArtifacts(nextState);
   } else {
@@ -1051,6 +1057,9 @@ export async function runOnePass(
     finalCommit: currentState.finalCommit,
     archivedReviewPath: currentState.archivedReviewPath,
   });
+  if (currentState.phase === 'blocked' || currentState.phase === 'done') {
+    await writeCheckpointRetrospective(currentState, currentState.phase === 'blocked' ? 'blocked' : 'done');
+  }
   return currentState;
 }
 

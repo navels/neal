@@ -57,6 +57,8 @@ Execution-mode semantics:
 
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 
+`neal` also writes wrapper-generated retrospectives into the run directory. `RETROSPECTIVE.md` always reflects the latest accepted chunk, blocked stop, or completed plan, and checkpoint-specific archives are written alongside it so you can inspect whether the review loop is adding value or exposing inefficiencies.
+
 Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Claude review sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, and `neal` will continue the same Claude session up to `2` times by default when it hits `error_max_turns` before returning structured findings. Override that continuation limit with `CLAUDE_REVIEW_CONTINUATION_LIMIT`.
 
 Codex turns now get the same treatment. If a Codex streamed turn goes silent for too long, `neal` fails the run with the current thread id instead of hanging indefinitely. Override the default 10-minute Codex inactivity timeout with `CODEX_INACTIVITY_TIMEOUT_MS`. You can also tune wrapper heartbeat logging with `NEAL_PHASE_HEARTBEAT_MS`; set it to `0` to disable phase heartbeats entirely.
