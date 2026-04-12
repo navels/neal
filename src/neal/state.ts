@@ -158,9 +158,9 @@ export async function loadState(path: string): Promise<OrchestrationState> {
   validateState(parsed);
   const stateDir = dirname(path);
   const runDir = typeof parsed.runDir === 'string' ? parsed.runDir : join(stateDir, 'runs', 'legacy');
-  const progressJsonPath = typeof parsed.progressJsonPath === 'string' ? parsed.progressJsonPath : join(stateDir, 'plan-progress.json');
+  const progressJsonPath = typeof parsed.progressJsonPath === 'string' ? parsed.progressJsonPath : join(runDir, 'plan-progress.json');
   const progressMarkdownPath =
-    typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(dirname(progressJsonPath), 'PLAN_PROGRESS.md');
+    typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(runDir, 'PLAN_PROGRESS.md');
   const executionMode =
     parsed.executionMode === undefined
       ? 'chunked'

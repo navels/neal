@@ -54,8 +54,6 @@ export async function initializeOrchestration(
 ) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.neal');
-  const progressJsonPath = join(cwd, 'plan-progress.json');
-  const progressMarkdownPath = join(cwd, 'PLAN_PROGRESS.md');
   const logger = await createRunLogger({
     cwd,
     stateDir,
@@ -70,8 +68,8 @@ export async function initializeOrchestration(
     stateDir,
     runDir: logger.runDir,
     topLevelMode,
-    progressJsonPath,
-    progressMarkdownPath,
+    progressJsonPath: join(logger.runDir, 'plan-progress.json'),
+    progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
     maxRounds: 3,
     executionMode,
@@ -89,8 +87,8 @@ export async function initializeOrchestration(
     baseCommit,
     topLevelMode,
     reviewMarkdownPath: savedState.reviewMarkdownPath,
-    progressJsonPath,
-    progressMarkdownPath,
+    progressJsonPath: savedState.progressJsonPath,
+    progressMarkdownPath: savedState.progressMarkdownPath,
     executionMode,
   });
 
@@ -135,8 +133,6 @@ function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
   const ignoredPaths = new Set([
     '.neal/session.json',
     '.forge/session.json',
-    'plan-progress.json',
-    'PLAN_PROGRESS.md',
   ]);
 
   return statusOutput

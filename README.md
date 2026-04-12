@@ -55,7 +55,7 @@ Execution-mode semantics:
 - `neal --execute --chunked PLAN.md` opts into chunked mode explicitly
 - in chunked mode, `neal` now continues into the next chunk automatically after an accepted `AUTONOMY_CHUNK_DONE` scope until the plan completes or blocks
 
-`neal` treats `.neal/`, `PLAN_PROGRESS.md`, and `plan-progress.json` as wrapper-owned artifacts. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts remain in the repo root for inspection.
+`neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 
 Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 120-second inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window.
 
@@ -69,7 +69,7 @@ Each `neal` run also writes persistent diagnostics under `.neal/runs/<timestamp>
 
 The final CLI JSON output includes `runDir` so you can jump straight to the relevant log directory after a failure.
 
-During execution, `neal` also maintains:
+During execution, `neal` also maintains in that same run directory:
 
 - `plan-progress.json`: authoritative machine-readable progress state
 - `PLAN_PROGRESS.md`: rendered human-readable burndown state
