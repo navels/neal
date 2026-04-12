@@ -7,6 +7,7 @@ export type OrchestrationPhase =
   | 'blocked';
 
 export type ExecutionMode = 'one_shot' | 'chunked';
+export type CodexMarker = 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
 
 export type FindingSeverity = 'blocking' | 'non_blocking';
 export type FindingStatus = 'open' | 'fixed' | 'rejected' | 'deferred';
@@ -36,12 +37,28 @@ export type ReviewRound = {
   findings: string[];
 };
 
+export type ProgressScope = {
+  number: number;
+  kind: 'one_shot' | 'chunk';
+  marker: CodexMarker;
+  result: 'accepted' | 'blocked';
+  baseCommit: string | null;
+  finalCommit: string | null;
+  commitSubject: string | null;
+  reviewRounds: number;
+  findings: number;
+  archivedReviewPath: string | null;
+  blocker: string | null;
+};
+
 export type OrchestrationState = {
   version: 1;
   planDoc: string;
   cwd: string;
   runDir: string;
   executionMode: ExecutionMode;
+  progressJsonPath: string;
+  progressMarkdownPath: string;
   phase: OrchestrationPhase;
   createdAt: string;
   updatedAt: string;
@@ -50,9 +67,12 @@ export type OrchestrationState = {
   baseCommit: string | null;
   finalCommit: string | null;
   codexThreadId: string | null;
+  currentScopeNumber: number;
+  lastCodexMarker: CodexMarker | null;
   rounds: ReviewRound[];
   findings: ReviewFinding[];
   createdCommits: string[];
+  completedScopes: ProgressScope[];
   maxRounds: number;
   status: 'running' | 'done' | 'blocked' | 'failed';
 };
@@ -62,6 +82,8 @@ export type OrchestratorInit = {
   planDoc: string;
   stateDir: string;
   runDir: string;
+  progressJsonPath: string;
+  progressMarkdownPath: string;
   reviewMarkdownPath: string;
   maxRounds: number;
   executionMode: ExecutionMode;

@@ -38,18 +38,22 @@ Use the in-repo sandbox plan when you want to exercise `forge` without touching 
 
 ```bash
 cd /Users/lee.nave/code/personal/codex-chunked
+forge --execute notes/testing/FORGE_ONE_SHOT_PLAN.md
 forge --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
 ```
 
 The sandbox scope is intentionally limited to `src/testing-fixture/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the chunk queue.
+
+Use [`notes/testing/FORGE_ONE_SHOT_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/FORGE_ONE_SHOT_PLAN.md) when you want a small end-to-end one-shot validation plan instead of the chunk backlog.
 
 Execution-mode semantics:
 
 - `forge PLAN.md` is a backward-compatible alias for `forge --execute PLAN.md`
 - `forge --execute PLAN.md` runs one-shot mode by default
 - `forge --execute --chunked PLAN.md` opts into chunked mode explicitly
+- in chunked mode, `forge` now continues into the next chunk automatically after an accepted `AUTONOMY_CHUNK_DONE` scope until the plan completes or blocks
 
-`forge` treats `.forge/`, `REVIEW.md`, and archived `notes/REVIEW-*.md` files as transient wrapper artifacts. On successful completion it archives the full review to `notes/REVIEW-<final-commit>.md` and rewrites root `REVIEW.md` as a short pointer to the archived file.
+`forge` treats `.forge/`, `REVIEW.md`, `PLAN_PROGRESS.md`, `plan-progress.json`, and archived `notes/REVIEW-*.md` files as transient wrapper artifacts. On successful completion it archives the full review to `notes/REVIEW-<final-commit>.md`, rewrites root `REVIEW.md` as a short pointer to the archived file, and leaves the final progress artifacts in the repo root for inspection.
 
 Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 120-second inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window.
 
@@ -62,6 +66,11 @@ Each `forge` run also writes persistent diagnostics under `.forge/runs/<timestam
 - `stderr.log`: tee of Codex/Claude progress plus wrapper diagnostics
 
 The final CLI JSON output includes `runDir` so you can jump straight to the relevant log directory after a failure.
+
+During execution, `forge` also maintains:
+
+- `plan-progress.json`: authoritative machine-readable progress state
+- `PLAN_PROGRESS.md`: rendered human-readable burndown state
 
 If you want to force the large-diff fallback path during local validation, lower the inline file threshold:
 

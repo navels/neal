@@ -62,6 +62,8 @@ async function main() {
         executionMode: finalState.executionMode,
         statePath,
         runDir: finalState.runDir,
+        progressJsonPath: finalState.progressJsonPath,
+        progressMarkdownPath: finalState.progressMarkdownPath,
         reviewMarkdownPath: finalState.reviewMarkdownPath,
         archivedReviewPath: finalState.archivedReviewPath,
         baseCommit: finalState.baseCommit,

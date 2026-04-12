@@ -5,9 +5,10 @@ import { notify } from '../notifier.js';
 import { runClaudeReviewRound, runCodexChunkRound, runCodexResponseRound } from './agents.js';
 import { getChangedFilesForRange, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
+import { writePlanProgressArtifacts } from './progress.js';
 import { renderReviewMarkdown, writeReviewMarkdown, writeReviewPointer } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
-import type { ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
+import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const MAX_INLINE_DIFF_FILES = Number(process.env.CLAUDE_INLINE_DIFF_FILE_LIMIT ?? 40);
 
@@ -25,10 +26,17 @@ function getCodexCompletionProblem(executionMode: ExecutionMode, marker: string 
     : 'Chunked execution must end with AUTONOMY_CHUNK_DONE, AUTONOMY_DONE, or AUTONOMY_BLOCKED.';
 }
 
+async function writeExecutionArtifacts(state: OrchestrationState) {
+  await writeReviewMarkdown(state.reviewMarkdownPath, state);
+  await writePlanProgressArtifacts(state);
+}
+
 export async function initializeOrchestration(planDoc: string, cwd: string, executionMode: ExecutionMode) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.forge');
   const reviewMarkdownPath = join(cwd, 'REVIEW.md');
+  const progressJsonPath = join(cwd, 'plan-progress.json');
+  const progressMarkdownPath = join(cwd, 'PLAN_PROGRESS.md');
   const logger = await createRunLogger({
     cwd,
     stateDir,
@@ -41,6 +49,8 @@ export async function initializeOrchestration(planDoc: string, cwd: string, exec
     planDoc: absolutePlanDoc,
     stateDir,
     runDir: logger.runDir,
+    progressJsonPath,
+    progressMarkdownPath,
     reviewMarkdownPath,
     maxRounds: 3,
     executionMode,
@@ -52,11 +62,13 @@ export async function initializeOrchestration(planDoc: string, cwd: string, exec
   const initialState = await createInitialState(init, baseCommit);
   const statePath = getSessionStatePath(stateDir);
   const savedState = await saveState(statePath, initialState);
-  await writeReviewMarkdown(reviewMarkdownPath, savedState);
+  await writeExecutionArtifacts(savedState);
   await logger.event('run.initialized', {
     statePath,
     baseCommit,
     reviewMarkdownPath,
+    progressJsonPath,
+    progressMarkdownPath,
     executionMode,
   });
 
@@ -80,8 +92,32 @@ async function notifyComplete(state: OrchestrationState, message: string, logger
   await notify('done', message);
 }
 
+async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
+  if (state.completedScopes.some((scope) => scope.number === state.currentScopeNumber)) {
+    return state;
+  }
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    completedScopes: appendCompletedScope(state, 'blocked', {
+      finalCommit: null,
+      commitSubject: null,
+      archivedReviewPath: state.archivedReviewPath,
+      blocker: reason,
+    }),
+  });
+  await writeExecutionArtifacts(nextState);
+  return nextState;
+}
+
 function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
-  const ignoredPaths = new Set(['.forge/session.json', '.codex-claude-chunked/session.json', 'REVIEW.md']);
+  const ignoredPaths = new Set([
+    '.forge/session.json',
+    '.codex-claude-chunked/session.json',
+    'REVIEW.md',
+    'plan-progress.json',
+    'PLAN_PROGRESS.md',
+  ]);
 
   return statusOutput
     .split('\n')
@@ -100,6 +136,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   const codex = await runCodexChunkRound({
     cwd: state.cwd,
     planDoc: state.planDoc,
+    progressMarkdownPath: state.progressMarkdownPath,
     executionMode: state.executionMode,
     threadId: state.codexThreadId,
     logger,
@@ -111,12 +148,13 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   const nextState = await saveState(statePath, {
     ...state,
     codexThreadId: codex.threadId,
+    lastCodexMarker: codex.marker as CodexMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_review',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
     createdCommits: [...state.createdCommits, ...createdCommits],
   });
 
-  await writeReviewMarkdown(nextState.reviewMarkdownPath, nextState);
+  await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase: 'codex_chunk',
     executionMode: state.executionMode,
@@ -126,11 +164,14 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked') {
+    const reason = completionProblem ?? 'Codex reported a blocker during chunk execution';
+    const persistedState = await persistBlockedScope(nextState, statePath, reason);
     await notifyBlocked(
-      nextState,
-      completionProblem ?? 'Codex reported a blocker during chunk execution',
+      persistedState,
+      reason,
       logger,
     );
+    return persistedState;
   }
   return nextState;
 }
@@ -220,7 +261,7 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
     findings: mergedFindings,
   });
 
-  await writeReviewMarkdown(nextState.reviewMarkdownPath, nextState);
+  await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase: 'claude_review',
     round,
@@ -230,7 +271,9 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked' && blockReason) {
-    await notifyBlocked(nextState, blockReason, logger);
+    const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
+    await notifyBlocked(persistedState, blockReason, logger);
+    return persistedState;
   }
   return nextState;
 }
@@ -313,6 +356,39 @@ function mapDecisionToStatus(decision: 'fixed' | 'rejected' | 'deferred'): Findi
   }
 }
 
+function getCurrentScopeKind(state: OrchestrationState): 'one_shot' | 'chunk' {
+  return state.executionMode === 'chunked' ? 'chunk' : 'one_shot';
+}
+
+function appendCompletedScope(
+  state: OrchestrationState,
+  result: 'accepted' | 'blocked',
+  details: {
+    finalCommit: string | null;
+    commitSubject: string | null;
+    archivedReviewPath: string | null;
+    blocker: string | null;
+  },
+) {
+  const marker = (state.lastCodexMarker ?? 'AUTONOMY_BLOCKED') as CodexMarker;
+  return [
+    ...state.completedScopes,
+    {
+      number: state.currentScopeNumber,
+      kind: getCurrentScopeKind(state),
+      marker,
+      result,
+      baseCommit: state.baseCommit,
+      finalCommit: details.finalCommit,
+      commitSubject: details.commitSubject,
+      reviewRounds: state.rounds.length,
+      findings: state.findings.length,
+      archivedReviewPath: details.archivedReviewPath,
+      blocker: details.blocker,
+    },
+  ];
+}
+
 async function runCodexResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   if (!state.codexThreadId) {
     throw new Error('Cannot run Codex response phase without an existing Codex thread');
@@ -326,7 +402,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
       phase: 'done',
       status: 'done',
     });
-    await writeReviewMarkdown(nextState.reviewMarkdownPath, nextState);
+    await writeExecutionArtifacts(nextState);
     await logger?.event('phase.complete', {
       phase: 'codex_response',
       openFindings: 0,
@@ -339,6 +415,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
   const codex = await runCodexResponseRound({
     cwd: state.cwd,
     planDoc: state.planDoc,
+    progressMarkdownPath: state.progressMarkdownPath,
     reviewMarkdownPath: state.reviewMarkdownPath,
     openFindings: openFindings.map((finding) => ({
       id: finding.id,
@@ -377,7 +454,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
   });
 
-  await writeReviewMarkdown(nextState.reviewMarkdownPath, nextState);
+  await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase: 'codex_response',
     outcome: codex.payload.outcome,
@@ -387,7 +464,9 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
   });
   if (nextState.status === 'blocked') {
     const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'Codex reported a blocker during review response';
-    await notifyBlocked(nextState, blocker, logger);
+    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    await notifyBlocked(persistedState, blocker, logger);
+    return persistedState;
   }
   return nextState;
 }
@@ -415,22 +494,57 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   await mkdir(notesDir, { recursive: true });
   const archivedReviewPath = join(notesDir, `REVIEW-${finalCommit}.md`);
 
-  const nextState = await saveState(statePath, {
-    ...state,
+  const completedScopes = appendCompletedScope(state, 'accepted', {
     finalCommit,
+    commitSubject: finalMessage,
     archivedReviewPath,
-    phase: 'done',
-    status: 'done',
+    blocker: null,
   });
+  const continueChunked = state.executionMode === 'chunked' && state.lastCodexMarker === 'AUTONOMY_CHUNK_DONE';
+  const nextState = await saveState(
+    statePath,
+    continueChunked
+      ? {
+          ...state,
+          baseCommit: finalCommit,
+          finalCommit: null,
+          codexThreadId: null,
+          currentScopeNumber: state.currentScopeNumber + 1,
+          lastCodexMarker: null,
+          rounds: [],
+          findings: [],
+          createdCommits: [],
+          completedScopes,
+          archivedReviewPath: null,
+          phase: 'codex_chunk',
+          status: 'running',
+        }
+      : {
+          ...state,
+          finalCommit,
+          archivedReviewPath,
+          completedScopes,
+          phase: 'done',
+          status: 'done',
+        },
+  );
 
-  await writeFile(archivedReviewPath, renderReviewMarkdown(nextState), 'utf8');
-  await writeReviewPointer(nextState.reviewMarkdownPath, nextState);
+  await writeFile(archivedReviewPath, renderReviewMarkdown({ ...nextState, finalCommit, archivedReviewPath }), 'utf8');
+  if (continueChunked) {
+    await writeExecutionArtifacts(nextState);
+  } else {
+    await writeReviewPointer(nextState.reviewMarkdownPath, nextState);
+    await writePlanProgressArtifacts(nextState);
+  }
   await logger?.event('phase.complete', {
     phase: 'final_squash',
     finalCommit,
     archivedReviewPath,
+    continueChunked,
   });
-  await notifyComplete(nextState, finalMessage, logger);
+  if (!continueChunked) {
+    await notifyComplete(nextState, finalMessage, logger);
+  }
 
   return nextState;
 }

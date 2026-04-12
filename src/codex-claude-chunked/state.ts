@@ -15,6 +15,8 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     cwd: init.cwd,
     runDir: init.runDir,
     executionMode: init.executionMode,
+    progressJsonPath: init.progressJsonPath,
+    progressMarkdownPath: init.progressMarkdownPath,
     phase: 'codex_chunk',
     createdAt: now,
     updatedAt: now,
@@ -23,9 +25,12 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     baseCommit,
     finalCommit: null,
     codexThreadId: null,
+    currentScopeNumber: 1,
+    lastCodexMarker: null,
     rounds: [],
     findings: [],
     createdCommits: [],
+    completedScopes: [],
     maxRounds: init.maxRounds,
     status: 'running',
   };
@@ -117,12 +122,40 @@ function hydrateRound(value: unknown): ReviewRound {
   };
 }
 
+function hydrateCompletedScope(value: unknown): OrchestrationState['completedScopes'][number] {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Invalid session state: malformed completed scope');
+  }
+
+  const scope = value as Partial<OrchestrationState['completedScopes'][number]>;
+
+  return {
+    number: typeof scope.number === 'number' ? scope.number : 0,
+    kind: scope.kind === 'one_shot' ? 'one_shot' : 'chunk',
+    marker:
+      scope.marker === 'AUTONOMY_CHUNK_DONE' || scope.marker === 'AUTONOMY_DONE' || scope.marker === 'AUTONOMY_BLOCKED'
+        ? scope.marker
+        : 'AUTONOMY_BLOCKED',
+    result: scope.result === 'accepted' ? 'accepted' : 'blocked',
+    baseCommit: typeof scope.baseCommit === 'string' ? scope.baseCommit : null,
+    finalCommit: typeof scope.finalCommit === 'string' ? scope.finalCommit : null,
+    commitSubject: typeof scope.commitSubject === 'string' ? scope.commitSubject : null,
+    reviewRounds: typeof scope.reviewRounds === 'number' ? scope.reviewRounds : 0,
+    findings: typeof scope.findings === 'number' ? scope.findings : 0,
+    archivedReviewPath: typeof scope.archivedReviewPath === 'string' ? scope.archivedReviewPath : null,
+    blocker: typeof scope.blocker === 'string' ? scope.blocker : null,
+  };
+}
+
 export async function loadState(path: string) {
   const content = await readFile(path, 'utf8');
   const parsed = JSON.parse(content);
   validateState(parsed);
   const stateDir = dirname(path);
   const runDir = typeof parsed.runDir === 'string' ? parsed.runDir : join(stateDir, 'runs', 'legacy');
+  const progressJsonPath = typeof parsed.progressJsonPath === 'string' ? parsed.progressJsonPath : join(stateDir, 'plan-progress.json');
+  const progressMarkdownPath =
+    typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(dirname(progressJsonPath), 'PLAN_PROGRESS.md');
   const executionMode =
     parsed.executionMode === undefined
       ? 'chunked'
@@ -134,8 +167,16 @@ export async function loadState(path: string) {
   return {
     ...parsed,
     runDir,
+    progressJsonPath,
+    progressMarkdownPath,
     executionMode,
+    currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
+    lastCodexMarker:
+      parsed.lastCodexMarker === 'AUTONOMY_CHUNK_DONE' || parsed.lastCodexMarker === 'AUTONOMY_DONE' || parsed.lastCodexMarker === 'AUTONOMY_BLOCKED'
+        ? parsed.lastCodexMarker
+        : null,
     rounds: parsed.rounds.map(hydrateRound),
     findings: parsed.findings.map(hydrateFinding),
+    completedScopes: Array.isArray(parsed.completedScopes) ? parsed.completedScopes.map(hydrateCompletedScope) : [],
   };
 }

@@ -12,18 +12,21 @@ const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
 const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 120_000);
 const INLINE_CLAUDE_DIFF_LIMIT = 120_000;
 
-function buildOneShotPrompt(planDoc: string) {
+function buildOneShotPrompt(planDoc: string, progressMarkdownPath: string) {
   return [
     `Continue autonomously on the task described in ${planDoc}.`,
     '',
     'Before doing anything else:',
     `1. Read ${planDoc}.`,
-    '2. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
-    '3. Reset your instructions for this turn from the current contents of that plan and its required context.',
+    `2. Read ${progressMarkdownPath}.`,
+    '3. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
+    '4. Reset your instructions for this turn from the current contents of the plan, the progress doc, and required context.',
     '',
     'Then complete the plan end-to-end if feasible.',
     'Verify the relevant work before you finish.',
     'Create real git commit(s) for completed work.',
+    `Read ${progressMarkdownPath} for status, but do not edit or stage it.`,
+    'Do not edit or stage wrapper-owned artifacts such as REVIEW.md, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
     'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
     '',
     'Final line must be exactly one of:',
@@ -32,18 +35,21 @@ function buildOneShotPrompt(planDoc: string) {
   ].join('\n');
 }
 
-function buildChunkedPrompt(planDoc: string) {
+function buildChunkedPrompt(planDoc: string, progressMarkdownPath: string) {
   return [
     `Continue autonomously on the task described in ${planDoc}.`,
     '',
     'Before doing anything else:',
     `1. Read ${planDoc}.`,
-    '2. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
-    '3. Reset your instructions for this turn from the current contents of that plan and its required context.',
+    `2. Read ${progressMarkdownPath}.`,
+    '3. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
+    '4. Reset your instructions for this turn from the current contents of the plan, the progress doc, and required context.',
     '',
     'Then execute exactly one meaningful chunk.',
     'Do not start a second chunk in this turn.',
     'This chunk must end with a real git commit if work was completed.',
+    `Read ${progressMarkdownPath} for status, but do not edit or stage it.`,
+    'Do not edit or stage wrapper-owned artifacts such as REVIEW.md, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
     'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
     '',
     'Final line must be exactly one of:',
@@ -371,12 +377,16 @@ function createCodexThread(cwd: string, threadId?: string | null): Thread {
 export async function runCodexChunkRound(args: {
   cwd: string;
   planDoc: string;
+  progressMarkdownPath: string;
   executionMode: ExecutionMode;
   threadId?: string | null;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
   const thread = createCodexThread(args.cwd, args.threadId);
-  const prompt = args.executionMode === 'one_shot' ? buildOneShotPrompt(args.planDoc) : buildChunkedPrompt(args.planDoc);
+  const prompt =
+    args.executionMode === 'one_shot'
+      ? buildOneShotPrompt(args.planDoc, args.progressMarkdownPath)
+      : buildChunkedPrompt(args.planDoc, args.progressMarkdownPath);
   const streamedTurn = await thread.runStreamed(prompt);
   const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
   const marker = extractMarker(finalResponse);
@@ -391,6 +401,7 @@ export async function runCodexChunkRound(args: {
 export async function runCodexResponseRound(args: {
   cwd: string;
   planDoc: string;
+  progressMarkdownPath: string;
   reviewMarkdownPath: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity'>[];
   threadId: string;
@@ -426,6 +437,8 @@ export async function runCodexResponseRound(args: {
   const prompt = [
     `Continue autonomously on the task described in ${args.planDoc}.`,
     '',
+    `Read ${args.progressMarkdownPath} before changing code so you stay on the current implementation scope.`,
+    'Do not edit or stage wrapper-owned artifacts such as REVIEW.md, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
     `Read ${args.reviewMarkdownPath} and address the currently open review findings.`,
     'You are still working on the same chunk. Do not start a new chunk.',
     'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
