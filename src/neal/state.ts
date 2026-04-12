@@ -26,6 +26,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     baseCommit,
     finalCommit: null,
     codexThreadId: null,
+    claudeSessionId: null,
     currentScopeNumber: 1,
     lastCodexMarker: null,
     rounds: [],
@@ -176,6 +177,7 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     progressJsonPath,
     progressMarkdownPath,
     executionMode,
+    claudeSessionId: typeof parsed.claudeSessionId === 'string' ? parsed.claudeSessionId : null,
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
     lastCodexMarker:
       parsed.lastCodexMarker === 'AUTONOMY_CHUNK_DONE' || parsed.lastCodexMarker === 'AUTONOMY_DONE' || parsed.lastCodexMarker === 'AUTONOMY_BLOCKED'

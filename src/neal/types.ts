@@ -71,6 +71,7 @@ export type OrchestrationState = {
   baseCommit: string | null;
   finalCommit: string | null;
   codexThreadId: string | null;
+  claudeSessionId: string | null;
   currentScopeNumber: number;
   lastCodexMarker: CodexMarker | null;
   rounds: ReviewRound[];

@@ -3,6 +3,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 import { notify } from '../notifier.js';
 import {
+  ClaudeRoundError,
+  CodexRoundError,
   runClaudePlanReviewRound,
   runClaudeReviewRound,
   runCodexChunkRound,
@@ -10,7 +12,7 @@ import {
   runCodexPlanRound,
   runCodexResponseRound,
 } from './agents.js';
-import { getChangedFilesForRange, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
+import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
@@ -18,6 +20,113 @@ import { createInitialState, getSessionStatePath, loadState, saveState } from '.
 import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const MAX_INLINE_DIFF_FILES = Number(process.env.CLAUDE_INLINE_DIFF_FILE_LIMIT ?? 40);
+const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
+
+function writeDiagnostic(message: string, logger?: RunLogger) {
+  process.stderr.write(message);
+  void logger?.stderr(message);
+}
+
+function formatClaudeFindings(
+  findings: Array<{
+    severity: 'blocking' | 'non_blocking';
+    files: string[];
+    claim: string;
+    requiredAction: string;
+  }>,
+) {
+  if (findings.length === 0) {
+    return '  Findings: none\n';
+  }
+
+  return findings
+    .map((finding, index) => {
+      const files = finding.files.length > 0 ? finding.files.join(', ') : 'n/a';
+      return [
+        `  ${index + 1}. [${finding.severity}] ${finding.claim}`,
+        `     Files: ${files}`,
+        `     Action: ${finding.requiredAction}`,
+      ].join('\n');
+    })
+    .join('\n') + '\n';
+}
+
+function printClaudeReviewResult(
+  kind: 'review' | 'plan-review',
+  summary: string,
+  findings: Array<{
+    severity: 'blocking' | 'non_blocking';
+    files: string[];
+    claim: string;
+    requiredAction: string;
+  }>,
+  logger?: RunLogger,
+) {
+  const blocking = findings.filter((finding) => finding.severity === 'blocking').length;
+  const nonBlocking = findings.length - blocking;
+  const header = kind === 'review' ? '[claude:review]' : '[claude:plan-review]';
+  const message = [
+    `${header} summary: ${summary}`,
+    `${header} findings: ${blocking} blocking, ${nonBlocking} non-blocking`,
+    formatClaudeFindings(findings),
+  ].join('\n');
+  writeDiagnostic(`${message}\n`, logger);
+}
+
+function startPhaseHeartbeat(
+  phase: OrchestrationState['phase'],
+  state: OrchestrationState,
+  logger?: RunLogger,
+  intervalMs = DEFAULT_PHASE_HEARTBEAT_MS,
+) {
+  if (!logger || intervalMs <= 0) {
+    return () => {};
+  }
+
+  const startedAt = Date.now();
+  const timer = setInterval(() => {
+    const elapsedMs = Date.now() - startedAt;
+    const payload = {
+      phase,
+      elapsedMs,
+      codexThreadId: state.codexThreadId,
+      claudeSessionId: state.claudeSessionId,
+      currentScopeNumber: state.currentScopeNumber,
+      topLevelMode: state.topLevelMode,
+      executionMode: state.executionMode,
+    };
+    void logger.event('phase.heartbeat', payload);
+    writeDiagnostic(
+      `[neal] heartbeat phase=${phase} elapsed=${Math.round(elapsedMs / 1000)}s` +
+        `${state.codexThreadId ? ` codex=${state.codexThreadId}` : ''}` +
+        `${state.claudeSessionId ? ` claude=${state.claudeSessionId}` : ''}\n`,
+      logger,
+    );
+  }, intervalMs);
+
+  return () => clearInterval(timer);
+}
+
+async function persistCodexFailureState(
+  state: OrchestrationState,
+  statePath: string,
+  phase: 'codex_chunk' | 'codex_plan' | 'codex_response' | 'codex_plan_response',
+  error: CodexRoundError,
+  logger?: RunLogger,
+) {
+  const failedState = await saveState(statePath, {
+    ...state,
+    codexThreadId: error.threadId ?? state.codexThreadId,
+    status: 'failed',
+  });
+  await writeExecutionArtifacts(failedState);
+  await logger?.event('phase.error', {
+    phase,
+    threadId: error.threadId ?? state.codexThreadId,
+    message: error.message,
+  });
+  return failedState;
+}
 
 function getCodexCompletionProblem(executionMode: ExecutionMode, marker: string | null) {
   if (marker === 'AUTONOMY_BLOCKED') {
@@ -111,6 +220,16 @@ async function notifyComplete(state: OrchestrationState, message: string, logger
   await notify('complete', `[neal] ${planName}: ${message}`);
 }
 
+async function notifyChunkAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  await logger?.event('notify.chunk_complete', {
+    message,
+    planName,
+    scopeNumber: state.currentScopeNumber,
+  });
+  await notify('complete', `[neal] ${planName}: chunk ${state.currentScopeNumber} complete: ${message}`);
+}
+
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
   if (state.completedScopes.some((scope) => scope.number === state.currentScopeNumber)) {
     return state;
@@ -149,14 +268,22 @@ function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
 async function runCodexPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'codex_chunk' });
   const beforeHead = await getHeadCommit(state.cwd);
-  const codex = await runCodexChunkRound({
-    cwd: state.cwd,
-    planDoc: state.planDoc,
-    progressMarkdownPath: state.progressMarkdownPath,
-    executionMode: state.executionMode,
-    threadId: state.codexThreadId,
-    logger,
-  });
+  let codex;
+  try {
+    codex = await runCodexChunkRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      progressMarkdownPath: state.progressMarkdownPath,
+      executionMode: state.executionMode,
+      threadId: state.codexThreadId,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CodexRoundError) {
+      await persistCodexFailureState(state, statePath, 'codex_chunk', error, logger);
+    }
+    throw error;
+  }
   const afterHead = await getHeadCommit(state.cwd);
   const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
   const completionProblem = getCodexCompletionProblem(state.executionMode, codex.marker);
@@ -194,12 +321,20 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
 
 async function runCodexPlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'codex_plan' });
-  const codex = await runCodexPlanRound({
-    cwd: state.cwd,
-    planDoc: state.planDoc,
-    threadId: state.codexThreadId,
-    logger,
-  });
+  let codex;
+  try {
+    codex = await runCodexPlanRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      threadId: state.codexThreadId,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CodexRoundError) {
+      await persistCodexFailureState(state, statePath, 'codex_plan', error, logger);
+    }
+    throw error;
+  }
   const completionProblem = getPlanningCompletionProblem(codex.marker);
 
   const nextState = await saveState(statePath, {
@@ -238,19 +373,41 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
   const diffStat = await getDiffStatForRange(state.cwd, state.baseCommit, headCommit);
   const changedFiles = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
   const diff = changedFiles.length <= MAX_INLINE_DIFF_FILES ? await getDiffForRange(state.cwd, state.baseCommit, headCommit) : '';
-  const claude = await runClaudeReviewRound({
-    cwd: state.cwd,
-    planDoc: state.planDoc,
-    baseCommit: state.baseCommit,
-    headCommit,
-    previousHeadCommit,
-    diff,
-    diffStat,
-    changedFiles,
-    round,
-    reviewMarkdownPath: state.reviewMarkdownPath,
-    logger,
-  });
+  let claude;
+  try {
+    claude = await runClaudeReviewRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      baseCommit: state.baseCommit,
+      headCommit,
+      previousHeadCommit,
+      diff,
+      diffStat,
+      changedFiles,
+      round,
+      reviewMarkdownPath: state.reviewMarkdownPath,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof ClaudeRoundError) {
+      const failedState = await saveState(statePath, {
+        ...state,
+        claudeSessionId: error.sessionId,
+        status: 'failed',
+      });
+      await writeExecutionArtifacts(failedState);
+      await logger?.event('phase.error', {
+        phase: 'claude_review',
+        round,
+        sessionId: error.sessionId,
+        subtype: error.subtype,
+        message: error.message,
+      });
+    }
+    throw error;
+  }
+
+  printClaudeReviewResult('review', claude.summary, claude.findings, logger);
 
   let nextCanonicalIndex = getNextCanonicalIndex(state.findings);
   const findings = claude.findings.map((finding, index) => {
@@ -281,6 +438,7 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
 
   const nextState = await saveState(statePath, {
     ...state,
+    claudeSessionId: claude.sessionId,
     phase: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
@@ -331,13 +489,35 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
 async function runClaudePlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'claude_plan_review', round: state.rounds.length + 1 });
   const round = state.rounds.length + 1;
-  const claude = await runClaudePlanReviewRound({
-    cwd: state.cwd,
-    planDoc: state.planDoc,
-    round,
-    reviewMarkdownPath: state.reviewMarkdownPath,
-    logger,
-  });
+  let claude;
+  try {
+    claude = await runClaudePlanReviewRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      round,
+      reviewMarkdownPath: state.reviewMarkdownPath,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof ClaudeRoundError) {
+      const failedState = await saveState(statePath, {
+        ...state,
+        claudeSessionId: error.sessionId,
+        status: 'failed',
+      });
+      await writeExecutionArtifacts(failedState);
+      await logger?.event('phase.error', {
+        phase: 'claude_plan_review',
+        round,
+        sessionId: error.sessionId,
+        subtype: error.subtype,
+        message: error.message,
+      });
+    }
+    throw error;
+  }
+
+  printClaudeReviewResult('plan-review', claude.summary, claude.findings, logger);
 
   let nextCanonicalIndex = getNextCanonicalIndex(state.findings);
   const findings = claude.findings.map((finding, index) => {
@@ -368,6 +548,7 @@ async function runClaudePlanPhase(state: OrchestrationState, statePath: string, 
 
   const nextState = await saveState(statePath, {
     ...state,
+    claudeSessionId: claude.sessionId,
     phase: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
@@ -552,20 +733,28 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
   }
 
   const beforeHead = await getHeadCommit(state.cwd);
-  const codex = await runCodexResponseRound({
-    cwd: state.cwd,
-    planDoc: state.planDoc,
-    progressMarkdownPath: state.progressMarkdownPath,
-    reviewMarkdownPath: state.reviewMarkdownPath,
-    openFindings: openFindings.map((finding) => ({
-      id: finding.id,
-      claim: finding.claim,
-      requiredAction: finding.requiredAction,
-      severity: finding.severity,
-    })),
-    threadId: state.codexThreadId,
-    logger,
-  });
+  let codex;
+  try {
+    codex = await runCodexResponseRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      progressMarkdownPath: state.progressMarkdownPath,
+      reviewMarkdownPath: state.reviewMarkdownPath,
+      openFindings: openFindings.map((finding) => ({
+        id: finding.id,
+        claim: finding.claim,
+        requiredAction: finding.requiredAction,
+        severity: finding.severity,
+      })),
+      threadId: state.codexThreadId,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CodexRoundError) {
+      await persistCodexFailureState(state, statePath, 'codex_response', error, logger);
+    }
+    throw error;
+  }
   const afterHead = await getHeadCommit(state.cwd);
   const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
   const latestCommit = createdCommits.at(-1) ?? null;
@@ -634,19 +823,27 @@ async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: s
     return nextState;
   }
 
-  const codex = await runCodexPlanResponseRound({
-    cwd: state.cwd,
-    planDoc: state.planDoc,
-    reviewMarkdownPath: state.reviewMarkdownPath,
-    openFindings: openFindings.map((finding) => ({
-      id: finding.id,
-      claim: finding.claim,
-      requiredAction: finding.requiredAction,
-      severity: finding.severity,
-    })),
-    threadId: state.codexThreadId,
-    logger,
-  });
+  let codex;
+  try {
+    codex = await runCodexPlanResponseRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      reviewMarkdownPath: state.reviewMarkdownPath,
+      openFindings: openFindings.map((finding) => ({
+        id: finding.id,
+        claim: finding.claim,
+        requiredAction: finding.requiredAction,
+        severity: finding.severity,
+      })),
+      threadId: state.codexThreadId,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CodexRoundError) {
+      await persistCodexFailureState(state, statePath, 'codex_plan_response', error, logger);
+    }
+    throw error;
+  }
   const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
 
   const findings = state.findings.map((finding) => {
@@ -700,17 +897,26 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   }
 
   const commitSubjects = await getCommitSubjects(state.cwd, state.createdCommits);
-  const finalMessage = commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize chunk work';
+  const latestCreatedCommit = state.createdCommits.at(-1) ?? null;
+  const finalMessage = latestCreatedCommit
+    ? await getCommitMessage(state.cwd, latestCreatedCommit)
+    : commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize chunk work';
+  const finalSubject = finalMessage.split(/\r?\n/, 1)[0] || 'Finalize chunk work';
   const finalCommit =
     state.createdCommits.length > 0
       ? await squashCommits(state.cwd, state.baseCommit, finalMessage)
       : headCommit;
 
   const archivedReviewPath = join(state.runDir, `REVIEW-${finalCommit}.md`);
+  const archivedReviewState = {
+    ...state,
+    finalCommit,
+    archivedReviewPath,
+  };
 
   const completedScopes = appendCompletedScope(state, 'accepted', {
     finalCommit,
-    commitSubject: finalMessage,
+    commitSubject: finalSubject,
     archivedReviewPath,
     blocker: null,
   });
@@ -743,7 +949,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
         },
   );
 
-  await writeFile(archivedReviewPath, renderReviewMarkdown({ ...nextState, finalCommit, archivedReviewPath }), 'utf8');
+  await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
   if (continueChunked) {
     await writeExecutionArtifacts(nextState);
   } else {
@@ -756,8 +962,10 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     archivedReviewPath,
     continueChunked,
   });
-  if (!continueChunked) {
-    await notifyComplete(nextState, finalMessage, logger);
+  if (continueChunked) {
+    await notifyChunkAccepted(state, finalSubject, logger);
+  } else {
+    await notifyComplete(nextState, finalSubject, logger);
   }
 
   return nextState;
@@ -783,6 +991,8 @@ export async function runOnePass(
     currentState.phase === 'codex_response' ||
     currentState.phase === 'final_squash'
   ) {
+    const stopHeartbeat = startPhaseHeartbeat(currentState.phase, currentState, logger);
+    try {
     if (currentState.phase === 'codex_plan') {
       currentState = await runCodexPlanPhase(currentState, statePath, logger);
       options?.onCodexThread?.(currentState.codexThreadId);
@@ -829,6 +1039,9 @@ export async function runOnePass(
           return currentState;
         }
       }
+    }
+    } finally {
+      stopHeartbeat();
     }
   }
 

@@ -9,7 +9,10 @@ import type { ExecutionMode, ReviewFinding } from './types.js';
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
 const AUTONOMY_DONE = 'AUTONOMY_DONE';
 const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
-const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 120_000);
+const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 600_000);
+const DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS = Number(process.env.CODEX_INACTIVITY_TIMEOUT_MS ?? 600_000);
+const DEFAULT_CLAUDE_MAX_TURNS = Number(process.env.CLAUDE_REVIEW_MAX_TURNS ?? 100);
+const DEFAULT_CLAUDE_CONTINUATION_LIMIT = Number(process.env.CLAUDE_REVIEW_CONTINUATION_LIMIT ?? 2);
 const INLINE_CLAUDE_DIFF_LIMIT = 120_000;
 
 function buildPlanningPrompt(planDoc: string) {
@@ -107,10 +110,25 @@ function writeDiagnostic(message: string, logger?: RunLogger) {
 async function consumeCodexTurn(turn: Awaited<ReturnType<Thread['runStreamed']>>, logger?: RunLogger) {
   let finalResponse = '';
   let fatalError: string | null = null;
+  let threadId: string | null = null;
+  const iterator = turn.events[Symbol.asyncIterator]();
 
-  for await (const event of turn.events) {
+  while (true) {
+    let next;
+    try {
+      next = await nextWithTimeout(iterator.next(), DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS, 'codex');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CodexRoundError(message, threadId);
+    }
+    if (next.done) {
+      break;
+    }
+
+    const event = next.value;
     switch (event.type) {
       case 'thread.started':
+        threadId = event.thread_id;
         writeDiagnostic(`[codex] thread ${event.thread_id}\n`, logger);
         void logger?.event('codex.thread_started', { threadId: event.thread_id });
         break;
@@ -145,7 +163,7 @@ async function consumeCodexTurn(turn: Awaited<ReturnType<Thread['runStreamed']>>
   }
 
   if (fatalError) {
-    throw new Error(fatalError);
+    throw new CodexRoundError(fatalError, threadId);
   }
 
   return finalResponse;
@@ -173,6 +191,28 @@ type CodexResponsePayload = {
     summary: string;
   }>;
 };
+
+export class ClaudeRoundError extends Error {
+  readonly sessionId: string | null;
+  readonly subtype: string | null;
+
+  constructor(message: string, sessionId: string | null, subtype: string | null) {
+    super(message);
+    this.name = 'ClaudeRoundError';
+    this.sessionId = sessionId;
+    this.subtype = subtype;
+  }
+}
+
+export class CodexRoundError extends Error {
+  readonly threadId: string | null;
+
+  constructor(message: string, threadId: string | null) {
+    super(message);
+    this.name = 'CodexRoundError';
+    this.threadId = threadId;
+  }
+}
 
 function parseCodexResponsePayload(raw: string): CodexResponsePayload {
   try {
@@ -233,7 +273,8 @@ function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger
 async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return await new Promise<T>((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => {
-      rejectPromise(new Error(`Claude ${label} timed out after ${Math.round(timeoutMs / 1000)}s without progress`));
+      const prefix = label === 'codex' ? 'Codex' : 'Claude';
+      rejectPromise(new Error(`${prefix} ${label} timed out after ${Math.round(timeoutMs / 1000)}s without progress`));
     }, timeoutMs);
 
     promise.then(
@@ -269,6 +310,89 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, lab
   }
 
   return { sessionId, lastResult };
+}
+
+function buildClaudeQueryStream(
+  prompt: string,
+  label: string,
+  cwd: string,
+  schema: Record<string, unknown>,
+  logger?: RunLogger,
+  resumeSessionId?: string | null,
+) {
+  return query({
+    prompt,
+    options: {
+      cwd,
+      tools: ['Read', 'Grep', 'Glob'],
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      maxTurns: DEFAULT_CLAUDE_MAX_TURNS,
+      ...(resumeSessionId ? { resume: resumeSessionId } : {}),
+      stderr: (data) => {
+        writeDiagnostic(`[claude:${label}:stderr] ${data}`, logger);
+      },
+      outputFormat: {
+        type: 'json_schema',
+        schema,
+      },
+    },
+  });
+}
+
+async function runClaudeStructuredRound(args: {
+  label: 'review' | 'plan-review';
+  cwd: string;
+  prompt: string;
+  schema: Record<string, unknown>;
+  logger?: RunLogger;
+}): Promise<{ sessionId: string | null; structured: ClaudeReviewPayload }> {
+  let sessionId: string | null = null;
+  let attempt = 0;
+  let lastResult: SDKResultMessage | null = null;
+
+  while (attempt <= DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
+    const prompt =
+      attempt === 0
+        ? args.prompt
+        : [
+            'Continue the same review session.',
+            'Do not restart the investigation from scratch.',
+            'Present your final structured findings now. If there are no findings, return an empty findings array.',
+          ].join('\n');
+    const stream = buildClaudeQueryStream(prompt, args.label, args.cwd, args.schema, args.logger, sessionId);
+    const result = await collectClaudeResult(stream, args.label, DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
+
+    sessionId = result.sessionId ?? sessionId;
+    lastResult = result.lastResult;
+    const structured = (lastResult as { structured_output?: ClaudeReviewPayload } | null)?.structured_output;
+    if (structured) {
+      return { sessionId, structured };
+    }
+
+    const subtype = lastResult?.subtype ?? null;
+    if (subtype !== 'error_max_turns' || !sessionId || attempt === DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
+      throw new ClaudeRoundError(
+        `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}`,
+        sessionId,
+        subtype,
+      );
+    }
+
+    writeDiagnostic(
+      `[claude:${args.label}] max turns reached without structured findings; continuing same session (${attempt + 1}/${DEFAULT_CLAUDE_CONTINUATION_LIMIT})\n`,
+      args.logger,
+    );
+    void args.logger?.event('claude.review_continuation', {
+      label: args.label,
+      sessionId,
+      attempt: attempt + 1,
+      continuationLimit: DEFAULT_CLAUDE_CONTINUATION_LIMIT,
+    });
+    attempt += 1;
+  }
+
+  throw new ClaudeRoundError(`Claude ${args.label} did not return structured output`, sessionId, lastResult?.subtype ?? null);
 }
 
 export async function runClaudeReviewRound(args: {
@@ -349,34 +473,13 @@ export async function runClaudeReviewRound(args: {
         ]),
   ].join('\n');
 
-  const stream = query({
+  const { sessionId, structured } = await runClaudeStructuredRound({
+    label: 'review',
+    cwd: args.cwd,
     prompt,
-    options: {
-      cwd: args.cwd,
-      tools: ['Read', 'Grep', 'Glob'],
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      maxTurns: 10,
-      stderr: (data) => {
-        writeDiagnostic(`[claude:review:stderr] ${data}`, args.logger);
-      },
-      outputFormat: {
-        type: 'json_schema',
-        schema,
-      },
-    },
+    schema,
+    logger: args.logger,
   });
-
-  const { sessionId, lastResult } = await collectClaudeResult(stream, 'review', DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
-
-  if (!lastResult || lastResult.subtype !== 'success') {
-    throw new Error('Claude review did not return a successful result');
-  }
-
-  const structured = lastResult.structured_output as ClaudeReviewPayload | undefined;
-  if (!structured) {
-    throw new Error('Claude review returned no structured output');
-  }
 
   return {
     sessionId,
@@ -438,34 +541,13 @@ export async function runClaudePlanReviewRound(args: {
     'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
   ].join('\n');
 
-  const stream = query({
+  const { sessionId, structured } = await runClaudeStructuredRound({
+    label: 'plan-review',
+    cwd: args.cwd,
     prompt,
-    options: {
-      cwd: args.cwd,
-      tools: ['Read', 'Grep', 'Glob'],
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      maxTurns: 10,
-      stderr: (data) => {
-        writeDiagnostic(`[claude:plan-review:stderr] ${data}`, args.logger);
-      },
-      outputFormat: {
-        type: 'json_schema',
-        schema,
-      },
-    },
+    schema,
+    logger: args.logger,
   });
-
-  const { sessionId, lastResult } = await collectClaudeResult(stream, 'plan-review', DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
-
-  if (!lastResult || lastResult.subtype !== 'success') {
-    throw new Error('Claude plan review did not return a successful result');
-  }
-
-  const structured = lastResult.structured_output as ClaudeReviewPayload | undefined;
-  if (!structured) {
-    throw new Error('Claude plan review returned no structured output');
-  }
 
   return {
     sessionId,

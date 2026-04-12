@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 
+import { ClaudeRoundError, CodexRoundError } from './agents.js';
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
 import type { ExecutionMode } from './types.js';
@@ -179,6 +180,7 @@ async function main() {
         baseCommit: finalState.baseCommit,
         finalCommit: finalState.finalCommit,
         codexThreadId: finalState.codexThreadId,
+        claudeSessionId: finalState.claudeSessionId,
         rounds: finalState.rounds.length,
         findings: finalState.findings.length,
       },
@@ -197,12 +199,23 @@ let runLogger: RunLogger | undefined;
 
 void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  void runLogger?.event('run.failed', { message });
+  void runLogger?.event('run.failed', {
+    message,
+    codexThreadId: error instanceof CodexRoundError ? error.threadId : null,
+    claudeSessionId: error instanceof ClaudeRoundError ? error.sessionId : null,
+    claudeSubtype: error instanceof ClaudeRoundError ? error.subtype : null,
+  });
   if (error instanceof Error && error.stack) {
     void runLogger?.stderr(`[fatal] ${error.stack}\n`);
   } else {
     void runLogger?.stderr(`[fatal] ${message}\n`);
   }
-  process.stderr.write(`[neal] ${message}\n`);
+  if (error instanceof CodexRoundError && error.threadId) {
+    process.stderr.write(`[neal] ${message} (codex thread: ${error.threadId})\n`);
+  } else if (error instanceof ClaudeRoundError && error.sessionId) {
+    process.stderr.write(`[neal] ${message} (claude session: ${error.sessionId})\n`);
+  } else {
+    process.stderr.write(`[neal] ${message}\n`);
+  }
   process.exit(1);
 });
