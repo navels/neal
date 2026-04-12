@@ -763,7 +763,15 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   return nextState;
 }
 
-export async function runOnePass(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+export async function runOnePass(
+  state: OrchestrationState,
+  statePath: string,
+  logger?: RunLogger,
+  options?: {
+    shouldStopAfterCurrentScope?: () => boolean;
+    onCodexThread?: (threadId: string | null) => void;
+  },
+) {
   let currentState = state;
 
   while (
@@ -777,6 +785,7 @@ export async function runOnePass(state: OrchestrationState, statePath: string, l
   ) {
     if (currentState.phase === 'codex_plan') {
       currentState = await runCodexPlanPhase(currentState, statePath, logger);
+      options?.onCodexThread?.(currentState.codexThreadId);
       continue;
     }
 
@@ -787,11 +796,13 @@ export async function runOnePass(state: OrchestrationState, statePath: string, l
 
     if (currentState.phase === 'codex_plan_response') {
       currentState = await runCodexPlanResponsePhase(currentState, statePath, logger);
+      options?.onCodexThread?.(currentState.codexThreadId);
       continue;
     }
 
     if (currentState.phase === 'codex_chunk') {
       currentState = await runCodexPhase(currentState, statePath, logger);
+      options?.onCodexThread?.(currentState.codexThreadId);
       continue;
     }
 
@@ -802,11 +813,22 @@ export async function runOnePass(state: OrchestrationState, statePath: string, l
 
     if (currentState.phase === 'codex_response') {
       currentState = await runCodexResponsePhase(currentState, statePath, logger);
+      options?.onCodexThread?.(currentState.codexThreadId);
       continue;
     }
 
     if (currentState.phase === 'final_squash') {
       currentState = await runFinalSquashPhase(currentState, statePath, logger);
+      if (currentState.executionMode === 'chunked' && currentState.phase === 'codex_chunk' && currentState.status === 'running') {
+        if (options?.shouldStopAfterCurrentScope?.()) {
+          await logger?.event('run.paused_after_scope', {
+            currentScopeNumber: currentState.currentScopeNumber,
+            phase: currentState.phase,
+            status: currentState.status,
+          });
+          return currentState;
+        }
+      }
     }
   }
 

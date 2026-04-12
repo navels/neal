@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
+import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
+import readline from 'node:readline';
 
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
@@ -13,6 +15,74 @@ function usage(): never {
   console.error('   or: neal --plan [--chunked] <plan-doc>');
   console.error('   or: neal --resume [state-file]');
   process.exit(1);
+}
+
+async function resumeLastThread(threadId: string) {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn('codex', ['resume', threadId], {
+      stdio: 'inherit',
+    });
+
+    child.on('error', rejectPromise);
+    child.on('exit', (code, signal) => {
+      if (signal) {
+        rejectPromise(new Error(`codex resume terminated by signal ${signal}`));
+        return;
+      }
+
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        rejectPromise(new Error(`codex resume exited with status ${code}`));
+      }
+    });
+  });
+}
+
+function createStopController() {
+  let stopRequested = false;
+
+  if (!process.stdin.isTTY) {
+    return {
+      cleanup() {},
+      isStopRequested() {
+        return stopRequested;
+      },
+    };
+  }
+
+  readline.emitKeypressEvents(process.stdin);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+
+  const onKeypress = (_input: string, key: readline.Key) => {
+    if (key.ctrl && key.name === 'c') {
+      cleanup();
+      process.exit(130);
+    }
+
+    if (key.name === 'q') {
+      stopRequested = true;
+      process.stderr.write('\n[neal] stop requested after the current chunk\n');
+    }
+  };
+
+  process.stdin.on('keypress', onKeypress);
+
+  function cleanup() {
+    process.stdin.off('keypress', onKeypress);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
+    process.stdin.pause();
+  }
+
+  return {
+    cleanup,
+    isStopRequested() {
+      return stopRequested;
+    },
+  };
 }
 
 async function main() {
@@ -61,7 +131,35 @@ async function main() {
   const resolvedPlanDoc = resumeStatePath ? null : planDoc;
   const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, executionMode, topLevelMode);
   runLogger = logger;
-  const finalState = await runOnePass(state, statePath, logger);
+  const stopController = createStopController();
+  let lastThreadId: string | null = state.codexThreadId;
+  let shouldResumeLastThread = false;
+
+  if (process.stdin.isTTY) {
+    process.stderr.write('[neal] press q to stop after the current chunk\n');
+  }
+
+  let finalState;
+  try {
+    finalState = await runOnePass(state, statePath, logger, {
+      shouldStopAfterCurrentScope() {
+        return stopController.isStopRequested();
+      },
+      onCodexThread(threadId) {
+        if (threadId) {
+          lastThreadId = threadId;
+        }
+      },
+    });
+    shouldResumeLastThread =
+      stopController.isStopRequested() &&
+      finalState.executionMode === 'chunked' &&
+      finalState.phase === 'codex_chunk' &&
+      finalState.status === 'running' &&
+      Boolean(lastThreadId);
+  } finally {
+    stopController.cleanup();
+  }
 
   process.stdout.write(
     JSON.stringify(
@@ -88,6 +186,11 @@ async function main() {
       2,
     ) + '\n',
   );
+
+  if (shouldResumeLastThread && lastThreadId) {
+    process.stderr.write(`[neal] resuming ${lastThreadId}\n`);
+    await resumeLastThread(lastThreadId);
+  }
 }
 
 let runLogger: RunLogger | undefined;
