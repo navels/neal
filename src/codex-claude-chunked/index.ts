@@ -9,7 +9,7 @@ import type { RunLogger } from './logger.js';
 import type { ExecutionMode } from './types.js';
 
 function usage(): never {
-  console.error('Usage: forge [--execute] [--chunked] <plan-doc>');
+  console.error('Usage: forge --execute [--chunked] <plan-doc>');
   console.error('   or: forge --plan [--chunked] <plan-doc>');
   console.error('   or: forge --resume [state-file]');
   process.exit(1);
@@ -26,11 +26,14 @@ async function main() {
   let planDoc: string | null = null;
   let resumeStatePath: string | undefined;
   let index = 0;
+  let sawExplicitMode = false;
 
   if (args[index] === '--plan') {
     topLevelMode = 'plan';
+    sawExplicitMode = true;
     index += 1;
   } else if (args[index] === '--execute') {
+    sawExplicitMode = true;
     index += 1;
   }
 
@@ -48,6 +51,9 @@ async function main() {
     resumeStatePath = resolve(args[index + 1] ?? '.forge/session.json');
     await access(resumeStatePath);
   } else {
+    if (!sawExplicitMode) {
+      usage();
+    }
     planDoc = resolve(firstArg);
     await access(planDoc);
   }

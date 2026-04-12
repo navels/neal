@@ -35,4 +35,4 @@ Pull requests should include a brief description of the behavior change, the com
 
 ## Configuration Notes
 
-The CLI expects Node.js 18+ and uses `@openai/codex-sdk`. Local notifications are implemented in-repo and shell out to `~/bin/healthcheck.sh` and `~/bin/notify` by default. Override those with `AUTONOMY_HEALTHCHECK` and `AUTONOMY_NOTIFY_BIN` when needed, and call out environment-specific assumptions in reviews and PRs.
+The CLI expects Node.js 18+ and uses `@openai/codex-sdk`. Local notifications are implemented in-repo and shell out to `~/bin/notify` by default. Override that with `AUTONOMY_NOTIFY_BIN` when needed, and call out environment-specific assumptions in reviews and PRs.

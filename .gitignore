@@ -3,7 +3,5 @@ dist
 .forge/
 .codex-claude-chunked/
 PROGRESS.md
-REVIEW.md
 PLAN_PROGRESS.md
 plan-progress.json
-notes/REVIEW-*.md

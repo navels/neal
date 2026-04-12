@@ -55,7 +55,7 @@ function buildOneShotPrompt(planDoc: string, progressMarkdownPath: string) {
     'Verify the relevant work before you finish.',
     'Create real git commit(s) for completed work.',
     `Read ${progressMarkdownPath} for status, but do not edit or stage it.`,
-    'Do not edit or stage wrapper-owned artifacts such as REVIEW.md, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
+    'Do not edit or stage wrapper-owned artifacts such as review files under .forge/runs/, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
     'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
     '',
     'Final line must be exactly one of:',
@@ -78,7 +78,7 @@ function buildChunkedPrompt(planDoc: string, progressMarkdownPath: string) {
     'Do not start a second chunk in this turn.',
     'This chunk must end with a real git commit if work was completed.',
     `Read ${progressMarkdownPath} for status, but do not edit or stage it.`,
-    'Do not edit or stage wrapper-owned artifacts such as REVIEW.md, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
+    'Do not edit or stage wrapper-owned artifacts such as review files under .forge/runs/, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
     'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
     '',
     'Final line must be exactly one of:',
@@ -345,7 +345,7 @@ export async function runClaudeReviewRound(args: {
       ? ['Git diff for review:', args.diff || '(no diff)']
       : [
           'The full patch is too large to inline safely.',
-          'Use the changed file list, diff stat, REVIEW.md, and repository tools to inspect the relevant files directly before finalizing findings.',
+          'Use the changed file list, diff stat, the review markdown path, and repository tools to inspect the relevant files directly before finalizing findings.',
         ]),
   ].join('\n');
 
@@ -574,7 +574,7 @@ export async function runCodexResponseRound(args: {
     `Continue autonomously on the task described in ${args.planDoc}.`,
     '',
     `Read ${args.progressMarkdownPath} before changing code so you stay on the current implementation scope.`,
-    'Do not edit or stage wrapper-owned artifacts such as REVIEW.md, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
+    'Do not edit or stage wrapper-owned artifacts such as review files under .forge/runs/, PLAN_PROGRESS.md, plan-progress.json, or .forge/*.',
     `Read ${args.reviewMarkdownPath} and address the currently open review findings.`,
     'You are still working on the same chunk. Do not start a new chunk.',
     'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',

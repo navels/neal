@@ -13,7 +13,7 @@ import {
 import { getChangedFilesForRange, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
-import { renderReviewMarkdown, writeReviewMarkdown, writeReviewPointer } from './review.js';
+import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
@@ -54,7 +54,6 @@ export async function initializeOrchestration(
 ) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.forge');
-  const reviewMarkdownPath = join(cwd, 'REVIEW.md');
   const progressJsonPath = join(cwd, 'plan-progress.json');
   const progressMarkdownPath = join(cwd, 'PLAN_PROGRESS.md');
   const logger = await createRunLogger({
@@ -73,7 +72,7 @@ export async function initializeOrchestration(
     topLevelMode,
     progressJsonPath,
     progressMarkdownPath,
-    reviewMarkdownPath,
+    reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
     maxRounds: 3,
     executionMode,
   };
@@ -89,7 +88,7 @@ export async function initializeOrchestration(
     statePath,
     baseCommit,
     topLevelMode,
-    reviewMarkdownPath,
+    reviewMarkdownPath: savedState.reviewMarkdownPath,
     progressJsonPath,
     progressMarkdownPath,
     executionMode,
@@ -112,7 +111,6 @@ async function notifyComplete(state: OrchestrationState, message: string, logger
   const planName = basename(state.planDoc);
   await logger?.event('notify.complete', { message, planName });
   await notify('complete', `[forge] ${planName}: ${message}`);
-  await notify('done', message);
 }
 
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
@@ -137,7 +135,6 @@ function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
   const ignoredPaths = new Set([
     '.forge/session.json',
     '.codex-claude-chunked/session.json',
-    'REVIEW.md',
     'plan-progress.json',
     'PLAN_PROGRESS.md',
   ]);
@@ -713,9 +710,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
       ? await squashCommits(state.cwd, state.baseCommit, finalMessage)
       : headCommit;
 
-  const notesDir = join(state.cwd, 'notes');
-  await mkdir(notesDir, { recursive: true });
-  const archivedReviewPath = join(notesDir, `REVIEW-${finalCommit}.md`);
+  const archivedReviewPath = join(state.runDir, `REVIEW-${finalCommit}.md`);
 
   const completedScopes = appendCompletedScope(state, 'accepted', {
     finalCommit,
@@ -756,7 +751,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   if (continueChunked) {
     await writeExecutionArtifacts(nextState);
   } else {
-    await writeReviewPointer(nextState.reviewMarkdownPath, nextState);
+    await writeReviewMarkdown(nextState.reviewMarkdownPath, { ...nextState, finalCommit, archivedReviewPath });
     await writePlanProgressArtifacts(nextState);
   }
   await logger?.event('phase.complete', {

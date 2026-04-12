@@ -31,12 +31,6 @@ async function runCommand(command: string, args: string[]) {
 }
 
 export async function notify(kind: NotificationKind, message: string) {
-  if (kind === 'done') {
-    const healthcheckPath = getCommandPath('AUTONOMY_HEALTHCHECK', 'bin/healthcheck.sh');
-    await runCommand(healthcheckPath, ['codex']);
-    return;
-  }
-
   const notifyPath = getCommandPath('AUTONOMY_NOTIFY_BIN', 'bin/notify');
   await runCommand(notifyPath, [message]);
 }

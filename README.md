@@ -51,12 +51,11 @@ Use [`notes/testing/FORGE_PLAN_DRAFT.md`](/Users/lee.nave/code/personal/codex-ch
 Execution-mode semantics:
 
 - `forge --plan PLAN.md` revises a draft plan in place without making commits
-- `forge PLAN.md` is a backward-compatible alias for `forge --execute PLAN.md`
 - `forge --execute PLAN.md` runs one-shot mode by default
 - `forge --execute --chunked PLAN.md` opts into chunked mode explicitly
 - in chunked mode, `forge` now continues into the next chunk automatically after an accepted `AUTONOMY_CHUNK_DONE` scope until the plan completes or blocks
 
-`forge` treats `.forge/`, `REVIEW.md`, `PLAN_PROGRESS.md`, `plan-progress.json`, and archived `notes/REVIEW-*.md` files as transient wrapper artifacts. On successful completion it archives the full review to `notes/REVIEW-<final-commit>.md`, rewrites root `REVIEW.md` as a short pointer to the archived file, and leaves the final progress artifacts in the repo root for inspection.
+`forge` treats `.forge/`, `PLAN_PROGRESS.md`, and `plan-progress.json` as wrapper-owned artifacts. Review notes now live under the current run directory at `.forge/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.forge/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts remain in the repo root for inspection.
 
 Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 120-second inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window.
 
@@ -75,7 +74,7 @@ During execution, `forge` also maintains:
 - `plan-progress.json`: authoritative machine-readable progress state
 - `PLAN_PROGRESS.md`: rendered human-readable burndown state
 
-Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state in `REVIEW.md`, and exits once Claude review converges or blocks.
+Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state under the active `.forge/runs/...` directory, and exits once Claude review converges or blocks.
 
 If you want to force the large-diff fallback path during local validation, lower the inline file threshold:
 
@@ -87,10 +86,9 @@ CLAUDE_INLINE_DIFF_FILE_LIMIT=1 forge --execute --chunked notes/testing/CODEX_CL
 
 The tool no longer depends on the `work-autonomously` skill. By default it:
 
-- runs `~/bin/healthcheck.sh codex` for `done`
-- runs `~/bin/notify "<message>"` for `blocked`, `complete`, and `retry`
+- runs `~/bin/notify "<message>"` for `blocked`, `complete`, `done`, and `retry`
 
-Override those commands with `AUTONOMY_HEALTHCHECK` and `AUTONOMY_NOTIFY_BIN` if your local setup differs.
+Override that command with `AUTONOMY_NOTIFY_BIN` if your local setup differs.
 
 ## Retry Behavior
 
