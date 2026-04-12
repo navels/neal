@@ -5,7 +5,7 @@
   "type": "module",
   "bin": {
     "codex-chunked": "dist/index.js",
-    "forge": "dist/codex-claude-chunked/index.js",
+    "neal": "dist/codex-claude-chunked/index.js",
     "codex-claude-chunked": "dist/codex-claude-chunked/index.js"
   },
   "engines": {

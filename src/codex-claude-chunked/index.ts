@@ -9,9 +9,9 @@ import type { RunLogger } from './logger.js';
 import type { ExecutionMode } from './types.js';
 
 function usage(): never {
-  console.error('Usage: forge --execute [--chunked] <plan-doc>');
-  console.error('   or: forge --plan [--chunked] <plan-doc>');
-  console.error('   or: forge --resume [state-file]');
+  console.error('Usage: neal --execute [--chunked] <plan-doc>');
+  console.error('   or: neal --plan [--chunked] <plan-doc>');
+  console.error('   or: neal --resume [state-file]');
   process.exit(1);
 }
 
@@ -48,7 +48,7 @@ async function main() {
   }
 
   if (firstArg === '--resume') {
-    resumeStatePath = resolve(args[index + 1] ?? '.forge/session.json');
+    resumeStatePath = resolve(args[index + 1] ?? '.neal/session.json');
     await access(resumeStatePath);
   } else {
     if (!sawExplicitMode) {
@@ -100,6 +100,6 @@ void main().catch((error: unknown) => {
   } else {
     void runLogger?.stderr(`[fatal] ${message}\n`);
   }
-  process.stderr.write(`[forge] ${message}\n`);
+  process.stderr.write(`[neal] ${message}\n`);
   process.exit(1);
 });

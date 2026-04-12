@@ -53,7 +53,7 @@ export async function initializeOrchestration(
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   const absolutePlanDoc = resolve(planDoc);
-  const stateDir = join(cwd, '.forge');
+  const stateDir = join(cwd, '.neal');
   const progressJsonPath = join(cwd, 'plan-progress.json');
   const progressMarkdownPath = join(cwd, 'PLAN_PROGRESS.md');
   const logger = await createRunLogger({
@@ -104,13 +104,13 @@ export async function initializeOrchestration(
 async function notifyBlocked(state: OrchestrationState, reason: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
   await logger?.event('notify.blocked', { reason, planName });
-  await notify('blocked', `[forge] ${planName}: ${reason}`);
+  await notify('blocked', `[neal] ${planName}: ${reason}`);
 }
 
 async function notifyComplete(state: OrchestrationState, message: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
   await logger?.event('notify.complete', { message, planName });
-  await notify('complete', `[forge] ${planName}: ${message}`);
+  await notify('complete', `[neal] ${planName}: ${message}`);
 }
 
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
@@ -133,6 +133,7 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
 
 function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
   const ignoredPaths = new Set([
+    '.neal/session.json',
     '.forge/session.json',
     '.codex-claude-chunked/session.json',
     'plan-progress.json',
