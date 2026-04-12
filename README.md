@@ -1,6 +1,6 @@
-# codex-chunked
+# neal
 
-Run Codex in chunked autonomous mode from a standalone Node.js tool.
+Run a reviewed autonomous implementation loop from a standalone Node.js tool.
 
 ## What it does
 
@@ -23,14 +23,14 @@ Install dependencies:
 pnpm install
 ```
 
-Run from the target repository so Codex works in that repo:
+Run from the target repository:
 
 ```bash
 cd /path/to/repo
-pnpm --dir ~/code/personal/codex-chunked start -- /absolute/or/relative/PLAN.md
+pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md
 ```
 
-`pnpm build` also refreshes the globally linked `codex-chunked` binary.
+`pnpm build` also refreshes the globally linked `neal` binary.
 
 ## Sandbox E2E
 

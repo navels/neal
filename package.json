@@ -1,19 +1,17 @@
 {
-  "name": "codex-chunked",
+  "name": "neal",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "codex-chunked": "dist/index.js",
-    "neal": "dist/codex-claude-chunked/index.js",
-    "codex-claude-chunked": "dist/codex-claude-chunked/index.js"
+    "neal": "dist/neal/index.js"
   },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && pnpm link --global",
-    "start": "tsx src/index.ts",
+    "start": "tsx src/neal/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
