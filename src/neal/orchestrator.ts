@@ -19,38 +19,6 @@ import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, Orc
 
 const MAX_INLINE_DIFF_FILES = Number(process.env.CLAUDE_INLINE_DIFF_FILE_LIMIT ?? 40);
 
-function writeStatus(message: string, logger?: RunLogger) {
-  process.stderr.write(`${message}\n`);
-  void logger?.stderr(`${message}\n`);
-}
-
-function formatPass(round: number) {
-  switch (round) {
-    case 1:
-      return 'first';
-    case 2:
-      return 'second';
-    case 3:
-      return 'third';
-  }
-
-  const lastTwo = round % 100;
-  if (lastTwo >= 11 && lastTwo <= 13) {
-    return `${round}th`;
-  }
-
-  switch (round % 10) {
-    case 1:
-      return `${round}st`;
-    case 2:
-      return `${round}nd`;
-    case 3:
-      return `${round}rd`;
-    default:
-      return `${round}th`;
-  }
-}
-
 function getCodexCompletionProblem(executionMode: ExecutionMode, marker: string | null) {
   if (marker === 'AUTONOMY_BLOCKED') {
     return null;
@@ -183,8 +151,6 @@ function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
 }
 
 async function runCodexPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  const scopeLabel = state.executionMode === 'chunked' ? `chunk ${state.currentScopeNumber}` : 'one-shot execution';
-  writeStatus(`Codex working on ${scopeLabel}...`, logger);
   await logger?.event('phase.start', { phase: 'codex_chunk' });
   const beforeHead = await getHeadCommit(state.cwd);
   const codex = await runCodexChunkRound({
@@ -231,7 +197,6 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
 }
 
 async function runCodexPlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  writeStatus('Codex revising the plan draft...', logger);
   await logger?.event('phase.start', { phase: 'codex_plan' });
   const codex = await runCodexPlanRound({
     cwd: state.cwd,
@@ -270,7 +235,6 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
     throw new Error('Cannot run Claude review without baseCommit');
   }
 
-  writeStatus(`Claude performing ${formatPass(state.rounds.length + 1)} pass review...`, logger);
   await logger?.event('phase.start', { phase: 'claude_review', round: state.rounds.length + 1 });
   const headCommit = await getHeadCommit(state.cwd);
   const round = state.rounds.length + 1;
@@ -369,7 +333,6 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
 }
 
 async function runClaudePlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  writeStatus(`Claude reviewing the plan draft (${formatPass(state.rounds.length + 1)} pass)...`, logger);
   await logger?.event('phase.start', { phase: 'claude_plan_review', round: state.rounds.length + 1 });
   const round = state.rounds.length + 1;
   const claude = await runClaudePlanReviewRound({
@@ -575,7 +538,6 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     throw new Error('Cannot run Codex response phase without an existing Codex thread');
   }
 
-  writeStatus(`Codex incorporating feedback from ${formatPass(state.rounds.length)} pass review...`, logger);
   await logger?.event('phase.start', { phase: 'codex_response' });
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
@@ -658,7 +620,6 @@ async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: s
     throw new Error('Cannot run Codex plan response phase without an existing Codex thread');
   }
 
-  writeStatus(`Codex revising the plan after ${formatPass(state.rounds.length)} pass review...`, logger);
   await logger?.event('phase.start', { phase: 'codex_plan_response' });
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
@@ -735,7 +696,6 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     throw new Error('Cannot finalize without a baseCommit');
   }
 
-  writeStatus('Neal finalizing accepted work...', logger);
   await logger?.event('phase.start', { phase: 'final_squash' });
   const headCommit = await getHeadCommit(state.cwd);
   const statusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(state.cwd));

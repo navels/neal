@@ -99,10 +99,8 @@ function extractMarker(message: string) {
   return null;
 }
 
-function writeDiagnostic(message: string, logger?: RunLogger, options?: { console?: boolean }) {
-  if (options?.console !== false) {
-    process.stderr.write(message);
-  }
+function writeDiagnostic(message: string, logger?: RunLogger) {
+  process.stderr.write(message);
   void logger?.stderr(message);
 }
 
@@ -113,19 +111,19 @@ async function consumeCodexTurn(turn: Awaited<ReturnType<Thread['runStreamed']>>
   for await (const event of turn.events) {
     switch (event.type) {
       case 'thread.started':
-        writeDiagnostic(`[codex] thread ${event.thread_id}\n`, logger, { console: false });
+        writeDiagnostic(`[codex] thread ${event.thread_id}\n`, logger);
         void logger?.event('codex.thread_started', { threadId: event.thread_id });
         break;
       case 'item.completed':
         if (event.item.type === 'command_execution') {
-          writeDiagnostic(`\n$ ${event.item.command}\n`, logger, { console: false });
+          writeDiagnostic(`\n$ ${event.item.command}\n`, logger);
           void logger?.event('codex.command_execution', { command: event.item.command });
           if (event.item.aggregated_output) {
-            writeDiagnostic(`${event.item.aggregated_output}\n`, logger, { console: false });
+            writeDiagnostic(`${event.item.aggregated_output}\n`, logger);
           }
         } else if (event.item.type === 'file_change' && event.item.changes.length > 0) {
           const files = event.item.changes.map((change) => change.path);
-          writeDiagnostic(`[codex] files ${files.join(', ')}\n`, logger, { console: false });
+          writeDiagnostic(`[codex] files ${files.join(', ')}\n`, logger);
           void logger?.event('codex.file_change', { files });
         } else if (event.item.type === 'agent_message') {
           finalResponse = event.item.text;
@@ -188,7 +186,7 @@ function parseCodexResponsePayload(raw: string): CodexResponsePayload {
 function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger) {
   switch (message.type) {
     case 'tool_progress':
-      writeDiagnostic(`[claude:${label}] tool ${message.tool_name} running (${message.elapsed_time_seconds}s)\n`, logger, { console: false });
+      writeDiagnostic(`[claude:${label}] tool ${message.tool_name} running (${message.elapsed_time_seconds}s)\n`, logger);
       void logger?.event('claude.tool_progress', {
         label,
         toolName: message.tool_name,
@@ -196,26 +194,26 @@ function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger
       });
       break;
     case 'tool_use_summary':
-      writeDiagnostic(`[claude:${label}] ${message.summary}\n`, logger, { console: false });
+      writeDiagnostic(`[claude:${label}] ${message.summary}\n`, logger);
       void logger?.event('claude.tool_use_summary', { label, summary: message.summary });
       break;
     case 'system':
       switch (message.subtype) {
         case 'task_started':
-          writeDiagnostic(`[claude:${label}] task started: ${message.description}\n`, logger, { console: false });
+          writeDiagnostic(`[claude:${label}] task started: ${message.description}\n`, logger);
           void logger?.event('claude.task_started', { label, description: message.description });
           break;
         case 'task_progress':
-          writeDiagnostic(`[claude:${label}] ${message.description}\n`, logger, { console: false });
+          writeDiagnostic(`[claude:${label}] ${message.description}\n`, logger);
           void logger?.event('claude.task_progress', { label, description: message.description });
           break;
         case 'task_notification':
-          writeDiagnostic(`[claude:${label}] task ${message.status}: ${message.summary}\n`, logger, { console: false });
+          writeDiagnostic(`[claude:${label}] task ${message.status}: ${message.summary}\n`, logger);
           void logger?.event('claude.task_notification', { label, status: message.status, summary: message.summary });
           break;
         case 'status':
           if (message.status) {
-            writeDiagnostic(`[claude:${label}] status: ${message.status}\n`, logger, { console: false });
+            writeDiagnostic(`[claude:${label}] status: ${message.status}\n`, logger);
             void logger?.event('claude.status', { label, status: message.status });
           }
           break;
@@ -224,7 +222,7 @@ function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger
       }
       break;
     case 'result':
-      writeDiagnostic(`[claude:${label}] result: ${message.subtype}\n`, logger, { console: false });
+      writeDiagnostic(`[claude:${label}] result: ${message.subtype}\n`, logger);
       void logger?.event('claude.result', { label, subtype: message.subtype });
       break;
     default:
@@ -360,7 +358,7 @@ export async function runClaudeReviewRound(args: {
       allowDangerouslySkipPermissions: true,
       maxTurns: 10,
       stderr: (data) => {
-        writeDiagnostic(`[claude:review:stderr] ${data}`, args.logger, { console: false });
+        writeDiagnostic(`[claude:review:stderr] ${data}`, args.logger);
       },
       outputFormat: {
         type: 'json_schema',
@@ -449,7 +447,7 @@ export async function runClaudePlanReviewRound(args: {
       allowDangerouslySkipPermissions: true,
       maxTurns: 10,
       stderr: (data) => {
-        writeDiagnostic(`[claude:plan-review:stderr] ${data}`, args.logger, { console: false });
+        writeDiagnostic(`[claude:plan-review:stderr] ${data}`, args.logger);
       },
       outputFormat: {
         type: 'json_schema',
