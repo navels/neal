@@ -11,6 +11,20 @@ import type { ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit
 
 const MAX_INLINE_DIFF_FILES = Number(process.env.CLAUDE_INLINE_DIFF_FILE_LIMIT ?? 40);
 
+function getCodexCompletionProblem(executionMode: ExecutionMode, marker: string | null) {
+  if (marker === 'AUTONOMY_BLOCKED') {
+    return null;
+  }
+
+  if (executionMode === 'one_shot') {
+    return marker === 'AUTONOMY_DONE' ? null : 'One-shot execution must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
+  }
+
+  return marker === 'AUTONOMY_CHUNK_DONE' || marker === 'AUTONOMY_DONE'
+    ? null
+    : 'Chunked execution must end with AUTONOMY_CHUNK_DONE, AUTONOMY_DONE, or AUTONOMY_BLOCKED.';
+}
+
 export async function initializeOrchestration(planDoc: string, cwd: string, executionMode: ExecutionMode) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.forge');
@@ -92,12 +106,13 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   });
   const afterHead = await getHeadCommit(state.cwd);
   const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
+  const completionProblem = getCodexCompletionProblem(state.executionMode, codex.marker);
 
   const nextState = await saveState(statePath, {
     ...state,
     codexThreadId: codex.threadId,
-    phase: codex.marker === 'AUTONOMY_BLOCKED' ? 'blocked' : 'claude_review',
-    status: codex.marker === 'AUTONOMY_BLOCKED' ? 'blocked' : 'running',
+    phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_review',
+    status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
     createdCommits: [...state.createdCommits, ...createdCommits],
   });
 
@@ -111,7 +126,11 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked') {
-    await notifyBlocked(nextState, 'Codex reported a blocker during chunk execution', logger);
+    await notifyBlocked(
+      nextState,
+      completionProblem ?? 'Codex reported a blocker during chunk execution',
+      logger,
+    );
   }
   return nextState;
 }

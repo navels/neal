@@ -9,7 +9,7 @@ import type { RunLogger } from './logger.js';
 import type { ExecutionMode } from './types.js';
 
 function usage(): never {
-  console.error('Usage: forge [--chunked] <plan-doc>');
+  console.error('Usage: forge [--execute] [--chunked] <plan-doc>');
   console.error('   or: forge --resume [state-file]');
   process.exit(1);
 }
@@ -24,6 +24,10 @@ async function main() {
   let planDoc: string | null = null;
   let resumeStatePath: string | undefined;
   let index = 0;
+
+  if (args[index] === '--execute') {
+    index += 1;
+  }
 
   if (args[index] === '--chunked') {
     executionMode = 'chunked';

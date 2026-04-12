@@ -62,10 +62,6 @@ function validateState(value: unknown): asserts value is OrchestrationState {
     throw new Error('Invalid session state: missing planDoc or cwd');
   }
 
-  if (state.executionMode !== 'one_shot' && state.executionMode !== 'chunked') {
-    throw new Error('Invalid session state: missing or invalid executionMode');
-  }
-
   if (typeof state.phase !== 'string' || typeof state.status !== 'string') {
     throw new Error('Invalid session state: missing phase or status');
   }
@@ -127,10 +123,18 @@ export async function loadState(path: string) {
   validateState(parsed);
   const stateDir = dirname(path);
   const runDir = typeof parsed.runDir === 'string' ? parsed.runDir : join(stateDir, 'runs', 'legacy');
+  const executionMode =
+    parsed.executionMode === undefined
+      ? 'chunked'
+      : parsed.executionMode === 'one_shot' || parsed.executionMode === 'chunked'
+        ? parsed.executionMode
+        : (() => {
+            throw new Error(`Invalid session state: invalid executionMode ${String(parsed.executionMode)}`);
+          })();
   return {
     ...parsed,
     runDir,
-    executionMode: parsed.executionMode,
+    executionMode,
     rounds: parsed.rounds.map(hydrateRound),
     findings: parsed.findings.map(hydrateFinding),
   };

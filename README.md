@@ -38,10 +38,16 @@ Use the in-repo sandbox plan when you want to exercise `forge` without touching 
 
 ```bash
 cd /Users/lee.nave/code/personal/codex-chunked
-forge notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
+forge --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
 ```
 
 The sandbox scope is intentionally limited to `src/testing-fixture/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the chunk queue.
+
+Execution-mode semantics:
+
+- `forge PLAN.md` is a backward-compatible alias for `forge --execute PLAN.md`
+- `forge --execute PLAN.md` runs one-shot mode by default
+- `forge --execute --chunked PLAN.md` opts into chunked mode explicitly
 
 `forge` treats `.forge/`, `REVIEW.md`, and archived `notes/REVIEW-*.md` files as transient wrapper artifacts. On successful completion it archives the full review to `notes/REVIEW-<final-commit>.md` and rewrites root `REVIEW.md` as a short pointer to the archived file.
 
@@ -60,7 +66,7 @@ The final CLI JSON output includes `runDir` so you can jump straight to the rele
 If you want to force the large-diff fallback path during local validation, lower the inline file threshold:
 
 ```bash
-CLAUDE_INLINE_DIFF_FILE_LIMIT=1 forge notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
+CLAUDE_INLINE_DIFF_FILE_LIMIT=1 forge --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
 ```
 
 ## Notifications

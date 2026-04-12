@@ -2,5 +2,6 @@ node_modules
 dist
 .forge/
 .codex-claude-chunked/
+PROGRESS.md
 REVIEW.md
 notes/REVIEW-*.md
