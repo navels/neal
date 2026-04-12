@@ -9,12 +9,14 @@ import readline from 'node:readline';
 import { ClaudeRoundError, CodexRoundError } from './agents.js';
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
+import { showSummaries } from './summaries.js';
 import type { ExecutionMode } from './types.js';
 
 function usage(): never {
   console.error('Usage: neal --execute [--chunked] <plan-doc>');
   console.error('   or: neal --plan [--chunked] <plan-doc>');
   console.error('   or: neal --resume [state-file]');
+  console.error('   or: neal --summaries [runs-dir]');
   process.exit(1);
 }
 
@@ -90,6 +92,11 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
     usage();
+  }
+
+  if (args[0] === '--summaries') {
+    await showSummaries(args[1]);
+    return;
   }
 
   let executionMode: ExecutionMode = 'one_shot';

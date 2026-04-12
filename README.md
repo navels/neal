@@ -41,6 +41,7 @@ cd /Users/lee.nave/code/personal/codex-chunked
 neal --plan notes/testing/NEAL_PLAN_DRAFT.md
 neal --execute notes/testing/NEAL_ONE_SHOT_PLAN.md
 neal --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
+neal --summaries
 ```
 
 The sandbox scope is intentionally limited to `src/testing-fixture/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the chunk queue.
@@ -53,6 +54,7 @@ Execution-mode semantics:
 - `neal --plan PLAN.md` revises a draft plan in place without making commits
 - `neal --execute PLAN.md` runs one-shot mode by default
 - `neal --execute --chunked PLAN.md` opts into chunked mode explicitly
+- `neal --summaries [runs-dir]` pages through retrospective reports written under `.neal/runs`
 - in chunked mode, `neal` now continues into the next chunk automatically after an accepted `AUTONOMY_CHUNK_DONE` scope until the plan completes or blocks
 
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
