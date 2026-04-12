@@ -2,7 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import { notify } from '../notifier.js';
-import { runClaudeReviewRound, runCodexChunkRound, runCodexResponseRound } from './agents.js';
+import {
+  runClaudePlanReviewRound,
+  runClaudeReviewRound,
+  runCodexChunkRound,
+  runCodexPlanResponseRound,
+  runCodexPlanRound,
+  runCodexResponseRound,
+} from './agents.js';
 import { getChangedFilesForRange, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
@@ -26,12 +33,25 @@ function getCodexCompletionProblem(executionMode: ExecutionMode, marker: string 
     : 'Chunked execution must end with AUTONOMY_CHUNK_DONE, AUTONOMY_DONE, or AUTONOMY_BLOCKED.';
 }
 
+function getPlanningCompletionProblem(marker: string | null) {
+  if (marker === 'AUTONOMY_BLOCKED') {
+    return null;
+  }
+
+  return marker === 'AUTONOMY_DONE' ? null : 'Planning mode must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
+}
+
 async function writeExecutionArtifacts(state: OrchestrationState) {
   await writeReviewMarkdown(state.reviewMarkdownPath, state);
   await writePlanProgressArtifacts(state);
 }
 
-export async function initializeOrchestration(planDoc: string, cwd: string, executionMode: ExecutionMode) {
+export async function initializeOrchestration(
+  planDoc: string,
+  cwd: string,
+  executionMode: ExecutionMode,
+  topLevelMode: 'plan' | 'execute' = 'execute',
+) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.forge');
   const reviewMarkdownPath = join(cwd, 'REVIEW.md');
@@ -41,6 +61,7 @@ export async function initializeOrchestration(planDoc: string, cwd: string, exec
     cwd,
     stateDir,
     planDoc: absolutePlanDoc,
+    topLevelMode,
     executionMode,
   });
 
@@ -49,6 +70,7 @@ export async function initializeOrchestration(planDoc: string, cwd: string, exec
     planDoc: absolutePlanDoc,
     stateDir,
     runDir: logger.runDir,
+    topLevelMode,
     progressJsonPath,
     progressMarkdownPath,
     reviewMarkdownPath,
@@ -66,6 +88,7 @@ export async function initializeOrchestration(planDoc: string, cwd: string, exec
   await logger.event('run.initialized', {
     statePath,
     baseCommit,
+    topLevelMode,
     reviewMarkdownPath,
     progressJsonPath,
     progressMarkdownPath,
@@ -176,6 +199,40 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   return nextState;
 }
 
+async function runCodexPlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  await logger?.event('phase.start', { phase: 'codex_plan' });
+  const codex = await runCodexPlanRound({
+    cwd: state.cwd,
+    planDoc: state.planDoc,
+    threadId: state.codexThreadId,
+    logger,
+  });
+  const completionProblem = getPlanningCompletionProblem(codex.marker);
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    codexThreadId: codex.threadId,
+    lastCodexMarker: codex.marker as CodexMarker | null,
+    phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_plan_review',
+    status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'codex_plan',
+    marker: codex.marker,
+    threadId: codex.threadId,
+    nextPhase: nextState.phase,
+  });
+  if (nextState.status === 'blocked') {
+    const reason = completionProblem ?? 'Codex reported a blocker during plan revision';
+    const persistedState = await persistBlockedScope(nextState, statePath, reason);
+    await notifyBlocked(persistedState, reason, logger);
+    return persistedState;
+  }
+  return nextState;
+}
+
 async function runClaudePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   if (!state.baseCommit) {
     throw new Error('Cannot run Claude review without baseCommit');
@@ -274,6 +331,96 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
     const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
     await notifyBlocked(persistedState, blockReason, logger);
     return persistedState;
+  }
+  return nextState;
+}
+
+async function runClaudePlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  await logger?.event('phase.start', { phase: 'claude_plan_review', round: state.rounds.length + 1 });
+  const round = state.rounds.length + 1;
+  const claude = await runClaudePlanReviewRound({
+    cwd: state.cwd,
+    planDoc: state.planDoc,
+    round,
+    reviewMarkdownPath: state.reviewMarkdownPath,
+    logger,
+  });
+
+  let nextCanonicalIndex = getNextCanonicalIndex(state.findings);
+  const findings = claude.findings.map((finding, index) => {
+    const canonicalId = findCanonicalId(state.findings, finding) ?? `C${nextCanonicalIndex++}`;
+    return {
+      ...finding,
+      id: `R${round}-F${index + 1}`,
+      canonicalId,
+      status: 'open' as const,
+      codexDisposition: null,
+      codexCommit: null,
+    };
+  });
+  const mergedFindings = [...state.findings, ...findings];
+  const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
+  const reachedMaxRounds = round >= state.maxRounds;
+  const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
+  const stalledBlockingCount = hasTwoConsecutiveNonReductions(state.rounds, openBlockingCanonicalCount);
+  const reopenedCanonical = getReopenedCanonical(mergedFindings);
+  const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
+  const blockReason = reopenedCanonical
+    ? `blocking finding ${reopenedCanonical} reopened across multiple Claude rounds`
+    : stalledBlockingCount
+      ? 'blocking findings did not decrease for two consecutive Claude rounds'
+      : reachedMaxRounds && hasBlockingFindings
+        ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
+        : null;
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    phase: shouldBlockForConvergence
+      ? 'blocked'
+      : hasBlockingFindings
+        ? reachedMaxRounds
+          ? 'blocked'
+          : 'codex_plan_response'
+        : 'done',
+    status: shouldBlockForConvergence
+      ? 'blocked'
+      : hasBlockingFindings
+        ? reachedMaxRounds
+          ? 'blocked'
+          : 'running'
+        : 'done',
+    rounds: [
+      ...state.rounds,
+      {
+        round,
+        claudeSessionId: claude.sessionId,
+        commitRange: {
+          base: state.baseCommit ?? '',
+          head: state.finalCommit ?? state.baseCommit ?? '',
+        },
+        openBlockingCanonicalCount,
+        findings: findings.map((finding) => finding.id),
+      },
+    ],
+    findings: mergedFindings,
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'claude_plan_review',
+    round,
+    sessionId: claude.sessionId,
+    findings: findings.length,
+    blockingFindings: findings.filter((finding) => finding.severity === 'blocking').length,
+    nextPhase: nextState.phase,
+  });
+  if (nextState.status === 'blocked' && blockReason) {
+    const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
+    await notifyBlocked(persistedState, blockReason, logger);
+    return persistedState;
+  }
+  if (nextState.status === 'done') {
+    await notifyComplete(nextState, 'Plan review converged', logger);
   }
   return nextState;
 }
@@ -471,6 +618,82 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
   return nextState;
 }
 
+async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.codexThreadId) {
+    throw new Error('Cannot run Codex plan response phase without an existing Codex thread');
+  }
+
+  await logger?.event('phase.start', { phase: 'codex_plan_response' });
+  const openFindings = state.findings.filter(isOpenBlockingFinding);
+  if (openFindings.length === 0) {
+    const nextState = await saveState(statePath, {
+      ...state,
+      phase: 'done',
+      status: 'done',
+    });
+    await writeExecutionArtifacts(nextState);
+    await logger?.event('phase.complete', {
+      phase: 'codex_plan_response',
+      openFindings: 0,
+      nextPhase: nextState.phase,
+    });
+    await notifyComplete(nextState, 'Plan review converged', logger);
+    return nextState;
+  }
+
+  const codex = await runCodexPlanResponseRound({
+    cwd: state.cwd,
+    planDoc: state.planDoc,
+    reviewMarkdownPath: state.reviewMarkdownPath,
+    openFindings: openFindings.map((finding) => ({
+      id: finding.id,
+      claim: finding.claim,
+      requiredAction: finding.requiredAction,
+      severity: finding.severity,
+    })),
+    threadId: state.codexThreadId,
+    logger,
+  });
+  const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
+
+  const findings = state.findings.map((finding) => {
+    const response = responseById.get(finding.id);
+    if (!response) {
+      return finding;
+    }
+
+    return {
+      ...finding,
+      status: mapDecisionToStatus(response.decision),
+      codexDisposition: response.summary,
+      codexCommit: null,
+    };
+  });
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    codexThreadId: codex.threadId,
+    findings,
+    phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'claude_plan_review',
+    status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'codex_plan_response',
+    outcome: codex.payload.outcome,
+    respondedFindings: codex.payload.responses.length,
+    nextPhase: nextState.phase,
+  });
+  if (nextState.status === 'blocked') {
+    const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'Codex reported a blocker during plan response';
+    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    await notifyBlocked(persistedState, blocker, logger);
+    return persistedState;
+  }
+  return nextState;
+}
+
 async function runFinalSquashPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   if (!state.baseCommit) {
     throw new Error('Cannot finalize without a baseCommit');
@@ -553,11 +776,29 @@ export async function runOnePass(state: OrchestrationState, statePath: string, l
   let currentState = state;
 
   while (
+    currentState.phase === 'codex_plan' ||
+    currentState.phase === 'claude_plan_review' ||
+    currentState.phase === 'codex_plan_response' ||
     currentState.phase === 'codex_chunk' ||
     currentState.phase === 'claude_review' ||
     currentState.phase === 'codex_response' ||
     currentState.phase === 'final_squash'
   ) {
+    if (currentState.phase === 'codex_plan') {
+      currentState = await runCodexPlanPhase(currentState, statePath, logger);
+      continue;
+    }
+
+    if (currentState.phase === 'claude_plan_review') {
+      currentState = await runClaudePlanPhase(currentState, statePath, logger);
+      continue;
+    }
+
+    if (currentState.phase === 'codex_plan_response') {
+      currentState = await runCodexPlanResponsePhase(currentState, statePath, logger);
+      continue;
+    }
+
     if (currentState.phase === 'codex_chunk') {
       currentState = await runCodexPhase(currentState, statePath, logger);
       continue;
@@ -592,6 +833,7 @@ export async function loadOrInitialize(
   cwd: string,
   resumeStatePath?: string,
   executionMode: ExecutionMode = 'one_shot',
+  topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   if (resumeStatePath) {
     const state = await loadState(resumeStatePath);
@@ -599,6 +841,7 @@ export async function loadOrInitialize(
       cwd: state.cwd,
       stateDir: dirname(resumeStatePath),
       planDoc: state.planDoc,
+      topLevelMode: state.topLevelMode,
       executionMode: state.executionMode,
       runDir: state.runDir,
       resumedFromStatePath: resumeStatePath,
@@ -619,5 +862,5 @@ export async function loadOrInitialize(
     throw new Error('planDoc is required when initializing a new orchestration');
   }
 
-  return initializeOrchestration(planDoc, cwd, executionMode);
+  return initializeOrchestration(planDoc, cwd, executionMode, topLevelMode);
 }

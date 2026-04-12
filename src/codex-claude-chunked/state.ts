@@ -14,10 +14,11 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     planDoc: init.planDoc,
     cwd: init.cwd,
     runDir: init.runDir,
+    topLevelMode: init.topLevelMode,
     executionMode: init.executionMode,
     progressJsonPath: init.progressJsonPath,
     progressMarkdownPath: init.progressMarkdownPath,
-    phase: 'codex_chunk',
+    phase: init.topLevelMode === 'plan' ? 'codex_plan' : 'codex_chunk',
     createdAt: now,
     updatedAt: now,
     reviewMarkdownPath: init.reviewMarkdownPath,
@@ -36,7 +37,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
   };
 }
 
-export async function saveState(path: string, state: OrchestrationState) {
+export async function saveState(path: string, state: OrchestrationState): Promise<OrchestrationState> {
   const nextState = {
     ...state,
     updatedAt: new Date().toISOString(),
@@ -65,6 +66,10 @@ function validateState(value: unknown): asserts value is OrchestrationState {
 
   if (typeof state.planDoc !== 'string' || typeof state.cwd !== 'string') {
     throw new Error('Invalid session state: missing planDoc or cwd');
+  }
+
+  if (state.topLevelMode !== undefined && state.topLevelMode !== 'plan' && state.topLevelMode !== 'execute') {
+    throw new Error(`Invalid session state: invalid topLevelMode ${String(state.topLevelMode)}`);
   }
 
   if (typeof state.phase !== 'string' || typeof state.status !== 'string') {
@@ -147,7 +152,7 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
   };
 }
 
-export async function loadState(path: string) {
+export async function loadState(path: string): Promise<OrchestrationState> {
   const content = await readFile(path, 'utf8');
   const parsed = JSON.parse(content);
   validateState(parsed);
@@ -167,6 +172,7 @@ export async function loadState(path: string) {
   return {
     ...parsed,
     runDir,
+    topLevelMode: parsed.topLevelMode === 'plan' ? 'plan' : 'execute',
     progressJsonPath,
     progressMarkdownPath,
     executionMode,

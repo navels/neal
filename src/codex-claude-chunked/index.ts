@@ -10,6 +10,7 @@ import type { ExecutionMode } from './types.js';
 
 function usage(): never {
   console.error('Usage: forge [--execute] [--chunked] <plan-doc>');
+  console.error('   or: forge --plan [--chunked] <plan-doc>');
   console.error('   or: forge --resume [state-file]');
   process.exit(1);
 }
@@ -21,11 +22,15 @@ async function main() {
   }
 
   let executionMode: ExecutionMode = 'one_shot';
+  let topLevelMode: 'plan' | 'execute' = 'execute';
   let planDoc: string | null = null;
   let resumeStatePath: string | undefined;
   let index = 0;
 
-  if (args[index] === '--execute') {
+  if (args[index] === '--plan') {
+    topLevelMode = 'plan';
+    index += 1;
+  } else if (args[index] === '--execute') {
     index += 1;
   }
 
@@ -48,7 +53,7 @@ async function main() {
   }
 
   const resolvedPlanDoc = resumeStatePath ? null : planDoc;
-  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, executionMode);
+  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, executionMode, topLevelMode);
   runLogger = logger;
   const finalState = await runOnePass(state, statePath, logger);
 
@@ -58,6 +63,7 @@ async function main() {
         ok: true,
         phase: finalState.phase,
         status: finalState.status,
+        topLevelMode: finalState.topLevelMode,
         planDoc: finalState.planDoc,
         executionMode: finalState.executionMode,
         statePath,

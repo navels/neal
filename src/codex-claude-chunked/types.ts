@@ -1,4 +1,7 @@
 export type OrchestrationPhase =
+  | 'codex_plan'
+  | 'claude_plan_review'
+  | 'codex_plan_response'
   | 'codex_chunk'
   | 'claude_review'
   | 'codex_response'
@@ -56,6 +59,7 @@ export type OrchestrationState = {
   planDoc: string;
   cwd: string;
   runDir: string;
+  topLevelMode: 'plan' | 'execute';
   executionMode: ExecutionMode;
   progressJsonPath: string;
   progressMarkdownPath: string;
@@ -82,6 +86,7 @@ export type OrchestratorInit = {
   planDoc: string;
   stateDir: string;
   runDir: string;
+  topLevelMode: 'plan' | 'execute';
   progressJsonPath: string;
   progressMarkdownPath: string;
   reviewMarkdownPath: string;

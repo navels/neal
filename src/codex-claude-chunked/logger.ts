@@ -14,6 +14,7 @@ export type RunLoggerInit = {
   cwd: string;
   stateDir: string;
   planDoc: string;
+  topLevelMode: 'plan' | 'execute';
   executionMode: ExecutionMode;
   runDir?: string;
   resumedFromStatePath?: string;
@@ -56,6 +57,7 @@ export class RunLogger {
             cwd: init.cwd,
             planDoc: init.planDoc,
             planName: basename(init.planDoc),
+            topLevelMode: init.topLevelMode,
             executionMode: init.executionMode,
             resumedFromStatePath: init.resumedFromStatePath ?? null,
             runDir: this.runDir,

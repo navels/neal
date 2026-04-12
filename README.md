@@ -38,6 +38,7 @@ Use the in-repo sandbox plan when you want to exercise `forge` without touching 
 
 ```bash
 cd /Users/lee.nave/code/personal/codex-chunked
+forge --plan notes/testing/FORGE_PLAN_DRAFT.md
 forge --execute notes/testing/FORGE_ONE_SHOT_PLAN.md
 forge --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
 ```
@@ -45,9 +46,11 @@ forge --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
 The sandbox scope is intentionally limited to `src/testing-fixture/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the chunk queue.
 
 Use [`notes/testing/FORGE_ONE_SHOT_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/FORGE_ONE_SHOT_PLAN.md) when you want a small end-to-end one-shot validation plan instead of the chunk backlog.
+Use [`notes/testing/FORGE_PLAN_DRAFT.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/FORGE_PLAN_DRAFT.md) when you want to exercise the non-interactive planning loop.
 
 Execution-mode semantics:
 
+- `forge --plan PLAN.md` revises a draft plan in place without making commits
 - `forge PLAN.md` is a backward-compatible alias for `forge --execute PLAN.md`
 - `forge --execute PLAN.md` runs one-shot mode by default
 - `forge --execute --chunked PLAN.md` opts into chunked mode explicitly
@@ -71,6 +74,8 @@ During execution, `forge` also maintains:
 
 - `plan-progress.json`: authoritative machine-readable progress state
 - `PLAN_PROGRESS.md`: rendered human-readable burndown state
+
+Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state in `REVIEW.md`, and exits once Claude review converges or blocks.
 
 If you want to force the large-diff fallback path during local validation, lower the inline file threshold:
 

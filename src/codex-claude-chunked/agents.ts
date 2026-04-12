@@ -12,6 +12,35 @@ const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
 const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 120_000);
 const INLINE_CLAUDE_DIFF_LIMIT = 120_000;
 
+function buildPlanningPrompt(planDoc: string) {
+  return [
+    `Rewrite the draft plan document at ${planDoc} into a future execution plan for forge.`,
+    '',
+    'Before doing anything else:',
+    `1. Read ${planDoc}.`,
+    '2. Read any companion docs explicitly referenced by that plan.',
+    '3. Reset your instructions for this turn from the current contents of the plan and referenced context.',
+    '',
+    'Then revise only plan-related artifacts.',
+    'Do not edit runtime source code outside the plan itself and adjacent planning notes.',
+    'Do not make git commits.',
+    'Your output must be a pure future execution plan, not a planning-task checklist.',
+    'Replace the draft in place so the resulting file is meant to be run later with forge --execute, not forge --plan.',
+    'Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.',
+    'Ground the plan in the actual current repository state. Inspect the real target files and write steps against the symbols, exports, and file structure that actually exist.',
+    'Do not leave avoidable ambiguity in the plan when the repository already answers the question. Name concrete target functions, files, and exports when they are knowable from the repo.',
+    'Do not ask the future executor to perform redundant edits. If an export already propagates through an existing barrel file, say to verify that behavior instead of adding a fake extra edit step.',
+    'Make the final plan explicit about execution mode, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any chunking rules.',
+    'If the plan is one-shot, say so directly and do not leave chunk-only markers or backlog instructions in place.',
+    'If the plan is chunked, make chunk selection and completion rules explicit.',
+    'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
+    '',
+    'Final line must be exactly one of:',
+    `- ${AUTONOMY_DONE}`,
+    `- ${AUTONOMY_BLOCKED}`,
+  ].join('\n');
+}
+
 function buildOneShotPrompt(planDoc: string, progressMarkdownPath: string) {
   return [
     `Continue autonomously on the task described in ${planDoc}.`,
@@ -363,6 +392,95 @@ export async function runClaudeReviewRound(args: {
   };
 }
 
+export async function runClaudePlanReviewRound(args: {
+  cwd: string;
+  planDoc: string;
+  round: number;
+  reviewMarkdownPath: string;
+  logger?: RunLogger;
+}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'codexDisposition' | 'codexCommit'>[] }> {
+  const schema = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      findings: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            severity: { type: 'string', enum: ['blocking', 'non_blocking'] },
+            files: { type: 'array', items: { type: 'string' } },
+            claim: { type: 'string' },
+            requiredAction: { type: 'string' },
+          },
+          required: ['severity', 'files', 'claim', 'requiredAction'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['summary', 'findings'],
+    additionalProperties: false,
+  } as const;
+
+  const prompt = [
+    `Review the plan document at ${args.planDoc}.`,
+    `Review round: ${args.round}.`,
+    '',
+    'Produce only structured review findings.',
+    'Use blocking severity for missing information or plan structure that would prevent forge from executing safely.',
+    'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run forge --plan, or how to validate the planning task.',
+    'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
+    'Use non_blocking severity for clarity improvements that do not block execution.',
+    'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
+    'Focus on whether the plan is now a clean future execution plan, explicit about one_shot vs chunked mode, and clear about verification and completion.',
+    `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and Codex responses.`,
+    '',
+    'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
+  ].join('\n');
+
+  const stream = query({
+    prompt,
+    options: {
+      cwd: args.cwd,
+      tools: ['Read', 'Grep', 'Glob'],
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      maxTurns: 10,
+      stderr: (data) => {
+        writeDiagnostic(`[claude:plan-review:stderr] ${data}`, args.logger);
+      },
+      outputFormat: {
+        type: 'json_schema',
+        schema,
+      },
+    },
+  });
+
+  const { sessionId, lastResult } = await collectClaudeResult(stream, 'plan-review', DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
+
+  if (!lastResult || lastResult.subtype !== 'success') {
+    throw new Error('Claude plan review did not return a successful result');
+  }
+
+  const structured = lastResult.structured_output as ClaudeReviewPayload | undefined;
+  if (!structured) {
+    throw new Error('Claude plan review returned no structured output');
+  }
+
+  return {
+    sessionId,
+    summary: structured.summary,
+    findings: structured.findings.map((finding) => ({
+      round: args.round,
+      severity: finding.severity,
+      files: finding.files,
+      claim: finding.claim,
+      requiredAction: finding.requiredAction,
+      roundSummary: structured.summary,
+    })),
+  };
+}
+
 function createCodexThread(cwd: string, threadId?: string | null): Thread {
   const codex = new Codex();
   return threadId
@@ -388,6 +506,24 @@ export async function runCodexChunkRound(args: {
       ? buildOneShotPrompt(args.planDoc, args.progressMarkdownPath)
       : buildChunkedPrompt(args.planDoc, args.progressMarkdownPath);
   const streamedTurn = await thread.runStreamed(prompt);
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const marker = extractMarker(finalResponse);
+
+  return {
+    threadId: thread.id,
+    finalResponse,
+    marker,
+  };
+}
+
+export async function runCodexPlanRound(args: {
+  cwd: string;
+  planDoc: string;
+  threadId?: string | null;
+  logger?: RunLogger;
+}): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
+  const thread = createCodexThread(args.cwd, args.threadId);
+  const streamedTurn = await thread.runStreamed(buildPlanningPrompt(args.planDoc));
   const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
   const marker = extractMarker(finalResponse);
 
@@ -447,6 +583,76 @@ export async function runCodexResponseRound(args: {
     'Use `deferred` only when the finding is real but not safe to resolve inside this chunk.',
     'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
     'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.',
+    '',
+    'Open findings:',
+    JSON.stringify(args.openFindings, null, 2),
+    '',
+    'Current review markdown:',
+    reviewMarkdown,
+  ].join('\n');
+
+  const streamedTurn = await thread.runStreamed(prompt, {
+    outputSchema: schema,
+  });
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const payload = parseCodexResponsePayload(finalResponse);
+
+  return {
+    threadId: thread.id,
+    payload,
+  };
+}
+
+export async function runCodexPlanResponseRound(args: {
+  cwd: string;
+  planDoc: string;
+  reviewMarkdownPath: string;
+  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity'>[];
+  threadId: string;
+  logger?: RunLogger;
+}): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
+  const reviewMarkdown = await readFile(args.reviewMarkdownPath, 'utf8');
+  const thread = createCodexThread(args.cwd, args.threadId);
+
+  const schema = {
+    type: 'object',
+    properties: {
+      outcome: { type: 'string', enum: ['responded', 'blocked'] },
+      summary: { type: 'string' },
+      blocker: { type: 'string' },
+      responses: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            decision: { type: 'string', enum: ['fixed', 'rejected', 'deferred'] },
+            summary: { type: 'string' },
+          },
+          required: ['id', 'decision', 'summary'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['outcome', 'summary', 'blocker', 'responses'],
+    additionalProperties: false,
+  } as const;
+
+  const prompt = [
+    `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
+    '',
+    `Read ${args.reviewMarkdownPath} and address the currently open review findings.`,
+    'Edit only the plan document and directly related planning artifacts.',
+    'Do not edit runtime source code.',
+    'Do not make git commits.',
+    'The final file must be a pure future execution plan for forge --execute.',
+    'Do not leave planning-task scaffolding behind after you respond to the findings.',
+    'Where the current repository already answers an implementation detail, revise the plan to use the concrete existing symbol names and exports instead of leaving generic or redundant instructions.',
+    'Use `fixed` only when you actually revised the plan to resolve the finding.',
+    'Use `rejected` only when the finding is incorrect and your summary explains why.',
+    'Use `deferred` only when the finding is real but not safe to resolve without user input.',
+    'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
+    'If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.',
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),
