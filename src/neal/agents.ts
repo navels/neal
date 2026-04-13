@@ -12,6 +12,7 @@ const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_IN
 const DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS = Number(process.env.CODEX_INACTIVITY_TIMEOUT_MS ?? 600_000);
 const DEFAULT_CLAUDE_MAX_TURNS = Number(process.env.CLAUDE_REVIEW_MAX_TURNS ?? 100);
 const DEFAULT_CLAUDE_CONTINUATION_LIMIT = Number(process.env.CLAUDE_REVIEW_CONTINUATION_LIMIT ?? 2);
+const DEFAULT_CLAUDE_API_RETRY_LIMIT = Number(process.env.CLAUDE_REVIEW_API_RETRY_LIMIT ?? 2);
 function buildPlanningPrompt(planDoc: string) {
   return [
     `Rewrite the draft plan document at ${planDoc} into a future execution plan for neal.`,
@@ -185,6 +186,39 @@ export class ClaudeRoundError extends Error {
   }
 }
 
+function getClaudeResultErrorMessage(result: SDKResultMessage | null) {
+  const raw = result as { result?: unknown; error?: unknown; subtype?: unknown } | null;
+  if (!raw) {
+    return null;
+  }
+
+  if (typeof raw.result === 'string' && raw.result.trim()) {
+    return raw.result.trim();
+  }
+
+  if (raw.error && typeof raw.error === 'object') {
+    const message = (raw.error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message.trim();
+    }
+  }
+
+  return null;
+}
+
+function isTransientClaudeFailure(subtype: string | null, message: string | null) {
+  const text = `${subtype ?? ''}\n${message ?? ''}`.toLowerCase();
+  return (
+    text.includes('api_error') ||
+    text.includes('api error') ||
+    text.includes('internal server error') ||
+    text.includes('overloaded') ||
+    text.includes('rate limit') ||
+    text.includes('temporar') ||
+    text.includes('try again')
+  );
+}
+
 export class CodexRoundError extends Error {
   readonly threadId: string | null;
 
@@ -330,6 +364,7 @@ async function runClaudeStructuredRound(args: {
 }): Promise<{ sessionId: string | null; structured: ClaudeReviewPayload }> {
   let sessionId: string | null = null;
   let attempt = 0;
+  let apiRetryCount = 0;
   let lastResult: SDKResultMessage | null = null;
 
   while (attempt <= DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
@@ -342,7 +377,28 @@ async function runClaudeStructuredRound(args: {
             'Present your final structured findings now. If there are no findings, return an empty findings array.',
           ].join('\n');
     const stream = buildClaudeQueryStream(prompt, args.label, args.cwd, args.schema, args.logger, sessionId);
-    const result = await collectClaudeResult(stream, args.label, DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
+    let result;
+    try {
+      result = await collectClaudeResult(stream, args.label, DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, args.logger);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isTransientClaudeFailure(null, message) && apiRetryCount < DEFAULT_CLAUDE_API_RETRY_LIMIT) {
+        apiRetryCount += 1;
+        writeDiagnostic(
+          `[claude:${args.label}] transient API failure; retrying review (${apiRetryCount}/${DEFAULT_CLAUDE_API_RETRY_LIMIT})\n`,
+          args.logger,
+        );
+        void args.logger?.event('claude.api_retry', {
+          label: args.label,
+          sessionId,
+          retryCount: apiRetryCount,
+          retryLimit: DEFAULT_CLAUDE_API_RETRY_LIMIT,
+          message,
+        });
+        continue;
+      }
+      throw new ClaudeRoundError(message, sessionId, 'api_error');
+    }
 
     sessionId = result.sessionId ?? sessionId;
     lastResult = result.lastResult;
@@ -352,9 +408,28 @@ async function runClaudeStructuredRound(args: {
     }
 
     const subtype = lastResult?.subtype ?? null;
+    const resultErrorMessage = getClaudeResultErrorMessage(lastResult);
+    if (isTransientClaudeFailure(subtype, resultErrorMessage) && apiRetryCount < DEFAULT_CLAUDE_API_RETRY_LIMIT) {
+      apiRetryCount += 1;
+      writeDiagnostic(
+        `[claude:${args.label}] transient Claude error result; retrying review (${apiRetryCount}/${DEFAULT_CLAUDE_API_RETRY_LIMIT})\n`,
+        args.logger,
+      );
+      void args.logger?.event('claude.api_retry', {
+        label: args.label,
+        sessionId,
+        retryCount: apiRetryCount,
+        retryLimit: DEFAULT_CLAUDE_API_RETRY_LIMIT,
+        subtype,
+        message: resultErrorMessage,
+      });
+      continue;
+    }
     if (subtype !== 'error_max_turns' || !sessionId || attempt === DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
       throw new ClaudeRoundError(
-        `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}`,
+        resultErrorMessage
+          ? `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}: ${resultErrorMessage}`
+          : `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}`,
         sessionId,
         subtype,
       );
