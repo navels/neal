@@ -2,8 +2,9 @@ import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/cla
 import { Codex, type Thread } from '@openai/codex-sdk';
 
 import type { RunLogger } from './logger.js';
-import type { ExecutionMode, ReviewFinding } from './types.js';
+import type { ReviewFinding } from './types.js';
 
+const AUTONOMY_SCOPE_DONE = 'AUTONOMY_SCOPE_DONE';
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
 const AUTONOMY_DONE = 'AUTONOMY_DONE';
 const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
@@ -29,9 +30,9 @@ function buildPlanningPrompt(planDoc: string) {
     'Ground the plan in the actual current repository state. Inspect the real target files and write steps against the symbols, exports, and file structure that actually exist.',
     'Do not leave avoidable ambiguity in the plan when the repository already answers the question. Name concrete target functions, files, and exports when they are knowable from the repo.',
     'Do not ask the future executor to perform redundant edits. If an export already propagates through an existing barrel file, say to verify that behavior instead of adding a fake extra edit step.',
-    'Make the final plan explicit about execution mode, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any chunking rules.',
-    'If the plan is one-shot, say so directly and do not leave chunk-only markers or backlog instructions in place.',
-    'If the plan is chunked, make chunk selection and completion rules explicit.',
+    'Make the final plan explicit about scope boundaries, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any repeated-scope selection rules.',
+    'If the plan should complete in one scope, say so directly.',
+    'If the plan requires multiple scopes, make scope selection and completion rules explicit.',
     'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
     '',
     'Final line must be exactly one of:',
@@ -40,7 +41,7 @@ function buildPlanningPrompt(planDoc: string) {
   ].join('\n');
 }
 
-function buildOneShotPrompt(planDoc: string, progressMarkdownPath: string) {
+function buildScopePrompt(planDoc: string, progressMarkdownPath: string) {
   return [
     `Continue autonomously on the task described in ${planDoc}.`,
     '',
@@ -50,7 +51,9 @@ function buildOneShotPrompt(planDoc: string, progressMarkdownPath: string) {
     '3. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
     '4. Reset your instructions for this turn from the current contents of the plan, the progress doc, and required context.',
     '',
-    'Then complete the plan end-to-end if feasible.',
+    'Then execute exactly one implementation scope.',
+    'Do not start a second scope in this turn.',
+    'If this scope completes the entire plan, return AUTONOMY_DONE. If more scopes remain, return AUTONOMY_SCOPE_DONE.',
     'Verify the relevant work before you finish.',
     'Create real git commit(s) for completed work.',
     `Read ${progressMarkdownPath} for status, but do not edit or stage it.`,
@@ -58,30 +61,7 @@ function buildOneShotPrompt(planDoc: string, progressMarkdownPath: string) {
     'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
     '',
     'Final line must be exactly one of:',
-    `- ${AUTONOMY_DONE}`,
-    `- ${AUTONOMY_BLOCKED}`,
-  ].join('\n');
-}
-
-function buildChunkedPrompt(planDoc: string, progressMarkdownPath: string) {
-  return [
-    `Continue autonomously on the task described in ${planDoc}.`,
-    '',
-    'Before doing anything else:',
-    `1. Read ${planDoc}.`,
-    `2. Read ${progressMarkdownPath}.`,
-    '3. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
-    '4. Reset your instructions for this turn from the current contents of the plan, the progress doc, and required context.',
-    '',
-    'Then execute exactly one meaningful chunk.',
-    'Do not start a second chunk in this turn.',
-    'This chunk must end with a real git commit if work was completed.',
-    `Read ${progressMarkdownPath} for status, but do not edit or stage it.`,
-    'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
-    'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
-    '',
-    'Final line must be exactly one of:',
-    `- ${AUTONOMY_CHUNK_DONE}`,
+    `- ${AUTONOMY_SCOPE_DONE}`,
     `- ${AUTONOMY_DONE}`,
     `- ${AUTONOMY_BLOCKED}`,
   ].join('\n');
@@ -90,7 +70,7 @@ function buildChunkedPrompt(planDoc: string, progressMarkdownPath: string) {
 function extractMarker(message: string) {
   for (const rawLine of message.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (line === AUTONOMY_CHUNK_DONE || line === AUTONOMY_DONE || line === AUTONOMY_BLOCKED) {
+    if (line === AUTONOMY_SCOPE_DONE || line === AUTONOMY_CHUNK_DONE || line === AUTONOMY_DONE || line === AUTONOMY_BLOCKED) {
       return line;
     }
   }
@@ -526,7 +506,7 @@ export async function runClaudePlanReviewRound(args: {
     'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
     'Use non_blocking severity for clarity improvements that do not block execution.',
     'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
-    'Focus on whether the plan is now a clean future execution plan, explicit about one_shot vs chunked mode, and clear about verification and completion.',
+    'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
     `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and Codex responses.`,
     '',
     'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
@@ -569,16 +549,12 @@ export async function runCodexChunkRound(args: {
   cwd: string;
   planDoc: string;
   progressMarkdownPath: string;
-  executionMode: ExecutionMode;
   threadId?: string | null;
   onThreadStarted?: (threadId: string) => void | Promise<void>;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
   const thread = createCodexThread(args.cwd, args.threadId);
-  const prompt =
-    args.executionMode === 'one_shot'
-      ? buildOneShotPrompt(args.planDoc, args.progressMarkdownPath)
-      : buildChunkedPrompt(args.planDoc, args.progressMarkdownPath);
+  const prompt = buildScopePrompt(args.planDoc, args.progressMarkdownPath);
   const streamedTurn = await thread.runStreamed(prompt);
   const finalResponse = await consumeCodexTurn(streamedTurn, args.logger, args.onThreadStarted);
   const marker = extractMarker(finalResponse);
@@ -650,7 +626,7 @@ export async function runCodexResponseRound(args: {
     `Read ${args.progressMarkdownPath} before changing code so you stay on the current implementation scope.`,
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
     'Address the currently open review findings provided below.',
-    'You are still working on the same chunk. Do not start a new chunk.',
+    'You are still working on the same scope. Do not start a new scope.',
     args.verificationHint,
     'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
     'Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.',

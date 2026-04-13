@@ -202,7 +202,7 @@ async function summarizeChangedFiles(state: OrchestrationState) {
 async function renderRetrospective(state: OrchestrationState, kind: RetrospectiveKind) {
   const events = await loadRunEvents(state.runDir);
   const scopeEvents =
-    state.topLevelMode === 'execute' && state.executionMode === 'chunked'
+    state.topLevelMode === 'execute'
       ? getScopeEvents(events, state.currentScopeNumber)
       : events;
   const commands = extractCommands(scopeEvents);
@@ -211,7 +211,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const planName = basename(state.planDoc);
   const outcomeTitle =
     kind === 'chunk_accepted'
-      ? `Chunk ${state.currentScopeNumber} accepted`
+      ? `Scope ${state.currentScopeNumber} accepted`
       : kind === 'blocked'
         ? `Scope ${state.currentScopeNumber} blocked`
         : kind === 'failed'
@@ -230,7 +230,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     '',
     `## Outcome`,
     `- Plan: ${planName}`,
-    `- Mode: ${state.topLevelMode}${state.topLevelMode === 'execute' ? ` / ${state.executionMode}` : ''}`,
+    `- Mode: ${state.topLevelMode}`,
     `- Summary: ${outcomeTitle}`,
     `- Scope: ${state.currentScopeNumber}`,
     `- Status: ${state.status}`,

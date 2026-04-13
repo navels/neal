@@ -10,11 +10,10 @@ import { ClaudeRoundError, CodexRoundError } from './agents.js';
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
 import { showSummaries } from './summaries.js';
-import type { ExecutionMode } from './types.js';
 
 function usage(): never {
-  console.error('Usage: neal --execute [--chunked] <plan-doc>');
-  console.error('   or: neal --plan [--chunked] <plan-doc>');
+  console.error('Usage: neal --execute <plan-doc>');
+  console.error('   or: neal --plan <plan-doc>');
   console.error('   or: neal --resume [state-file]');
   console.error('   or: neal --summaries [runs-dir]');
   process.exit(1);
@@ -66,7 +65,7 @@ function createStopController() {
 
     if (key.name === 'q') {
       stopRequested = true;
-      process.stderr.write('\n[neal] stop requested after the current chunk\n');
+      process.stderr.write('\n[neal] stop requested after the current scope\n');
     }
   };
 
@@ -99,7 +98,6 @@ async function main() {
     return;
   }
 
-  let executionMode: ExecutionMode = 'one_shot';
   let topLevelMode: 'plan' | 'execute' = 'execute';
   let planDoc: string | null = null;
   let resumeStatePath: string | undefined;
@@ -116,7 +114,7 @@ async function main() {
   }
 
   if (args[index] === '--chunked') {
-    executionMode = 'chunked';
+    process.stderr.write('[neal] --chunked is deprecated and now ignored; all execute runs are scope-based\n');
     index += 1;
   }
 
@@ -137,14 +135,14 @@ async function main() {
   }
 
   const resolvedPlanDoc = resumeStatePath ? null : planDoc;
-  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, executionMode, topLevelMode);
+  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, 'scoped', topLevelMode);
   runLogger = logger;
   const stopController = createStopController();
   let lastThreadId: string | null = state.codexThreadId;
   let shouldResumeLastThread = false;
 
   if (process.stdin.isTTY) {
-    process.stderr.write('[neal] press q to stop after the current chunk\n');
+    process.stderr.write('[neal] press q to stop after the current scope\n');
   }
 
   let finalState;
@@ -161,7 +159,6 @@ async function main() {
     });
     shouldResumeLastThread =
       stopController.isStopRequested() &&
-      finalState.executionMode === 'chunked' &&
       finalState.phase === 'codex_chunk' &&
       finalState.status === 'running' &&
       Boolean(lastThreadId);
@@ -177,7 +174,6 @@ async function main() {
         status: finalState.status,
         topLevelMode: finalState.topLevelMode,
         planDoc: finalState.planDoc,
-        executionMode: finalState.executionMode,
         statePath,
         runDir: finalState.runDir,
         progressJsonPath: finalState.progressJsonPath,

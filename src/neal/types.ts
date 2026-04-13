@@ -9,8 +9,8 @@ export type OrchestrationPhase =
   | 'done'
   | 'blocked';
 
-export type ExecutionMode = 'one_shot' | 'chunked';
-export type CodexMarker = 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
+export type ExecutionMode = 'scoped';
+export type CodexMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
 
 export type FindingSeverity = 'blocking' | 'non_blocking';
 export type FindingStatus = 'open' | 'fixed' | 'rejected' | 'deferred';
@@ -42,7 +42,6 @@ export type ReviewRound = {
 
 export type ProgressScope = {
   number: number;
-  kind: 'one_shot' | 'chunk';
   marker: CodexMarker;
   result: 'accepted' | 'blocked';
   baseCommit: string | null;

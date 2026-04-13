@@ -138,9 +138,11 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
 
   return {
     number: typeof scope.number === 'number' ? scope.number : 0,
-    kind: scope.kind === 'one_shot' ? 'one_shot' : 'chunk',
     marker:
-      scope.marker === 'AUTONOMY_CHUNK_DONE' || scope.marker === 'AUTONOMY_DONE' || scope.marker === 'AUTONOMY_BLOCKED'
+      scope.marker === 'AUTONOMY_SCOPE_DONE' ||
+      scope.marker === 'AUTONOMY_CHUNK_DONE' ||
+      scope.marker === 'AUTONOMY_DONE' ||
+      scope.marker === 'AUTONOMY_BLOCKED'
         ? scope.marker
         : 'AUTONOMY_BLOCKED',
     result: scope.result === 'accepted' ? 'accepted' : 'blocked',
@@ -163,14 +165,13 @@ export async function loadState(path: string): Promise<OrchestrationState> {
   const progressJsonPath = typeof parsed.progressJsonPath === 'string' ? parsed.progressJsonPath : join(runDir, 'plan-progress.json');
   const progressMarkdownPath =
     typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(runDir, 'PLAN_PROGRESS.md');
+  const rawExecutionMode = (parsed as { executionMode?: unknown }).executionMode;
   const executionMode =
-    parsed.executionMode === undefined
-      ? 'chunked'
-      : parsed.executionMode === 'one_shot' || parsed.executionMode === 'chunked'
-        ? parsed.executionMode
-        : (() => {
-            throw new Error(`Invalid session state: invalid executionMode ${String(parsed.executionMode)}`);
-          })();
+    rawExecutionMode === undefined || rawExecutionMode === 'one_shot' || rawExecutionMode === 'chunked' || rawExecutionMode === 'scoped'
+      ? 'scoped'
+      : (() => {
+          throw new Error(`Invalid session state: invalid executionMode ${String(rawExecutionMode)}`);
+        })();
   return {
     ...parsed,
     runDir,
@@ -182,7 +183,10 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
     codexRetryCount: typeof parsed.codexRetryCount === 'number' ? parsed.codexRetryCount : 0,
     lastCodexMarker:
-      parsed.lastCodexMarker === 'AUTONOMY_CHUNK_DONE' || parsed.lastCodexMarker === 'AUTONOMY_DONE' || parsed.lastCodexMarker === 'AUTONOMY_BLOCKED'
+      parsed.lastCodexMarker === 'AUTONOMY_SCOPE_DONE' ||
+      parsed.lastCodexMarker === 'AUTONOMY_CHUNK_DONE' ||
+      parsed.lastCodexMarker === 'AUTONOMY_DONE' ||
+      parsed.lastCodexMarker === 'AUTONOMY_BLOCKED'
         ? parsed.lastCodexMarker
         : null,
     rounds: parsed.rounds.map(hydrateRound),

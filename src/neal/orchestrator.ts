@@ -94,7 +94,6 @@ function startPhaseHeartbeat(
       claudeSessionId: state.claudeSessionId,
       currentScopeNumber: state.currentScopeNumber,
       topLevelMode: state.topLevelMode,
-      executionMode: state.executionMode,
     };
     void logger.event('phase.heartbeat', payload);
     writeDiagnostic(
@@ -130,18 +129,14 @@ async function persistCodexFailureState(
   return failedState;
 }
 
-function getCodexCompletionProblem(executionMode: ExecutionMode, marker: string | null) {
+function getCodexCompletionProblem(marker: string | null) {
   if (marker === 'AUTONOMY_BLOCKED') {
     return null;
   }
 
-  if (executionMode === 'one_shot') {
-    return marker === 'AUTONOMY_DONE' ? null : 'One-shot execution must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
-  }
-
-  return marker === 'AUTONOMY_CHUNK_DONE' || marker === 'AUTONOMY_DONE'
+  return marker === 'AUTONOMY_SCOPE_DONE' || marker === 'AUTONOMY_CHUNK_DONE' || marker === 'AUTONOMY_DONE'
     ? null
-    : 'Chunked execution must end with AUTONOMY_CHUNK_DONE, AUTONOMY_DONE, or AUTONOMY_BLOCKED.';
+    : 'Execution must end with AUTONOMY_SCOPE_DONE, AUTONOMY_DONE, or AUTONOMY_BLOCKED.';
 }
 
 function getPlanningCompletionProblem(marker: string | null) {
@@ -160,7 +155,6 @@ async function writeExecutionArtifacts(state: OrchestrationState) {
 export async function initializeOrchestration(
   planDoc: string,
   cwd: string,
-  executionMode: ExecutionMode,
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   const absolutePlanDoc = resolve(planDoc);
@@ -170,7 +164,6 @@ export async function initializeOrchestration(
     stateDir,
     planDoc: absolutePlanDoc,
     topLevelMode,
-    executionMode,
   });
 
   const init: OrchestratorInit = {
@@ -183,7 +176,7 @@ export async function initializeOrchestration(
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
     maxRounds: 3,
-    executionMode,
+    executionMode: 'scoped',
   };
 
   await mkdir(stateDir, { recursive: true });
@@ -200,7 +193,6 @@ export async function initializeOrchestration(
     reviewMarkdownPath: savedState.reviewMarkdownPath,
     progressJsonPath: savedState.progressJsonPath,
     progressMarkdownPath: savedState.progressMarkdownPath,
-    executionMode,
   });
 
   return {
@@ -222,14 +214,14 @@ async function notifyComplete(state: OrchestrationState, message: string, logger
   await notify('complete', `[neal] ${planName}: ${message}`);
 }
 
-async function notifyChunkAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
+async function notifyScopeAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
-  await logger?.event('notify.chunk_complete', {
+  await logger?.event('notify.scope_complete', {
     message,
     planName,
     scopeNumber: state.currentScopeNumber,
   });
-  await notify('complete', `[neal] ${planName}: chunk ${state.currentScopeNumber} complete: ${message}`);
+  await notify('complete', `[neal] ${planName}: scope ${state.currentScopeNumber} complete: ${message}`);
 }
 
 async function notifyRetry(state: OrchestrationState, message: string, logger?: RunLogger) {
@@ -331,7 +323,6 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
-      executionMode: state.executionMode,
       threadId: state.codexThreadId,
       onThreadStarted: async (threadId) => {
         state.codexThreadId = threadId;
@@ -356,7 +347,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   }
   const afterHead = await getHeadCommit(state.cwd);
   const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
-  const completionProblem = getCodexCompletionProblem(state.executionMode, codex.marker);
+  const completionProblem = getCodexCompletionProblem(codex.marker);
 
   const nextState = await saveState(statePath, {
     ...workingState,
@@ -371,7 +362,6 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase: 'codex_chunk',
-    executionMode: state.executionMode,
     marker: codex.marker,
     threadId: codex.threadId,
     createdCommits,
@@ -756,10 +746,6 @@ function mapDecisionToStatus(decision: 'fixed' | 'rejected' | 'deferred'): Findi
   }
 }
 
-function getCurrentScopeKind(state: OrchestrationState): 'one_shot' | 'chunk' {
-  return state.executionMode === 'chunked' ? 'chunk' : 'one_shot';
-}
-
 function appendCompletedScope(
   state: OrchestrationState,
   result: 'accepted' | 'blocked',
@@ -775,7 +761,6 @@ function appendCompletedScope(
     ...state.completedScopes,
     {
       number: state.currentScopeNumber,
-      kind: getCurrentScopeKind(state),
       marker,
       result,
       baseCommit: state.baseCommit,
@@ -1030,10 +1015,10 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     ...archivedReviewState,
     completedScopes,
   };
-  const continueChunked = state.executionMode === 'chunked' && state.lastCodexMarker === 'AUTONOMY_CHUNK_DONE';
+  const continueScopes = state.lastCodexMarker !== 'AUTONOMY_DONE' && state.lastCodexMarker !== 'AUTONOMY_BLOCKED';
   const nextState = await saveState(
     statePath,
-    continueChunked
+    continueScopes
       ? {
           ...state,
           baseCommit: finalCommit,
@@ -1060,8 +1045,8 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   );
 
   await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
-  await writeCheckpointRetrospective(retrospectiveState, continueChunked ? 'chunk_accepted' : 'done');
-  if (continueChunked) {
+  await writeCheckpointRetrospective(retrospectiveState, continueScopes ? 'chunk_accepted' : 'done');
+  if (continueScopes) {
     await writeExecutionArtifacts(nextState);
   } else {
     await writeReviewMarkdown(nextState.reviewMarkdownPath, { ...nextState, finalCommit, archivedReviewPath });
@@ -1071,10 +1056,10 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     phase: 'final_squash',
     finalCommit,
     archivedReviewPath,
-    continueChunked,
+    continueScopes,
   });
-  if (continueChunked) {
-    await notifyChunkAccepted(state, finalSubject, logger);
+  if (continueScopes) {
+    await notifyScopeAccepted(state, finalSubject, logger);
   } else {
     await notifyComplete(nextState, finalSubject, logger);
   }
@@ -1140,7 +1125,7 @@ export async function runOnePass(
 
     if (currentState.phase === 'final_squash') {
       currentState = await runFinalSquashPhase(currentState, statePath, logger);
-      if (currentState.executionMode === 'chunked' && currentState.phase === 'codex_chunk' && currentState.status === 'running') {
+      if (currentState.phase === 'codex_chunk' && currentState.status === 'running') {
         if (options?.shouldStopAfterCurrentScope?.()) {
           await logger?.event('run.paused_after_scope', {
             currentScopeNumber: currentState.currentScopeNumber,
@@ -1172,7 +1157,7 @@ export async function loadOrInitialize(
   planDoc: string | null,
   cwd: string,
   resumeStatePath?: string,
-  executionMode: ExecutionMode = 'one_shot',
+  _executionMode: ExecutionMode = 'scoped',
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   if (resumeStatePath) {
@@ -1182,7 +1167,6 @@ export async function loadOrInitialize(
       stateDir: dirname(resumeStatePath),
       planDoc: state.planDoc,
       topLevelMode: state.topLevelMode,
-      executionMode: state.executionMode,
       runDir: state.runDir,
       resumedFromStatePath: resumeStatePath,
     });
@@ -1211,5 +1195,5 @@ export async function loadOrInitialize(
     }
   }
 
-  return initializeOrchestration(planDoc, cwd, executionMode, topLevelMode);
+  return initializeOrchestration(planDoc, cwd, topLevelMode);
 }
