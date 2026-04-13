@@ -65,7 +65,7 @@ Claude review rounds now emit progress to stderr and fail with a clear inactivit
 
 Codex turns now get the same treatment. If a Codex streamed turn goes silent for too long, `neal` fails the run with the current thread id instead of hanging indefinitely. Override the default 10-minute Codex inactivity timeout with `CODEX_INACTIVITY_TIMEOUT_MS`. You can also tune wrapper heartbeat logging with `NEAL_PHASE_HEARTBEAT_MS`; set it to `0` to disable phase heartbeats entirely.
 
-For review quality, `neal` uses a hybrid diff strategy: smaller diffs are inlined directly into Claude’s prompt, while larger diffs fall back to diff stat plus changed-file guidance so Claude can inspect files with `Read`, `Grep`, and `Glob` instead of relying on a truncated patch.
+For review quality, `neal` gives Claude the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. Claude is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
 
 Each `neal` run also writes persistent diagnostics under `.neal/runs/<timestamp>-<id>/`:
 
@@ -81,12 +81,6 @@ During execution, `neal` also maintains in that same run directory:
 - `PLAN_PROGRESS.md`: rendered human-readable burndown state
 
 Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state under the active `.neal/runs/...` directory, and exits once Claude review converges or blocks.
-
-If you want to force the large-diff fallback path during local validation, lower the inline file threshold:
-
-```bash
-CLAUDE_INLINE_DIFF_FILE_LIMIT=1 neal --execute --chunked notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
-```
 
 ## Notifications
 

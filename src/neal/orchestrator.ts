@@ -12,7 +12,7 @@ import {
   runCodexPlanRound,
   runCodexResponseRound,
 } from './agents.js';
-import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
+import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
@@ -20,7 +20,6 @@ import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
-const MAX_INLINE_DIFF_FILES = Number(process.env.CLAUDE_INLINE_DIFF_FILE_LIMIT ?? 40);
 const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
 
 function writeDiagnostic(message: string, logger?: RunLogger) {
@@ -371,9 +370,9 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
   const headCommit = await getHeadCommit(state.cwd);
   const round = state.rounds.length + 1;
   const previousHeadCommit = state.rounds.at(-1)?.commitRange.head ?? null;
+  const commits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
   const diffStat = await getDiffStatForRange(state.cwd, state.baseCommit, headCommit);
   const changedFiles = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
-  const diff = changedFiles.length <= MAX_INLINE_DIFF_FILES ? await getDiffForRange(state.cwd, state.baseCommit, headCommit) : '';
   let claude;
   try {
     claude = await runClaudeReviewRound({
@@ -381,8 +380,8 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
       planDoc: state.planDoc,
       baseCommit: state.baseCommit,
       headCommit,
+      commits,
       previousHeadCommit,
-      diff,
       diffStat,
       changedFiles,
       round,
@@ -740,12 +739,13 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
-      reviewMarkdownPath: state.reviewMarkdownPath,
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
         claim: finding.claim,
         requiredAction: finding.requiredAction,
         severity: finding.severity,
+        files: finding.files,
+        roundSummary: finding.roundSummary,
       })),
       threadId: state.codexThreadId,
       logger,
@@ -829,12 +829,13 @@ async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: s
     codex = await runCodexPlanResponseRound({
       cwd: state.cwd,
       planDoc: state.planDoc,
-      reviewMarkdownPath: state.reviewMarkdownPath,
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
         claim: finding.claim,
         requiredAction: finding.requiredAction,
         severity: finding.severity,
+        files: finding.files,
+        roundSummary: finding.roundSummary,
       })),
       threadId: state.codexThreadId,
       logger,

@@ -65,14 +65,6 @@ export async function getCommitRange(cwd: string, base: string, head: string) {
   return output ? output.split('\n').filter(Boolean) : [];
 }
 
-export async function getDiffForRange(cwd: string, base: string, head: string) {
-  if (base === head) {
-    return '';
-  }
-
-  return runGit(['diff', '--stat', '--patch', `${base}..${head}`], cwd);
-}
-
 export async function getDiffStatForRange(cwd: string, base: string, head: string) {
   if (base === head) {
     return '';

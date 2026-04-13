@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { Codex, type Thread } from '@openai/codex-sdk';
 
@@ -13,8 +11,6 @@ const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_IN
 const DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS = Number(process.env.CODEX_INACTIVITY_TIMEOUT_MS ?? 600_000);
 const DEFAULT_CLAUDE_MAX_TURNS = Number(process.env.CLAUDE_REVIEW_MAX_TURNS ?? 100);
 const DEFAULT_CLAUDE_CONTINUATION_LIMIT = Number(process.env.CLAUDE_REVIEW_CONTINUATION_LIMIT ?? 2);
-const INLINE_CLAUDE_DIFF_LIMIT = 120_000;
-
 function buildPlanningPrompt(planDoc: string) {
   return [
     `Rewrite the draft plan document at ${planDoc} into a future execution plan for neal.`,
@@ -400,27 +396,16 @@ export async function runClaudeReviewRound(args: {
   planDoc: string;
   baseCommit: string;
   headCommit: string;
+  commits: string[];
   previousHeadCommit?: string | null;
-  diff: string;
   diffStat: string;
   changedFiles: string[];
   round: number;
   reviewMarkdownPath: string;
   logger?: RunLogger;
 }): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'codexDisposition' | 'codexCommit'>[] }> {
-  const shouldInlineDiff = args.diff.length <= INLINE_CLAUDE_DIFF_LIMIT;
   const changedFilesText = args.changedFiles.length > 0 ? args.changedFiles.join('\n') : '(no changed files)';
-
-  if (!shouldInlineDiff) {
-    writeDiagnostic(
-      `[claude:review] using tool-based diff fallback for ${args.changedFiles.length} files; inline diff skipped\n`,
-      args.logger,
-    );
-    void args.logger?.event('claude.review_diff_fallback', {
-      changedFiles: args.changedFiles.length,
-      inlineDiffLimit: INLINE_CLAUDE_DIFF_LIMIT,
-    });
-  }
+  const commitsText = args.commits.length > 0 ? args.commits.join('\n') : '(no commits recorded)';
 
   const schema = {
     type: 'object',
@@ -449,15 +434,18 @@ export async function runClaudeReviewRound(args: {
     `Review the codex chunk for plan ${args.planDoc}.`,
     `Review round: ${args.round}.`,
     `Commit range: ${args.baseCommit}..${args.headCommit}.`,
+    'Review that commit range directly with repository tools. The commit range is the source of truth for this review.',
     '',
     'Produce only structured review findings.',
     'Use blocking severity for correctness, regression, or missing-verification issues.',
     'Use non_blocking severity for suggestions that do not block acceptance.',
     'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
-    `Read ${args.reviewMarkdownPath} before finalizing your findings so you can inspect prior review history and Codex responses.`,
     args.previousHeadCommit
       ? `Previous Claude review head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
       : 'This is the first Claude review round for this chunk.',
+    '',
+    'Commits in scope:',
+    commitsText,
     '',
     'Diff stat:',
     args.diffStat || '(no diff stat)',
@@ -465,12 +453,7 @@ export async function runClaudeReviewRound(args: {
     'Changed files:',
     changedFilesText,
     '',
-    ...(shouldInlineDiff
-      ? ['Git diff for review:', args.diff || '(no diff)']
-      : [
-          'The full patch is too large to inline safely.',
-          'Use the changed file list, diff stat, the review markdown path, and repository tools to inspect the relevant files directly before finalizing findings.',
-        ]),
+    `Prior review history is available at ${args.reviewMarkdownPath} if you need earlier Claude findings or Codex responses, but review the current commit range directly.`,
   ].join('\n');
 
   const { sessionId, structured } = await runClaudeStructuredRound({
@@ -620,12 +603,10 @@ export async function runCodexResponseRound(args: {
   cwd: string;
   planDoc: string;
   progressMarkdownPath: string;
-  reviewMarkdownPath: string;
-  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity'>[];
+  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   threadId: string;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
-  const reviewMarkdown = await readFile(args.reviewMarkdownPath, 'utf8');
   const thread = createCodexThread(args.cwd, args.threadId);
 
   const schema = {
@@ -657,7 +638,7 @@ export async function runCodexResponseRound(args: {
     '',
     `Read ${args.progressMarkdownPath} before changing code so you stay on the current implementation scope.`,
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
-    `Read ${args.reviewMarkdownPath} and address the currently open review findings.`,
+    'Address the currently open review findings provided below.',
     'You are still working on the same chunk. Do not start a new chunk.',
     'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
     'Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.',
@@ -668,9 +649,6 @@ export async function runCodexResponseRound(args: {
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),
-    '',
-    'Current review markdown:',
-    reviewMarkdown,
   ].join('\n');
 
   const streamedTurn = await thread.runStreamed(prompt, {
@@ -688,12 +666,10 @@ export async function runCodexResponseRound(args: {
 export async function runCodexPlanResponseRound(args: {
   cwd: string;
   planDoc: string;
-  reviewMarkdownPath: string;
-  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity'>[];
+  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   threadId: string;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
-  const reviewMarkdown = await readFile(args.reviewMarkdownPath, 'utf8');
   const thread = createCodexThread(args.cwd, args.threadId);
 
   const schema = {
@@ -723,7 +699,7 @@ export async function runCodexPlanResponseRound(args: {
   const prompt = [
     `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
     '',
-    `Read ${args.reviewMarkdownPath} and address the currently open review findings.`,
+    'Address the currently open review findings provided below.',
     'Edit only the plan document and directly related planning artifacts.',
     'Do not edit runtime source code.',
     'Do not make git commits.',
@@ -738,9 +714,6 @@ export async function runCodexPlanResponseRound(args: {
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),
-    '',
-    'Current review markdown:',
-    reviewMarkdown,
   ].join('\n');
 
   const streamedTurn = await thread.runStreamed(prompt, {

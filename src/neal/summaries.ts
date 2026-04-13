@@ -19,6 +19,8 @@ async function collectSummaryFiles(rootDir: string): Promise<SummaryFile[]> {
 
     const runDir = join(rootDir, entry.name);
     const runFiles = await readdir(runDir, { withFileTypes: true });
+    const archivedFiles: SummaryFile[] = [];
+    let currentFile: SummaryFile | null = null;
     for (const runFile of runFiles) {
       if (!runFile.isFile()) {
         continue;
@@ -29,10 +31,22 @@ async function collectSummaryFiles(rootDir: string): Promise<SummaryFile[]> {
       }
 
       const filePath = join(runDir, runFile.name);
-      files.push({
+      const summaryFile = {
         path: filePath,
         relativePath: relative(rootDir, filePath),
-      });
+      };
+
+      if (runFile.name === 'RETROSPECTIVE.md') {
+        currentFile = summaryFile;
+      } else {
+        archivedFiles.push(summaryFile);
+      }
+    }
+
+    if (archivedFiles.length > 0) {
+      files.push(...archivedFiles);
+    } else if (currentFile) {
+      files.push(currentFile);
     }
   }
 
