@@ -710,6 +710,26 @@ function appendCompletedScope(
   ];
 }
 
+function buildVerificationHint(state: OrchestrationState) {
+  const latestRound = state.rounds.at(-1);
+  if (!latestRound) {
+    return [
+      'Verification state hint from neal:',
+      '- No prior Claude review round exists for this chunk yet.',
+      '- Choose verification based on the plan and the concrete changes you make.',
+      '- Prefer focused reruns during active fixes. Reserve full-suite reruns for the final gate or for changes that materially invalidate earlier verification.',
+    ].join('\n');
+  }
+
+  return [
+    'Verification state hint from neal:',
+    `- This chunk already reached Claude review for commit range ${latestRound.commitRange.base}..${latestRound.commitRange.head}.`,
+    '- Treat that reviewed head as the current verified baseline unless you find concrete contrary evidence in the repository or review history.',
+    '- Prefer focused reruns while addressing review findings.',
+    '- Rerun full OSL and Portal suites only if your new changes materially invalidate that reviewed baseline or the plan explicitly requires new end-of-chunk full-suite verification.',
+  ].join('\n');
+}
+
 async function runCodexResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   if (!state.codexThreadId) {
     throw new Error('Cannot run Codex response phase without an existing Codex thread');
@@ -739,6 +759,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
+      verificationHint: buildVerificationHint(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
         claim: finding.claim,

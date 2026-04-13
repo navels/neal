@@ -439,6 +439,9 @@ export async function runClaudeReviewRound(args: {
     'Produce only structured review findings.',
     'Use blocking severity for correctness, regression, or missing-verification issues.',
     'Use non_blocking severity for suggestions that do not block acceptance.',
+    'Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.',
+    'Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.',
+    'If the chunk is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
     'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
     args.previousHeadCommit
       ? `Previous Claude review head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
@@ -603,6 +606,7 @@ export async function runCodexResponseRound(args: {
   cwd: string;
   planDoc: string;
   progressMarkdownPath: string;
+  verificationHint: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   threadId: string;
   logger?: RunLogger;
@@ -640,6 +644,7 @@ export async function runCodexResponseRound(args: {
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
     'Address the currently open review findings provided below.',
     'You are still working on the same chunk. Do not start a new chunk.',
+    args.verificationHint,
     'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
     'Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
