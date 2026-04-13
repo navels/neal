@@ -288,7 +288,7 @@ function isCodexTimeoutError(error: CodexRoundError) {
   return /\btimed out after\b/i.test(error.message);
 }
 
-function shouldRetryCodexTimeout(state: OrchestrationState, phase: 'codex_chunk' | 'codex_response', error: CodexRoundError) {
+function shouldRetryCodexTimeout(state: OrchestrationState, error: CodexRoundError) {
   return state.topLevelMode === 'execute' && isCodexTimeoutError(error) && state.codexRetryCount < 1;
 }
 
@@ -344,12 +344,12 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
-      if (shouldRetryCodexTimeout(workingState, 'codex_chunk', error)) {
+      if (shouldRetryCodexTimeout(workingState, error)) {
         return scheduleCodexTimeoutRetry(workingState, statePath, 'codex_chunk', error, logger);
       }
-      await persistCodexFailureState(workingState, statePath, 'codex_chunk', error, logger);
+      const failedState = await persistCodexFailureState(workingState, statePath, 'codex_chunk', error, logger);
       if (isCodexTimeoutError(error)) {
-        await notifyBlocked(workingState, error.message, logger);
+        await notifyBlocked(failedState, error.message, logger);
       }
     }
     throw error;
@@ -848,12 +848,12 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
-      if (shouldRetryCodexTimeout(state, 'codex_response', error)) {
+      if (shouldRetryCodexTimeout(state, error)) {
         return scheduleCodexTimeoutRetry(state, statePath, 'codex_response', error, logger);
       }
-      await persistCodexFailureState(state, statePath, 'codex_response', error, logger);
+      const failedState = await persistCodexFailureState(state, statePath, 'codex_response', error, logger);
       if (isCodexTimeoutError(error)) {
-        await notifyBlocked(state, error.message, logger);
+        await notifyBlocked(failedState, error.message, logger);
       }
     }
     throw error;
