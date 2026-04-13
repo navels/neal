@@ -7,7 +7,7 @@ import {
   CodexRoundError,
   runClaudePlanReviewRound,
   runClaudeReviewRound,
-  runCodexChunkRound,
+  runCodexScopeRound,
   runCodexPlanResponseRound,
   runCodexPlanRound,
   runCodexResponseRound,
@@ -18,7 +18,7 @@ import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
-import type { CodexMarker, ExecutionMode, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
+import type { CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
 
@@ -110,7 +110,7 @@ function startPhaseHeartbeat(
 async function persistCodexFailureState(
   state: OrchestrationState,
   statePath: string,
-  phase: 'codex_chunk' | 'codex_plan' | 'codex_response' | 'codex_plan_response',
+  phase: 'codex_scope' | 'codex_plan' | 'codex_response' | 'codex_plan_response',
   error: CodexRoundError,
   logger?: RunLogger,
 ) {
@@ -176,7 +176,6 @@ export async function initializeOrchestration(
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
     maxRounds: 3,
-    executionMode: 'scoped',
   };
 
   await mkdir(stateDir, { recursive: true });
@@ -287,7 +286,7 @@ function shouldRetryCodexTimeout(state: OrchestrationState, error: CodexRoundErr
 async function scheduleCodexTimeoutRetry(
   state: OrchestrationState,
   statePath: string,
-  phase: 'codex_chunk' | 'codex_response',
+  phase: 'codex_scope' | 'codex_response',
   error: CodexRoundError,
   logger?: RunLogger,
 ) {
@@ -314,12 +313,12 @@ async function scheduleCodexTimeoutRetry(
 }
 
 async function runCodexPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  await logger?.event('phase.start', { phase: 'codex_chunk' });
+  await logger?.event('phase.start', { phase: 'codex_scope' });
   const beforeHead = await getHeadCommit(state.cwd);
   let workingState = state;
   let codex;
   try {
-    codex = await runCodexChunkRound({
+    codex = await runCodexScopeRound({
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
@@ -336,9 +335,9 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   } catch (error) {
     if (error instanceof CodexRoundError) {
       if (shouldRetryCodexTimeout(workingState, error)) {
-        return scheduleCodexTimeoutRetry(workingState, statePath, 'codex_chunk', error, logger);
+        return scheduleCodexTimeoutRetry(workingState, statePath, 'codex_scope', error, logger);
       }
-      const failedState = await persistCodexFailureState(workingState, statePath, 'codex_chunk', error, logger);
+      const failedState = await persistCodexFailureState(workingState, statePath, 'codex_scope', error, logger);
       if (isCodexTimeoutError(error)) {
         await notifyBlocked(failedState, error.message, logger);
       }
@@ -361,14 +360,14 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
 
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
-    phase: 'codex_chunk',
+    phase: 'codex_scope',
     marker: codex.marker,
     threadId: codex.threadId,
     createdCommits,
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked') {
-    const reason = completionProblem ?? 'Codex reported a blocker during chunk execution';
+    const reason = completionProblem ?? 'Codex reported a blocker during scope execution';
     const persistedState = await persistBlockedScope(nextState, statePath, reason);
     await notifyBlocked(
       persistedState,
@@ -779,7 +778,7 @@ function buildVerificationHint(state: OrchestrationState) {
   if (!latestRound) {
     return [
       'Verification state hint from neal:',
-      '- No prior Claude review round exists for this chunk yet.',
+      '- No prior Claude review round exists for this scope yet.',
       '- Choose verification based on the plan and the concrete changes you make.',
       '- Prefer focused reruns during active fixes. Reserve full-suite reruns for the final gate or for changes that materially invalidate earlier verification.',
     ].join('\n');
@@ -787,10 +786,10 @@ function buildVerificationHint(state: OrchestrationState) {
 
   return [
     'Verification state hint from neal:',
-    `- This chunk already reached Claude review for commit range ${latestRound.commitRange.base}..${latestRound.commitRange.head}.`,
+    `- This scope already reached Claude review for commit range ${latestRound.commitRange.base}..${latestRound.commitRange.head}.`,
     '- Treat that reviewed head as the current verified baseline unless you find concrete contrary evidence in the repository or review history.',
     '- Prefer focused reruns while addressing review findings.',
-    '- Rerun full OSL and Portal suites only if your new changes materially invalidate that reviewed baseline or the plan explicitly requires new end-of-chunk full-suite verification.',
+    '- Rerun full OSL and Portal suites only if your new changes materially invalidate that reviewed baseline or the plan explicitly requires new end-of-scope full-suite verification.',
   ].join('\n');
 }
 
@@ -990,9 +989,9 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   const latestCreatedCommit = state.createdCommits.at(-1) ?? null;
   const rawFinalMessage = latestCreatedCommit
     ? await getCommitMessage(state.cwd, latestCreatedCommit)
-    : commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize chunk work';
+    : commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize scope work';
   const finalMessage = normalizeFinalCommitMessage(rawFinalMessage);
-  const finalSubject = finalMessage.split(/\r?\n/, 1)[0] || 'Finalize chunk work';
+  const finalSubject = finalMessage.split(/\r?\n/, 1)[0] || 'Finalize scope work';
   const finalCommit =
     state.createdCommits.length > 0
       ? await squashCommits(state.cwd, state.baseCommit, finalMessage)
@@ -1031,7 +1030,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
           createdCommits: [],
           completedScopes,
           archivedReviewPath: null,
-          phase: 'codex_chunk',
+          phase: 'codex_scope',
           status: 'running',
         }
       : {
@@ -1045,7 +1044,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
   );
 
   await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
-  await writeCheckpointRetrospective(retrospectiveState, continueScopes ? 'chunk_accepted' : 'done');
+  await writeCheckpointRetrospective(retrospectiveState, continueScopes ? 'scope_accepted' : 'done');
   if (continueScopes) {
     await writeExecutionArtifacts(nextState);
   } else {
@@ -1082,7 +1081,7 @@ export async function runOnePass(
     currentState.phase === 'codex_plan' ||
     currentState.phase === 'claude_plan_review' ||
     currentState.phase === 'codex_plan_response' ||
-    currentState.phase === 'codex_chunk' ||
+    currentState.phase === 'codex_scope' ||
     currentState.phase === 'claude_review' ||
     currentState.phase === 'codex_response' ||
     currentState.phase === 'final_squash'
@@ -1106,7 +1105,7 @@ export async function runOnePass(
       continue;
     }
 
-    if (currentState.phase === 'codex_chunk') {
+    if (currentState.phase === 'codex_scope') {
       currentState = await runCodexPhase(currentState, statePath, logger);
       options?.onCodexThread?.(currentState.codexThreadId);
       continue;
@@ -1125,7 +1124,7 @@ export async function runOnePass(
 
     if (currentState.phase === 'final_squash') {
       currentState = await runFinalSquashPhase(currentState, statePath, logger);
-      if (currentState.phase === 'codex_chunk' && currentState.status === 'running') {
+      if (currentState.phase === 'codex_scope' && currentState.status === 'running') {
         if (options?.shouldStopAfterCurrentScope?.()) {
           await logger?.event('run.paused_after_scope', {
             currentScopeNumber: currentState.currentScopeNumber,
@@ -1157,7 +1156,6 @@ export async function loadOrInitialize(
   planDoc: string | null,
   cwd: string,
   resumeStatePath?: string,
-  _executionMode: ExecutionMode = 'scoped',
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   if (resumeStatePath) {
@@ -1190,7 +1188,7 @@ export async function loadOrInitialize(
     const statusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(cwd));
     if (statusOutput) {
       throw new Error(
-        `Cannot start neal --execute with a dirty worktree:\n${statusOutput}\n\nUse neal --resume for in-progress chunk work.`,
+        `Cannot start neal --execute with a dirty worktree:\n${statusOutput}\n\nUse neal --resume for in-progress scope work.`,
       );
     }
   }

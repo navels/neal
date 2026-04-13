@@ -113,11 +113,6 @@ async function main() {
     index += 1;
   }
 
-  if (args[index] === '--chunked') {
-    process.stderr.write('[neal] --chunked is deprecated and now ignored; all execute runs are scope-based\n');
-    index += 1;
-  }
-
   const firstArg = args[index];
   if (!firstArg) {
     usage();
@@ -135,7 +130,7 @@ async function main() {
   }
 
   const resolvedPlanDoc = resumeStatePath ? null : planDoc;
-  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, 'scoped', topLevelMode);
+  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, topLevelMode);
   runLogger = logger;
   const stopController = createStopController();
   let lastThreadId: string | null = state.codexThreadId;
@@ -159,7 +154,7 @@ async function main() {
     });
     shouldResumeLastThread =
       stopController.isStopRequested() &&
-      finalState.phase === 'codex_chunk' &&
+      finalState.phase === 'codex_scope' &&
       finalState.status === 'running' &&
       Boolean(lastThreadId);
   } finally {

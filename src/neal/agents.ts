@@ -416,7 +416,7 @@ export async function runClaudeReviewRound(args: {
   } as const;
 
   const prompt = [
-    `Review the codex chunk for plan ${args.planDoc}.`,
+    `Review the codex scope for plan ${args.planDoc}.`,
     `Review round: ${args.round}.`,
     `Commit range: ${args.baseCommit}..${args.headCommit}.`,
     'Review that commit range directly with repository tools. The commit range is the source of truth for this review.',
@@ -426,11 +426,11 @@ export async function runClaudeReviewRound(args: {
     'Use non_blocking severity for suggestions that do not block acceptance.',
     'Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.',
     'Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.',
-    'If the chunk is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
+    'If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
     'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
     args.previousHeadCommit
       ? `Previous Claude review head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
-      : 'This is the first Claude review round for this chunk.',
+      : 'This is the first Claude review round for this scope.',
     '',
     'Commits in scope:',
     commitsText,
@@ -545,7 +545,7 @@ function createCodexThread(cwd: string, threadId?: string | null): Thread {
       });
 }
 
-export async function runCodexChunkRound(args: {
+export async function runCodexScopeRound(args: {
   cwd: string;
   planDoc: string;
   progressMarkdownPath: string;
@@ -631,7 +631,7 @@ export async function runCodexResponseRound(args: {
     'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
     'Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
-    'Use `deferred` only when the finding is real but not safe to resolve inside this chunk.',
+    'Use `deferred` only when the finding is real but not safe to resolve inside this scope.',
     'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
     'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.',
     '',

@@ -4,10 +4,10 @@ Run a reviewed autonomous implementation loop from a standalone Node.js tool.
 
 ## What it does
 
-- Starts a fresh Codex thread for each chunk
-- Tells Codex to reread the plan doc and execute exactly one chunk
+- Starts a fresh Codex thread for each scope
+- Tells Codex to reread the plan doc and execute exactly one scope
 - Treats “blocked” as a wrapper-level stop condition and requires an exact blocker report
-- Streams the chunk output to stdout while the turn runs
+- Streams the scope output to stdout while the turn runs
 - Parses the terminal `AUTONOMY_*` marker from the final assistant message
 - Sends local notifications implemented in this project
 - Retries transient Codex transport and generic `exec code 1` failures with backoff
@@ -56,11 +56,11 @@ Execution semantics:
 - `neal --summaries [runs-dir]` pages through retrospective reports written under `.neal/runs`
 - after an accepted scope, `neal` continues into the next scope automatically when the marker is `AUTONOMY_SCOPE_DONE` (or legacy `AUTONOMY_CHUNK_DONE`) until the plan completes or blocks
 
-Fresh `neal --execute ...` runs require a clean worktree. If a chunk was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run.
+Fresh `neal --execute ...` runs require a clean worktree. If a scope was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run.
 
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 
-`neal` also writes wrapper-generated retrospectives into the run directory. `RETROSPECTIVE.md` always reflects the latest accepted chunk, blocked stop, or completed plan, and checkpoint-specific archives are written alongside it so you can inspect whether the review loop is adding value or exposing inefficiencies.
+`neal` also writes wrapper-generated retrospectives into the run directory. `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, and checkpoint-specific archives are written alongside it so you can inspect whether the review loop is adding value or exposing inefficiencies.
 
 Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Claude review sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, and `neal` will continue the same Claude session up to `2` times by default when it hits `error_max_turns` before returning structured findings. Override that continuation limit with `CLAUDE_REVIEW_CONTINUATION_LIMIT`.
 
@@ -95,4 +95,4 @@ Override that command with `AUTONOMY_NOTIFY_BIN` if your local setup differs.
 
 ## Retry Behavior
 
-Transient Codex failures are retried on the same thread with exponential backoff. Recovery turns tell Codex to reread the plan, inspect repo state, and avoid doing a second chunk if the interrupted turn already finished.
+Transient Codex failures are retried on the same thread with exponential backoff. Recovery turns tell Codex to reread the plan, inspect repo state, and avoid doing a second scope if the interrupted turn already finished.

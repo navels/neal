@@ -10,7 +10,7 @@ type RunEvent = {
   data?: Record<string, unknown>;
 };
 
-type RetrospectiveKind = 'chunk_accepted' | 'blocked' | 'failed' | 'done';
+type RetrospectiveKind = 'scope_accepted' | 'blocked' | 'failed' | 'done';
 
 function getEventsPath(runDir: string) {
   return join(runDir, 'events.ndjson');
@@ -21,9 +21,9 @@ function getCurrentRetrospectivePath(runDir: string) {
 }
 
 function getArchivedRetrospectivePath(state: OrchestrationState, kind: RetrospectiveKind) {
-  if (kind === 'chunk_accepted') {
+  if (kind === 'scope_accepted') {
     const suffix = state.finalCommit ? `-${state.finalCommit}` : '';
-    return join(state.runDir, `RETROSPECTIVE-chunk-${state.currentScopeNumber}${suffix}.md`);
+    return join(state.runDir, `RETROSPECTIVE-scope-${state.currentScopeNumber}${suffix}.md`);
   }
 
   if (kind === 'blocked') {
@@ -52,7 +52,7 @@ async function loadRunEvents(runDir: string): Promise<RunEvent[]> {
 
 function getScopeEvents(events: RunEvent[], scopeNumber: number) {
   const scopeStartIndexes = events.reduce<number[]>((indexes, event, index) => {
-    if (event.type === 'phase.start' && event.data?.phase === 'codex_chunk') {
+    if (event.type === 'phase.start' && event.data?.phase === 'codex_scope') {
       indexes.push(index);
     }
     return indexes;
@@ -131,11 +131,11 @@ function buildAssessment(state: OrchestrationState, scopeEvents: RunEvent[]) {
   }
 
   if (state.rounds.length > 1) {
-    assessments.push(`- The review loop required ${state.rounds.length} passes. This chunk may be slightly too broad or under-specified.`);
+    assessments.push(`- The review loop required ${state.rounds.length} passes. This scope may be slightly too broad or under-specified.`);
   }
 
   if (state.createdCommits.length > 1) {
-    assessments.push(`- Codex created ${state.createdCommits.length} commits before final squash. That suggests rework during the chunk, which may be acceptable but is worth watching.`);
+    assessments.push(`- Codex created ${state.createdCommits.length} commits before final squash. That suggests rework during the scope, which may be acceptable but is worth watching.`);
   }
 
   if (continuationCount > 0) {
@@ -210,7 +210,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const dispositions = countDispositions(state);
   const planName = basename(state.planDoc);
   const outcomeTitle =
-    kind === 'chunk_accepted'
+    kind === 'scope_accepted'
       ? `Scope ${state.currentScopeNumber} accepted`
       : kind === 'blocked'
         ? `Scope ${state.currentScopeNumber} blocked`

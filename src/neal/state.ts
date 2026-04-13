@@ -15,10 +15,9 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     cwd: init.cwd,
     runDir: init.runDir,
     topLevelMode: init.topLevelMode,
-    executionMode: init.executionMode,
     progressJsonPath: init.progressJsonPath,
     progressMarkdownPath: init.progressMarkdownPath,
-    phase: init.topLevelMode === 'plan' ? 'codex_plan' : 'codex_chunk',
+    phase: init.topLevelMode === 'plan' ? 'codex_plan' : 'codex_scope',
     createdAt: now,
     updatedAt: now,
     reviewMarkdownPath: init.reviewMarkdownPath,
@@ -165,20 +164,14 @@ export async function loadState(path: string): Promise<OrchestrationState> {
   const progressJsonPath = typeof parsed.progressJsonPath === 'string' ? parsed.progressJsonPath : join(runDir, 'plan-progress.json');
   const progressMarkdownPath =
     typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(runDir, 'PLAN_PROGRESS.md');
-  const rawExecutionMode = (parsed as { executionMode?: unknown }).executionMode;
-  const executionMode =
-    rawExecutionMode === undefined || rawExecutionMode === 'one_shot' || rawExecutionMode === 'chunked' || rawExecutionMode === 'scoped'
-      ? 'scoped'
-      : (() => {
-          throw new Error(`Invalid session state: invalid executionMode ${String(rawExecutionMode)}`);
-        })();
+  const rawPhase = (parsed as { phase?: unknown }).phase;
   return {
     ...parsed,
     runDir,
     topLevelMode: parsed.topLevelMode === 'plan' ? 'plan' : 'execute',
     progressJsonPath,
     progressMarkdownPath,
-    executionMode,
+    phase: rawPhase === 'codex_chunk' ? 'codex_scope' : parsed.phase,
     claudeSessionId: typeof parsed.claudeSessionId === 'string' ? parsed.claudeSessionId : null,
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
     codexRetryCount: typeof parsed.codexRetryCount === 'number' ? parsed.codexRetryCount : 0,

@@ -2,14 +2,13 @@ export type OrchestrationPhase =
   | 'codex_plan'
   | 'claude_plan_review'
   | 'codex_plan_response'
-  | 'codex_chunk'
+  | 'codex_scope'
   | 'claude_review'
   | 'codex_response'
   | 'final_squash'
   | 'done'
   | 'blocked';
 
-export type ExecutionMode = 'scoped';
 export type CodexMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
 
 export type FindingSeverity = 'blocking' | 'non_blocking';
@@ -59,7 +58,6 @@ export type OrchestrationState = {
   cwd: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';
-  executionMode: ExecutionMode;
   progressJsonPath: string;
   progressMarkdownPath: string;
   phase: OrchestrationPhase;
@@ -92,5 +90,4 @@ export type OrchestratorInit = {
   progressMarkdownPath: string;
   reviewMarkdownPath: string;
   maxRounds: number;
-  executionMode: ExecutionMode;
 };
