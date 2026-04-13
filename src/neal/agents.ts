@@ -103,7 +103,11 @@ function writeDiagnostic(message: string, logger?: RunLogger) {
   void logger?.stderr(message);
 }
 
-async function consumeCodexTurn(turn: Awaited<ReturnType<Thread['runStreamed']>>, logger?: RunLogger) {
+async function consumeCodexTurn(
+  turn: Awaited<ReturnType<Thread['runStreamed']>>,
+  logger?: RunLogger,
+  onThreadStarted?: (threadId: string) => void | Promise<void>,
+) {
   let finalResponse = '';
   let fatalError: string | null = null;
   let threadId: string | null = null;
@@ -127,6 +131,7 @@ async function consumeCodexTurn(turn: Awaited<ReturnType<Thread['runStreamed']>>
         threadId = event.thread_id;
         writeDiagnostic(`[codex] thread ${event.thread_id}\n`, logger);
         void logger?.event('codex.thread_started', { threadId: event.thread_id });
+        await onThreadStarted?.(event.thread_id);
         break;
       case 'item.completed':
         if (event.item.type === 'command_execution') {
@@ -566,6 +571,7 @@ export async function runCodexChunkRound(args: {
   progressMarkdownPath: string;
   executionMode: ExecutionMode;
   threadId?: string | null;
+  onThreadStarted?: (threadId: string) => void | Promise<void>;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
   const thread = createCodexThread(args.cwd, args.threadId);
@@ -574,7 +580,7 @@ export async function runCodexChunkRound(args: {
       ? buildOneShotPrompt(args.planDoc, args.progressMarkdownPath)
       : buildChunkedPrompt(args.planDoc, args.progressMarkdownPath);
   const streamedTurn = await thread.runStreamed(prompt);
-  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger, args.onThreadStarted);
   const marker = extractMarker(finalResponse);
 
   return {
@@ -588,11 +594,12 @@ export async function runCodexPlanRound(args: {
   cwd: string;
   planDoc: string;
   threadId?: string | null;
+  onThreadStarted?: (threadId: string) => void | Promise<void>;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
   const thread = createCodexThread(args.cwd, args.threadId);
   const streamedTurn = await thread.runStreamed(buildPlanningPrompt(args.planDoc));
-  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger, args.onThreadStarted);
   const marker = extractMarker(finalResponse);
 
   return {

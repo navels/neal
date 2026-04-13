@@ -10,7 +10,7 @@ type RunEvent = {
   data?: Record<string, unknown>;
 };
 
-type RetrospectiveKind = 'chunk_accepted' | 'blocked' | 'done';
+type RetrospectiveKind = 'chunk_accepted' | 'blocked' | 'failed' | 'done';
 
 function getEventsPath(runDir: string) {
   return join(runDir, 'events.ndjson');
@@ -28,6 +28,10 @@ function getArchivedRetrospectivePath(state: OrchestrationState, kind: Retrospec
 
   if (kind === 'blocked') {
     return join(state.runDir, `RETROSPECTIVE-blocked-scope-${state.currentScopeNumber}.md`);
+  }
+
+  if (kind === 'failed') {
+    return join(state.runDir, `RETROSPECTIVE-failed-scope-${state.currentScopeNumber}.md`);
   }
 
   const suffix = state.finalCommit ? `-${state.finalCommit}` : '';
@@ -210,6 +214,8 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
       ? `Chunk ${state.currentScopeNumber} accepted`
       : kind === 'blocked'
         ? `Scope ${state.currentScopeNumber} blocked`
+        : kind === 'failed'
+          ? `Scope ${state.currentScopeNumber} failed`
         : state.topLevelMode === 'plan'
           ? 'Planning run complete'
           : 'Plan implementation complete';

@@ -75,7 +75,7 @@ function printClaudeReviewResult(
 
 function startPhaseHeartbeat(
   phase: OrchestrationState['phase'],
-  state: OrchestrationState,
+  getState: () => OrchestrationState,
   logger?: RunLogger,
   intervalMs = DEFAULT_PHASE_HEARTBEAT_MS,
 ) {
@@ -85,6 +85,7 @@ function startPhaseHeartbeat(
 
   const startedAt = Date.now();
   const timer = setInterval(() => {
+    const state = getState();
     const elapsedMs = Date.now() - startedAt;
     const payload = {
       phase,
@@ -120,6 +121,7 @@ async function persistCodexFailureState(
     status: 'failed',
   });
   await writeExecutionArtifacts(failedState);
+  await writeCheckpointRetrospective(failedState, 'failed');
   await logger?.event('phase.error', {
     phase,
     threadId: error.threadId ?? state.codexThreadId,
@@ -268,6 +270,7 @@ function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
 async function runCodexPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'codex_chunk' });
   const beforeHead = await getHeadCommit(state.cwd);
+  let workingState = state;
   let codex;
   try {
     codex = await runCodexChunkRound({
@@ -276,11 +279,18 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
       progressMarkdownPath: state.progressMarkdownPath,
       executionMode: state.executionMode,
       threadId: state.codexThreadId,
+      onThreadStarted: async (threadId) => {
+        state.codexThreadId = threadId;
+        workingState = await saveState(statePath, {
+          ...workingState,
+          codexThreadId: threadId,
+        });
+      },
       logger,
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
-      await persistCodexFailureState(state, statePath, 'codex_chunk', error, logger);
+      await persistCodexFailureState(workingState, statePath, 'codex_chunk', error, logger);
     }
     throw error;
   }
@@ -289,12 +299,12 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   const completionProblem = getCodexCompletionProblem(state.executionMode, codex.marker);
 
   const nextState = await saveState(statePath, {
-    ...state,
+    ...workingState,
     codexThreadId: codex.threadId,
     lastCodexMarker: codex.marker as CodexMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_review',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
-    createdCommits: [...state.createdCommits, ...createdCommits],
+    createdCommits: [...workingState.createdCommits, ...createdCommits],
   });
 
   await writeExecutionArtifacts(nextState);
@@ -321,24 +331,32 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
 
 async function runCodexPlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'codex_plan' });
+  let workingState = state;
   let codex;
   try {
     codex = await runCodexPlanRound({
       cwd: state.cwd,
       planDoc: state.planDoc,
       threadId: state.codexThreadId,
+      onThreadStarted: async (threadId) => {
+        state.codexThreadId = threadId;
+        workingState = await saveState(statePath, {
+          ...workingState,
+          codexThreadId: threadId,
+        });
+      },
       logger,
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
-      await persistCodexFailureState(state, statePath, 'codex_plan', error, logger);
+      await persistCodexFailureState(workingState, statePath, 'codex_plan', error, logger);
     }
     throw error;
   }
   const completionProblem = getPlanningCompletionProblem(codex.marker);
 
   const nextState = await saveState(statePath, {
-    ...state,
+    ...workingState,
     codexThreadId: codex.threadId,
     lastCodexMarker: codex.marker as CodexMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_plan_review',
@@ -1019,7 +1037,7 @@ export async function runOnePass(
     currentState.phase === 'codex_response' ||
     currentState.phase === 'final_squash'
   ) {
-    const stopHeartbeat = startPhaseHeartbeat(currentState.phase, currentState, logger);
+    const stopHeartbeat = startPhaseHeartbeat(currentState.phase, () => currentState, logger);
     try {
     if (currentState.phase === 'codex_plan') {
       currentState = await runCodexPlanPhase(currentState, statePath, logger);
