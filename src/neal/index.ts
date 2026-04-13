@@ -64,8 +64,12 @@ function createStopController() {
     }
 
     if (key.name === 'q') {
-      stopRequested = true;
-      process.stderr.write('\n[neal] stop requested after the current scope\n');
+      stopRequested = !stopRequested;
+      process.stderr.write(
+        stopRequested
+          ? '\n[neal] stop requested after the current scope\n'
+          : '\n[neal] stop request cleared; continuing after the current scope\n',
+      );
     }
   };
 
