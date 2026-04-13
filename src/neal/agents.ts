@@ -615,7 +615,7 @@ export async function runCodexResponseRound(args: {
   progressMarkdownPath: string;
   verificationHint: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
-  threadId: string;
+  threadId?: string | null;
   logger?: RunLogger;
 }): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
   const thread = createCodexThread(args.cwd, args.threadId);

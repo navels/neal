@@ -232,6 +232,17 @@ async function notifyChunkAccepted(state: OrchestrationState, message: string, l
   await notify('complete', `[neal] ${planName}: chunk ${state.currentScopeNumber} complete: ${message}`);
 }
 
+async function notifyRetry(state: OrchestrationState, message: string, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  await logger?.event('notify.retry', {
+    message,
+    planName,
+    scopeNumber: state.currentScopeNumber,
+    phase: state.phase,
+  });
+  await notify('retry', `[neal] ${planName}: ${message}`);
+}
+
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
   if (state.completedScopes.some((scope) => scope.number === state.currentScopeNumber)) {
     return state;
@@ -273,6 +284,43 @@ function normalizeFinalCommitMessage(message: string) {
   return convertedEscapes.replace(/\n+$/, '') + '\n';
 }
 
+function isCodexTimeoutError(error: CodexRoundError) {
+  return /\btimed out after\b/i.test(error.message);
+}
+
+function shouldRetryCodexTimeout(state: OrchestrationState, phase: 'codex_chunk' | 'codex_response', error: CodexRoundError) {
+  return state.topLevelMode === 'execute' && isCodexTimeoutError(error) && state.codexRetryCount < 1;
+}
+
+async function scheduleCodexTimeoutRetry(
+  state: OrchestrationState,
+  statePath: string,
+  phase: 'codex_chunk' | 'codex_response',
+  error: CodexRoundError,
+  logger?: RunLogger,
+) {
+  const retryState = await saveState(statePath, {
+    ...state,
+    codexThreadId: null,
+    codexRetryCount: state.codexRetryCount + 1,
+    status: 'running',
+    phase,
+  });
+  await writeExecutionArtifacts(retryState);
+  await logger?.event('phase.retry', {
+    phase,
+    threadId: error.threadId ?? state.codexThreadId,
+    retryCount: retryState.codexRetryCount,
+    message: error.message,
+  });
+  await notifyRetry(
+    retryState,
+    `scope ${retryState.currentScopeNumber} timed out in ${phase}; retrying with a fresh Codex thread`,
+    logger,
+  );
+  return retryState;
+}
+
 async function runCodexPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'codex_chunk' });
   const beforeHead = await getHeadCommit(state.cwd);
@@ -296,7 +344,13 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
+      if (shouldRetryCodexTimeout(workingState, 'codex_chunk', error)) {
+        return scheduleCodexTimeoutRetry(workingState, statePath, 'codex_chunk', error, logger);
+      }
       await persistCodexFailureState(workingState, statePath, 'codex_chunk', error, logger);
+      if (isCodexTimeoutError(error)) {
+        await notifyBlocked(workingState, error.message, logger);
+      }
     }
     throw error;
   }
@@ -311,6 +365,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_review',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
     createdCommits: [...workingState.createdCommits, ...createdCommits],
+    codexRetryCount: 0,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -755,10 +810,6 @@ function buildVerificationHint(state: OrchestrationState) {
 }
 
 async function runCodexResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  if (!state.codexThreadId) {
-    throw new Error('Cannot run Codex response phase without an existing Codex thread');
-  }
-
   await logger?.event('phase.start', { phase: 'codex_response' });
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
@@ -797,7 +848,13 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
+      if (shouldRetryCodexTimeout(state, 'codex_response', error)) {
+        return scheduleCodexTimeoutRetry(state, statePath, 'codex_response', error, logger);
+      }
       await persistCodexFailureState(state, statePath, 'codex_response', error, logger);
+      if (isCodexTimeoutError(error)) {
+        await notifyBlocked(state, error.message, logger);
+      }
     }
     throw error;
   }
@@ -827,6 +884,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     createdCommits: [...state.createdCommits, ...createdCommits],
     phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'claude_review',
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
+    codexRetryCount: 0,
   });
 
   await writeExecutionArtifacts(nextState);

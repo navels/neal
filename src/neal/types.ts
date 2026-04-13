@@ -73,6 +73,7 @@ export type OrchestrationState = {
   codexThreadId: string | null;
   claudeSessionId: string | null;
   currentScopeNumber: number;
+  codexRetryCount: number;
   lastCodexMarker: CodexMarker | null;
   rounds: ReviewRound[];
   findings: ReviewFinding[];

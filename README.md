@@ -67,6 +67,8 @@ Claude review rounds now emit progress to stderr and fail with a clear inactivit
 
 Codex turns now get the same treatment. If a Codex streamed turn goes silent for too long, `neal` fails the run with the current thread id instead of hanging indefinitely. Override the default 10-minute Codex inactivity timeout with `CODEX_INACTIVITY_TIMEOUT_MS`. You can also tune wrapper heartbeat logging with `NEAL_PHASE_HEARTBEAT_MS`; set it to `0` to disable phase heartbeats entirely.
 
+In execute mode, a Codex inactivity timeout now triggers one automatic retry on a fresh Codex thread for the current chunk phase. `neal` sends a retry notification when that happens. If the fresh-thread retry also times out, the run fails and sends a failure notification.
+
 For review quality, `neal` gives Claude the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. Claude is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
 
 Each `neal` run also writes persistent diagnostics under `.neal/runs/<timestamp>-<id>/`:
