@@ -267,6 +267,12 @@ function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
     .join('\n');
 }
 
+function normalizeFinalCommitMessage(message: string) {
+  const normalizedNewlines = message.replace(/\r\n/g, '\n');
+  const convertedEscapes = normalizedNewlines.replace(/\\n(?=- )/g, '\n');
+  return convertedEscapes.replace(/\n+$/, '') + '\n';
+}
+
 async function runCodexPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'codex_chunk' });
   const beforeHead = await getHeadCommit(state.cwd);
@@ -939,9 +945,10 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
 
   const commitSubjects = await getCommitSubjects(state.cwd, state.createdCommits);
   const latestCreatedCommit = state.createdCommits.at(-1) ?? null;
-  const finalMessage = latestCreatedCommit
+  const rawFinalMessage = latestCreatedCommit
     ? await getCommitMessage(state.cwd, latestCreatedCommit)
     : commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize chunk work';
+  const finalMessage = normalizeFinalCommitMessage(rawFinalMessage);
   const finalSubject = finalMessage.split(/\r?\n/, 1)[0] || 'Finalize chunk work';
   const finalCommit =
     state.createdCommits.length > 0
