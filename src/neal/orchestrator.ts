@@ -1137,5 +1137,14 @@ export async function loadOrInitialize(
     throw new Error('planDoc is required when initializing a new orchestration');
   }
 
+  if (topLevelMode === 'execute') {
+    const statusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(cwd));
+    if (statusOutput) {
+      throw new Error(
+        `Cannot start neal --execute with a dirty worktree:\n${statusOutput}\n\nUse neal --resume for in-progress chunk work.`,
+      );
+    }
+  }
+
   return initializeOrchestration(planDoc, cwd, executionMode, topLevelMode);
 }

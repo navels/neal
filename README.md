@@ -57,6 +57,8 @@ Execution-mode semantics:
 - `neal --summaries [runs-dir]` pages through retrospective reports written under `.neal/runs`
 - in chunked mode, `neal` now continues into the next chunk automatically after an accepted `AUTONOMY_CHUNK_DONE` scope until the plan completes or blocks
 
+Fresh `neal --execute ...` runs require a clean worktree. If a chunk was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run.
+
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 
 `neal` also writes wrapper-generated retrospectives into the run directory. `RETROSPECTIVE.md` always reflects the latest accepted chunk, blocked stop, or completed plan, and checkpoint-specific archives are written alongside it so you can inspect whether the review loop is adding value or exposing inefficiencies.
