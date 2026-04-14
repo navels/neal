@@ -4,13 +4,13 @@ Run a reviewed autonomous implementation loop from a standalone Node.js tool.
 
 ## What it does
 
-- Starts a fresh Codex thread for each scope
-- Tells Codex to reread the plan doc and execute exactly one scope
+- Starts a fresh coder session for each scope
+- Tells the coder to reread the plan doc and execute exactly one scope
 - Treats “blocked” as a wrapper-level stop condition and requires an exact blocker report
 - Streams the scope output to stdout while the turn runs
 - Parses the terminal `AUTONOMY_*` marker from the final assistant message
 - Sends local notifications implemented in this project
-- Retries transient Codex transport and generic `exec code 1` failures with backoff
+- Retries transient coder transport and generic `exec code 1` failures with backoff
 - Stops on `AUTONOMY_DONE` or `AUTONOMY_BLOCKED`
 - Lets you press `q` to stop after the current scope completes
 - Opens `codex resume <thread-id>` automatically when it exits
@@ -78,31 +78,31 @@ Current provider support in this slice is:
 
 Model overrides are supported for both roles. The config surface is symmetric: the same provider can be used for coder and reviewer with different models when that provider implements both capabilities. In this slice, the configured OpenAI and Anthropic providers both support both roles. Unsupported provider-role combinations fail fast.
 
-Fresh `neal --execute ...` runs require a clean worktree. If a scope was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted Codex thread, `neal --resume` will automatically re-enter the last blocked Codex phase when that phase is resumable.
+Fresh `neal --execute ...` runs require a clean worktree. If a scope was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted coder session, `neal --resume` will automatically re-enter the last blocked coder phase when that phase is resumable.
 
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 
 `neal` also writes wrapper-generated consult and retrospective artifacts into the run directory. `CONSULT.md` reflects the latest blocker consultation state, and `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, with checkpoint-specific archives written alongside them so you can inspect whether the review loop is adding value or exposing inefficiencies.
 
-Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Claude review sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, `neal` will continue the same Claude session up to `2` times by default when it hits `error_max_turns` before returning structured findings, and transient Claude API/internal failures are retried up to `2` times by default. Override those limits with `CLAUDE_REVIEW_CONTINUATION_LIMIT` and `CLAUDE_REVIEW_API_RETRY_LIMIT`.
+Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Anthropic reviewer sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, `neal` will continue the same reviewer session up to `2` times by default when it hits `error_max_turns` before returning structured findings, and transient Anthropic API/internal failures are retried up to `2` times by default. Override those limits with `CLAUDE_REVIEW_CONTINUATION_LIMIT` and `CLAUDE_REVIEW_API_RETRY_LIMIT`.
 
 Execute and planning review loops now default to `20` rounds via `NEAL_MAX_REVIEW_ROUNDS`. `neal` also detects `review_stuck` conditions and blocks early when blocking findings keep reopening or the open blocking count fails to decrease across multiple consecutive review rounds. Override that non-reduction window with `NEAL_REVIEW_STUCK_WINDOW`.
 
-Codex turns now get the same treatment. If a Codex streamed turn goes silent for too long, `neal` fails the run with the current thread id instead of hanging indefinitely. Override the default 10-minute Codex inactivity timeout with `CODEX_INACTIVITY_TIMEOUT_MS`. You can also tune wrapper heartbeat logging with `NEAL_PHASE_HEARTBEAT_MS`; set it to `0` to disable phase heartbeats entirely.
+Coder turns now get the same treatment. If a streamed coder turn goes silent for too long, `neal` fails the run with the current session id instead of hanging indefinitely. Override the default 10-minute coder inactivity timeout with `CODEX_INACTIVITY_TIMEOUT_MS`. You can also tune wrapper heartbeat logging with `NEAL_PHASE_HEARTBEAT_MS`; set it to `0` to disable phase heartbeats entirely.
 
-In execute mode, a Codex inactivity timeout now triggers one automatic retry on a fresh Codex thread for the current scope phase. `neal` sends a retry notification when that happens. If the fresh-thread retry also times out, the run fails and sends a failure notification.
+In execute mode, a coder inactivity timeout now triggers one automatic retry on a fresh coder session for the current scope phase. `neal` sends a retry notification when that happens. If the fresh-session retry also times out, the run fails and sends a failure notification.
 
-Planning mode now gets the same one-shot fresh-thread retry for `codex_plan` and `codex_plan_response` inactivity timeouts. When a timed-out Codex phase was running as `resume <threadId>`, `neal` also makes a best-effort attempt to terminate that orphaned resume subprocess before retrying or failing.
+Planning mode now gets the same one-shot fresh-session retry for `coder_plan` and `coder_plan_response` inactivity timeouts. When a timed-out coder phase was running as `resume <threadId>`, `neal` also makes a best-effort attempt to terminate that orphaned resume subprocess before retrying or failing.
 
-For review quality, `neal` gives Claude the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. Claude is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
+For review quality, `neal` gives the reviewer the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. The reviewer is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
 
-If Codex blocks during scope execution or during a review-response pass, `neal` now routes that blocker through a bounded Claude consult loop before stopping. The consult is wrapper-owned and recorded in `CONSULT.md`; Codex remains the implementation owner. New runs default to up to `4` consult rounds per scope. Consult advice is diagnostic only: it cannot authorize baseline failures, waive verification gates, or override explicit user/wrapper policy.
+If the coder blocks during scope execution or during a review-response pass, `neal` now routes that blocker through a bounded reviewer consult loop before stopping. The consult is wrapper-owned and recorded in `CONSULT.md`; the coder remains the implementation owner. New runs default to up to `4` consult rounds per scope. Consult advice is diagnostic only: it cannot authorize baseline failures, waive verification gates, or override explicit user/wrapper policy.
 
 Each `neal` run also writes persistent diagnostics under `.neal/runs/<timestamp>-<id>/`:
 
 - `meta.json`: static run metadata
 - `events.ndjson`: structured phase, notification, and failure events
-- `stderr.log`: tee of Codex/Claude progress plus wrapper diagnostics
+- `stderr.log`: tee of coder/reviewer progress plus wrapper diagnostics
 
 The final CLI JSON output includes `runDir` so you can jump straight to the relevant log directory after a failure.
 
@@ -111,7 +111,7 @@ During execution, `neal` also maintains in that same run directory:
 - `plan-progress.json`: authoritative machine-readable progress state
 - `PLAN_PROGRESS.md`: rendered human-readable burndown state
 
-Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state under the active `.neal/runs/...` directory, and exits once Claude review converges or blocks.
+Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state under the active `.neal/runs/...` directory, and exits once reviewer feedback converges or blocks.
 
 ## Notifications
 
@@ -123,4 +123,4 @@ Override that command with `AUTONOMY_NOTIFY_BIN` if your local setup differs.
 
 ## Retry Behavior
 
-Transient Codex failures are retried on the same thread with exponential backoff. Recovery turns tell Codex to reread the plan, inspect repo state, and avoid doing a second scope if the interrupted turn already finished.
+Transient coder failures are retried on the same session with exponential backoff. Recovery turns tell the coder to reread the plan, inspect repo state, and avoid doing a second scope if the interrupted turn already finished.

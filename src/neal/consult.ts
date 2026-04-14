@@ -10,8 +10,8 @@ export function renderConsultMarkdown(state: OrchestrationState) {
     '## Metadata',
     `- Plan: ${state.planDoc}`,
     `- Phase: ${state.phase}`,
-    `- Codex thread: ${state.codexThreadId ?? 'pending'}`,
-    `- Claude session: ${state.claudeSessionId ?? 'pending'}`,
+    `- Coder session: ${state.coderSessionId ?? 'pending'}`,
+    `- Reviewer session: ${state.reviewerSessionId ?? 'pending'}`,
     '',
     '## Consult Rounds',
   ];
@@ -26,8 +26,8 @@ export function renderConsultMarkdown(state: OrchestrationState) {
       '',
       `### Consult Round ${round.number}`,
       `- Source phase: ${round.sourcePhase}`,
-      `- Codex thread: ${round.codexThreadId ?? 'pending'}`,
-      `- Claude session: ${round.claudeSessionId ?? 'pending'}`,
+      `- Coder session: ${round.coderSessionId ?? 'pending'}`,
+      `- Reviewer session: ${round.reviewerSessionId ?? 'pending'}`,
       `- Summary: ${round.request.summary}`,
       `- Blocker: ${round.request.blocker}`,
       `- Question: ${round.request.question}`,
@@ -38,27 +38,27 @@ export function renderConsultMarkdown(state: OrchestrationState) {
 
     if (round.response) {
       lines.push(
-        `- Claude summary: ${round.response.summary}`,
-        `- Claude diagnosis: ${round.response.diagnosis}`,
-        `- Claude confidence: ${round.response.confidence}`,
-        `- Claude recoverable: ${round.response.recoverable ? 'yes' : 'no'}`,
-        `- Claude recommendations: ${round.response.recommendations.join(' | ') || 'n/a'}`,
-        `- Claude rationale: ${round.response.rationale}`,
+        `- Reviewer summary: ${round.response.summary}`,
+        `- Reviewer diagnosis: ${round.response.diagnosis}`,
+        `- Reviewer confidence: ${round.response.confidence}`,
+        `- Reviewer recoverable: ${round.response.recoverable ? 'yes' : 'no'}`,
+        `- Reviewer recommendations: ${round.response.recommendations.join(' | ') || 'n/a'}`,
+        `- Reviewer rationale: ${round.response.rationale}`,
       );
     } else {
-      lines.push('- Claude response: pending');
+      lines.push('- Reviewer response: pending');
     }
 
     if (round.disposition) {
       lines.push(
-        `- Codex outcome: ${round.disposition.outcome}`,
-        `- Codex decision: ${round.disposition.decision}`,
-        `- Codex summary: ${round.disposition.summary}`,
-        `- Codex blocker: ${round.disposition.blocker || 'n/a'}`,
-        `- Codex rationale: ${round.disposition.rationale}`,
+        `- Coder outcome: ${round.disposition.outcome}`,
+        `- Coder decision: ${round.disposition.decision}`,
+        `- Coder summary: ${round.disposition.summary}`,
+        `- Coder blocker: ${round.disposition.blocker || 'n/a'}`,
+        `- Coder rationale: ${round.disposition.rationale}`,
       );
     } else {
-      lines.push('- Codex disposition: pending');
+      lines.push('- Coder disposition: pending');
     }
   }
 

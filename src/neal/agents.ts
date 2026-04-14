@@ -4,7 +4,7 @@ import type { RunLogger } from './logger.js';
 import { AnthropicClaudeProviderError } from './providers/anthropic-claude.js';
 import { OpenAICodexProviderError } from './providers/openai-codex.js';
 import { getCoderAdapter, getStructuredAdvisorAdapter } from './providers/registry.js';
-import type { AgentRoleConfig, ClaudeConsultResponse, CodexConsultDisposition, CodexConsultRequest, ReviewFinding } from './types.js';
+import type { AgentRoleConfig, CoderConsultDisposition, CoderConsultRequest, ReviewFinding, ReviewerConsultResponse } from './types.js';
 
 const AUTONOMY_SCOPE_DONE = 'AUTONOMY_SCOPE_DONE';
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
@@ -82,19 +82,19 @@ function extractMarker(message: string) {
   return null;
 }
 
-type ClaudeFindingPayload = {
+type ReviewerFindingPayload = {
   severity: 'blocking' | 'non_blocking';
   files: string[];
   claim: string;
   requiredAction: string;
 };
 
-type ClaudeReviewPayload = {
+type ReviewerPayload = {
   summary: string;
-  findings: ClaudeFindingPayload[];
+  findings: ReviewerFindingPayload[];
 };
 
-type CodexResponsePayload = {
+type CoderResponsePayload = {
   outcome: 'responded' | 'blocked';
   summary: string;
   blocker?: string;
@@ -105,45 +105,45 @@ type CodexResponsePayload = {
   }>;
 };
 
-type CodexConsultDispositionPayload = CodexConsultDisposition;
+type CoderConsultDispositionPayload = CoderConsultDisposition;
 
-export class ClaudeRoundError extends Error {
+export class ReviewerRoundError extends Error {
   readonly sessionId: string | null;
   readonly subtype: string | null;
 
   constructor(message: string, sessionId: string | null, subtype: string | null) {
     super(message);
-    this.name = 'ClaudeRoundError';
+    this.name = 'ReviewerRoundError';
     this.sessionId = sessionId;
     this.subtype = subtype;
   }
 }
 
-export class CodexRoundError extends Error {
+export class CoderRoundError extends Error {
   readonly threadId: string | null;
 
   constructor(message: string, threadId: string | null) {
     super(message);
-    this.name = 'CodexRoundError';
+    this.name = 'CoderRoundError';
     this.threadId = threadId;
   }
 }
 
-function parseCodexResponsePayload(raw: string): CodexResponsePayload {
+function parseCoderResponsePayload(raw: string): CoderResponsePayload {
   try {
-    return JSON.parse(raw) as CodexResponsePayload;
+    return JSON.parse(raw) as CoderResponsePayload;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Codex response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
+    throw new Error(`Coder response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
   }
 }
 
-function parseCodexConsultDispositionPayload(raw: string): CodexConsultDispositionPayload {
+function parseCoderConsultDispositionPayload(raw: string): CoderConsultDispositionPayload {
   try {
-    return JSON.parse(raw) as CodexConsultDispositionPayload;
+    return JSON.parse(raw) as CoderConsultDispositionPayload;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Codex consult-response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
+    throw new Error(`Coder consult-response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
   }
 }
 
@@ -160,17 +160,17 @@ async function safeReadText(path: string) {
 }
 
 
-async function runClaudeStructuredRound(args: {
+async function runReviewerStructuredRound(args: {
   reviewer: AgentRoleConfig;
   label: 'review' | 'plan-review' | 'consult';
   cwd: string;
   prompt: string;
   schema: Record<string, unknown>;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; structured: ClaudeReviewPayload }> {
+}): Promise<{ sessionId: string | null; structured: ReviewerPayload }> {
   try {
     const advisor = getStructuredAdvisorAdapter(args.reviewer);
-    const result = await advisor.runStructuredRound<ClaudeReviewPayload>({
+    const result = await advisor.runStructuredRound<ReviewerPayload>({
       label: args.label,
       cwd: args.cwd,
       prompt: args.prompt,
@@ -184,16 +184,16 @@ async function runClaudeStructuredRound(args: {
     };
   } catch (error) {
     if (error instanceof AnthropicClaudeProviderError) {
-      throw new ClaudeRoundError(error.message, error.sessionId, error.subtype);
+      throw new ReviewerRoundError(error.message, error.sessionId, error.subtype);
     }
     if (error instanceof OpenAICodexProviderError) {
-      throw new ClaudeRoundError(error.message, error.threadId, null);
+      throw new ReviewerRoundError(error.message, error.threadId, null);
     }
     throw error;
   }
 }
 
-export async function runClaudeReviewRound(args: {
+export async function runReviewerRound(args: {
   reviewer: AgentRoleConfig;
   cwd: string;
   planDoc: string;
@@ -207,7 +207,7 @@ export async function runClaudeReviewRound(args: {
   round: number;
   reviewMarkdownPath: string;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'codexDisposition' | 'codexCommit'>[] }> {
+}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
   const changedFilesText = args.changedFiles.length > 0 ? args.changedFiles.join('\n') : '(no changed files)';
   const commitsText = args.commits.length > 0 ? args.commits.join('\n') : '(no commits recorded)';
 
@@ -236,7 +236,7 @@ export async function runClaudeReviewRound(args: {
 
   const prompt = reviewerHasRepoTools(args.reviewer)
     ? [
-        `Review the codex scope for plan ${args.planDoc}.`,
+        `Review the current scope for plan ${args.planDoc}.`,
         `Review round: ${args.round}.`,
         `Commit range: ${args.baseCommit}..${args.headCommit}.`,
         'Review that commit range directly with repository tools. The commit range is the source of truth for this review.',
@@ -249,8 +249,8 @@ export async function runClaudeReviewRound(args: {
         'If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
         'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
         args.previousHeadCommit
-          ? `Previous Claude review head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
-          : 'This is the first Claude review round for this scope.',
+          ? `Previous reviewer head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
+          : 'This is the first reviewer round for this scope.',
         '',
         'Commits in scope:',
         commitsText,
@@ -261,10 +261,10 @@ export async function runClaudeReviewRound(args: {
         'Changed files:',
         changedFilesText,
         '',
-        `Prior review history is available at ${args.reviewMarkdownPath} if you need earlier Claude findings or Codex responses, but review the current commit range directly.`,
+        `Prior review history is available at ${args.reviewMarkdownPath} if you need earlier reviewer findings or coder responses, but review the current commit range directly.`,
       ].join('\n')
     : [
-        `Review the codex scope for plan ${args.planDoc}.`,
+        `Review the current scope for plan ${args.planDoc}.`,
         `Review round: ${args.round}.`,
         `Commit range: ${args.baseCommit}..${args.headCommit}.`,
         'You do not have direct repository tool access in this adapter. Review only the supplied commit metadata and unified diff below.',
@@ -292,7 +292,7 @@ export async function runClaudeReviewRound(args: {
         args.diff || '(no diff)',
       ].join('\n');
 
-  const { sessionId, structured } = await runClaudeStructuredRound({
+  const { sessionId, structured } = await runReviewerStructuredRound({
     reviewer: args.reviewer,
     label: 'review',
     cwd: args.cwd,
@@ -315,14 +315,14 @@ export async function runClaudeReviewRound(args: {
   };
 }
 
-export async function runClaudePlanReviewRound(args: {
+export async function runPlanReviewerRound(args: {
   reviewer: AgentRoleConfig;
   cwd: string;
   planDoc: string;
   round: number;
   reviewMarkdownPath: string;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'codexDisposition' | 'codexCommit'>[] }> {
+}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
   const planText = reviewerHasRepoTools(args.reviewer) ? '' : await safeReadText(args.planDoc);
   const reviewHistoryText = reviewerHasRepoTools(args.reviewer) ? '' : await safeReadText(args.reviewMarkdownPath);
   const schema = {
@@ -360,7 +360,7 @@ export async function runClaudePlanReviewRound(args: {
         'Use non_blocking severity for clarity improvements that do not block execution.',
         'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
         'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
-        `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and Codex responses.`,
+        `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
         '',
         'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
       ].join('\n')
@@ -382,7 +382,7 @@ export async function runClaudePlanReviewRound(args: {
         reviewHistoryText || '(no prior review history)',
       ].join('\n');
 
-  const { sessionId, structured } = await runClaudeStructuredRound({
+  const { sessionId, structured } = await runReviewerStructuredRound({
     reviewer: args.reviewer,
     label: 'plan-review',
     cwd: args.cwd,
@@ -405,14 +405,14 @@ export async function runClaudePlanReviewRound(args: {
   };
 }
 
-export async function runClaudeConsultRound(args: {
+export async function runConsultReviewerRound(args: {
   reviewer: AgentRoleConfig;
   cwd: string;
   planDoc: string;
-  request: CodexConsultRequest;
+  request: CoderConsultRequest;
   consultMarkdownPath: string;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; response: ClaudeConsultResponse }> {
+}): Promise<{ sessionId: string | null; response: ReviewerConsultResponse }> {
   const schema = {
     type: 'object',
     properties: {
@@ -431,11 +431,11 @@ export async function runClaudeConsultRound(args: {
   const prompt = [
     `Handle a blocker consultation for the active neal scope in ${args.planDoc}.`,
     'This is a blocker consultation, not a code review.',
-    'Codex remains the implementation owner. Your job is to diagnose the blocker and recommend bounded next steps.',
+    'The coder remains the implementation owner. Your job is to diagnose the blocker and recommend bounded next steps.',
     'Do not expand scope unnecessarily.',
     'You are not allowed to grant policy exceptions, authorize baseline failures, waive verification gates, or reinterpret the plan on behalf of the user or wrapper.',
     'If the blocker would require explicit user or wrapper authorization, say that directly. You may recommend asking for authorization, but you must not treat it as already granted.',
-    'Do not tell Codex to consider a failure "allowed", "authorized", or "baseline" unless that authorization is already explicitly present in the blocker request or the referenced plan/context.',
+    'Do not tell the coder to consider a failure "allowed", "authorized", or "baseline" unless that authorization is already explicitly present in the blocker request or the referenced plan/context.',
     reviewerHasRepoTools(args.reviewer)
       ? `Read ${args.consultMarkdownPath} if you need prior consult history.`
       : 'You do not have direct repository tool access in this adapter. Use only the supplied blocker context.',
@@ -448,7 +448,7 @@ export async function runClaudeConsultRound(args: {
       : 'Prefer concrete, file-specific advice based on the supplied blocker context.',
   ].join('\n');
 
-  const { sessionId, structured } = await runClaudeStructuredRound({
+  const { sessionId, structured } = await runReviewerStructuredRound({
     reviewer: args.reviewer,
     label: 'consult',
     cwd: args.cwd,
@@ -459,11 +459,11 @@ export async function runClaudeConsultRound(args: {
 
   return {
     sessionId,
-    response: structured as unknown as ClaudeConsultResponse,
+    response: structured as unknown as ReviewerConsultResponse,
   };
 }
 
-export async function runCodexScopeRound(args: {
+export async function runCoderScopeRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
@@ -489,10 +489,10 @@ export async function runCodexScopeRound(args: {
     threadId = result.threadId;
   } catch (error) {
     if (error instanceof OpenAICodexProviderError) {
-      throw new CodexRoundError(error.message, error.threadId);
+      throw new CoderRoundError(error.message, error.threadId);
     }
     if (error instanceof AnthropicClaudeProviderError) {
-      throw new CodexRoundError(error.message, error.sessionId);
+      throw new CoderRoundError(error.message, error.sessionId);
     }
     throw error;
   }
@@ -505,7 +505,7 @@ export async function runCodexScopeRound(args: {
   };
 }
 
-export async function runCodexPlanRound(args: {
+export async function runCoderPlanRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
@@ -528,10 +528,10 @@ export async function runCodexPlanRound(args: {
     threadId = result.threadId;
   } catch (error) {
     if (error instanceof OpenAICodexProviderError) {
-      throw new CodexRoundError(error.message, error.threadId);
+      throw new CoderRoundError(error.message, error.threadId);
     }
     if (error instanceof AnthropicClaudeProviderError) {
-      throw new CodexRoundError(error.message, error.sessionId);
+      throw new CoderRoundError(error.message, error.sessionId);
     }
     throw error;
   }
@@ -544,7 +544,7 @@ export async function runCodexPlanRound(args: {
   };
 }
 
-export async function runCodexResponseRound(args: {
+export async function runCoderResponseRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
@@ -553,7 +553,7 @@ export async function runCodexResponseRound(args: {
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   threadId?: string | null;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
+}): Promise<{ threadId: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
 
@@ -617,14 +617,14 @@ export async function runCodexResponseRound(args: {
     threadId = result.threadId;
   } catch (error) {
     if (error instanceof OpenAICodexProviderError) {
-      throw new CodexRoundError(error.message, error.threadId);
+      throw new CoderRoundError(error.message, error.threadId);
     }
     if (error instanceof AnthropicClaudeProviderError) {
-      throw new CodexRoundError(error.message, error.sessionId);
+      throw new CoderRoundError(error.message, error.sessionId);
     }
     throw error;
   }
-  const payload = parseCodexResponsePayload(finalResponse);
+  const payload = parseCoderResponsePayload(finalResponse);
 
   return {
     threadId,
@@ -632,17 +632,17 @@ export async function runCodexResponseRound(args: {
   };
 }
 
-export async function runCodexConsultResponseRound(args: {
+export async function runCoderConsultResponseRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
   progressMarkdownPath: string;
   consultMarkdownPath: string;
-  request: CodexConsultRequest;
-  response: ClaudeConsultResponse;
+  request: CoderConsultRequest;
+  response: ReviewerConsultResponse;
   threadId?: string | null;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; payload: CodexConsultDispositionPayload }> {
+}): Promise<{ threadId: string | null; payload: CoderConsultDispositionPayload }> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
 
@@ -664,17 +664,17 @@ export async function runCodexConsultResponseRound(args: {
     `Read ${args.consultMarkdownPath} before responding so you understand the current blocker context.`,
     'Use the inlined progress state below to stay on the current scope.',
     'You are still working on the same scope. Do not start a new scope.',
-    'Use Claude advisory feedback below to continue the same scope if possible.',
-    'Claude consult advice is advisory only. It does not authorize policy exceptions, baseline failures, skipped verification, or plan reinterpretation.',
+    'Use reviewer advisory feedback below to continue the same scope if possible.',
+    'Reviewer consult advice is advisory only. It does not authorize policy exceptions, baseline failures, skipped verification, or plan reinterpretation.',
     'If continuing would require a new allowed-failure baseline or any other explicit user/wrapper authorization that is not already present in the plan or wrapper-owned artifacts, you must remain blocked.',
     'Make code changes if needed, run relevant verification, and create a real git commit if you changed code.',
     'Return outcome=`resumed` if you followed the advice enough to continue the scope.',
     'Return outcome=`blocked` only if the blocker is still real after reasonable follow-through.',
     '',
-    'Codex blocker request:',
+    'Coder blocker request:',
     JSON.stringify(args.request, null, 2),
     '',
-    'Claude consultation response:',
+    'Reviewer consultation response:',
     JSON.stringify(args.response, null, 2),
     '',
     'Current progress state:',
@@ -695,14 +695,14 @@ export async function runCodexConsultResponseRound(args: {
     threadId = result.threadId;
   } catch (error) {
     if (error instanceof OpenAICodexProviderError) {
-      throw new CodexRoundError(error.message, error.threadId);
+      throw new CoderRoundError(error.message, error.threadId);
     }
     if (error instanceof AnthropicClaudeProviderError) {
-      throw new CodexRoundError(error.message, error.sessionId);
+      throw new CoderRoundError(error.message, error.sessionId);
     }
     throw error;
   }
-  const payload = parseCodexConsultDispositionPayload(finalResponse);
+  const payload = parseCoderConsultDispositionPayload(finalResponse);
 
   return {
     threadId,
@@ -710,14 +710,14 @@ export async function runCodexConsultResponseRound(args: {
   };
 }
 
-export async function runCodexPlanResponseRound(args: {
+export async function runCoderPlanResponseRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   threadId: string;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; payload: CodexResponsePayload }> {
+}): Promise<{ threadId: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
 
   const schema = {
@@ -778,14 +778,14 @@ export async function runCodexPlanResponseRound(args: {
     threadId = result.threadId;
   } catch (error) {
     if (error instanceof OpenAICodexProviderError) {
-      throw new CodexRoundError(error.message, error.threadId);
+      throw new CoderRoundError(error.message, error.threadId);
     }
     if (error instanceof AnthropicClaudeProviderError) {
-      throw new CodexRoundError(error.message, error.sessionId);
+      throw new CoderRoundError(error.message, error.sessionId);
     }
     throw error;
   }
-  const payload = parseCodexResponsePayload(finalResponse);
+  const payload = parseCoderResponsePayload(finalResponse);
 
   return {
     threadId,

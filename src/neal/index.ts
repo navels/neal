@@ -13,7 +13,7 @@ import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
 import { getDefaultAgentConfig } from './state.js';
 import { showSummaries } from './summaries.js';
-import { ClaudeRoundError, CodexRoundError } from './agents.js';
+import { CoderRoundError, ReviewerRoundError } from './agents.js';
 import type { AgentProvider } from './types.js';
 
 function usage(): never {
@@ -32,7 +32,7 @@ function isAgentProvider(value: string): value is AgentProvider {
 async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['state'], statePath: string, logger: RunLogger) {
   runLogger = logger;
   const stopController = createStopController();
-  let lastThreadId: string | null = state.codexThreadId;
+  let lastCoderSessionId: string | null = state.coderSessionId;
   let shouldResumeLastThread = false;
 
   if (process.stdin.isTTY) {
@@ -45,17 +45,17 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
       shouldStopAfterCurrentScope() {
         return stopController.isStopRequested();
       },
-      onCodexThread(threadId) {
-        if (threadId) {
-          lastThreadId = threadId;
+      onCoderSession(sessionId) {
+        if (sessionId) {
+          lastCoderSessionId = sessionId;
         }
       },
     });
     shouldResumeLastThread =
       stopController.isStopRequested() &&
-      finalState.phase === 'codex_scope' &&
+      finalState.phase === 'coder_scope' &&
       finalState.status === 'running' &&
-      Boolean(lastThreadId);
+      Boolean(lastCoderSessionId);
   } finally {
     stopController.cleanup();
   }
@@ -77,8 +77,8 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
         archivedReviewPath: finalState.archivedReviewPath,
         baseCommit: finalState.baseCommit,
         finalCommit: finalState.finalCommit,
-        codexThreadId: finalState.codexThreadId,
-        claudeSessionId: finalState.claudeSessionId,
+        coderSessionId: finalState.coderSessionId,
+        reviewerSessionId: finalState.reviewerSessionId,
         rounds: finalState.rounds.length,
         findings: finalState.findings.length,
       },
@@ -87,9 +87,9 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
     ) + '\n',
   );
 
-  if (shouldResumeLastThread && lastThreadId) {
-    process.stderr.write(`[neal] resuming ${lastThreadId}\n`);
-    await resumeLastThread(lastThreadId);
+  if (shouldResumeLastThread && lastCoderSessionId) {
+    process.stderr.write(`[neal] resuming ${lastCoderSessionId}\n`);
+    await resumeLastThread(lastCoderSessionId);
   }
 }
 
@@ -297,19 +297,19 @@ void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   void runLogger?.event('run.failed', {
     message,
-    codexThreadId: error instanceof CodexRoundError ? error.threadId : null,
-    claudeSessionId: error instanceof ClaudeRoundError ? error.sessionId : null,
-    claudeSubtype: error instanceof ClaudeRoundError ? error.subtype : null,
+    coderSessionId: error instanceof CoderRoundError ? error.threadId : null,
+    reviewerSessionId: error instanceof ReviewerRoundError ? error.sessionId : null,
+    reviewerSubtype: error instanceof ReviewerRoundError ? error.subtype : null,
   });
   if (error instanceof Error && error.stack) {
     void runLogger?.stderr(`[fatal] ${error.stack}\n`);
   } else {
     void runLogger?.stderr(`[fatal] ${message}\n`);
   }
-  if (error instanceof CodexRoundError && error.threadId) {
-    process.stderr.write(`[neal] ${message} (codex thread: ${error.threadId})\n`);
-  } else if (error instanceof ClaudeRoundError && error.sessionId) {
-    process.stderr.write(`[neal] ${message} (claude session: ${error.sessionId})\n`);
+  if (error instanceof CoderRoundError && error.threadId) {
+    process.stderr.write(`[neal] ${message} (coder session: ${error.threadId})\n`);
+  } else if (error instanceof ReviewerRoundError && error.sessionId) {
+    process.stderr.write(`[neal] ${message} (reviewer session: ${error.sessionId})\n`);
   } else {
     process.stderr.write(`[neal] ${message}\n`);
   }

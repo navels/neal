@@ -68,18 +68,18 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     progressJsonPath: init.progressJsonPath,
     progressMarkdownPath: init.progressMarkdownPath,
     consultMarkdownPath: init.consultMarkdownPath,
-    phase: init.topLevelMode === 'plan' ? 'codex_plan' : 'codex_scope',
+    phase: init.topLevelMode === 'plan' ? 'coder_plan' : 'coder_scope',
     createdAt: now,
     updatedAt: now,
     reviewMarkdownPath: init.reviewMarkdownPath,
     archivedReviewPath: null,
     baseCommit,
     finalCommit: null,
-    codexThreadId: null,
-    claudeSessionId: null,
+    coderSessionId: null,
+    reviewerSessionId: null,
     currentScopeNumber: 1,
-    codexRetryCount: 0,
-    lastCodexMarker: null,
+    coderRetryCount: 0,
+    lastScopeMarker: null,
     rounds: [],
     consultRounds: [],
     findings: [],
@@ -149,9 +149,15 @@ function hydrateConsultRound(value: unknown): ConsultRound {
 
   return {
     number: typeof round.number === 'number' ? round.number : 0,
-    sourcePhase: round.sourcePhase === 'codex_response' ? 'codex_response' : 'codex_scope',
-    codexThreadId: typeof round.codexThreadId === 'string' ? round.codexThreadId : null,
-    claudeSessionId: typeof round.claudeSessionId === 'string' ? round.claudeSessionId : null,
+    sourcePhase: round.sourcePhase === 'coder_response' ? 'coder_response' : 'coder_scope',
+    coderSessionId:
+      typeof (round as { coderSessionId?: unknown }).coderSessionId === 'string'
+        ? (round as { coderSessionId: string }).coderSessionId
+        : null,
+    reviewerSessionId:
+      typeof (round as { reviewerSessionId?: unknown }).reviewerSessionId === 'string'
+        ? (round as { reviewerSessionId: string }).reviewerSessionId
+        : null,
     request: {
       summary: typeof round.request?.summary === 'string' ? round.request.summary : '',
       blocker: typeof round.request?.blocker === 'string' ? round.request.blocker : '',
@@ -211,8 +217,14 @@ function hydrateFinding(value: unknown): ReviewFinding {
     status:
       finding.status === 'fixed' || finding.status === 'rejected' || finding.status === 'deferred' ? finding.status : 'open',
     roundSummary: typeof finding.roundSummary === 'string' ? finding.roundSummary : '',
-    codexDisposition: typeof finding.codexDisposition === 'string' ? finding.codexDisposition : null,
-    codexCommit: typeof finding.codexCommit === 'string' ? finding.codexCommit : null,
+    coderDisposition:
+      typeof (finding as { coderDisposition?: unknown }).coderDisposition === 'string'
+        ? (finding as { coderDisposition: string }).coderDisposition
+        : null,
+    coderCommit:
+      typeof (finding as { coderCommit?: unknown }).coderCommit === 'string'
+        ? (finding as { coderCommit: string }).coderCommit
+        : null,
   };
 }
 
@@ -225,7 +237,10 @@ function hydrateRound(value: unknown): ReviewRound {
 
   return {
     round: typeof round.round === 'number' ? round.round : 0,
-    claudeSessionId: typeof round.claudeSessionId === 'string' ? round.claudeSessionId : null,
+    reviewerSessionId:
+      typeof (round as { reviewerSessionId?: unknown }).reviewerSessionId === 'string'
+        ? (round as { reviewerSessionId: string }).reviewerSessionId
+        : null,
     commitRange: {
       base: typeof round.commitRange?.base === 'string' ? round.commitRange.base : '',
       head: typeof round.commitRange?.head === 'string' ? round.commitRange.head : '',
@@ -273,7 +288,6 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(runDir, 'PLAN_PROGRESS.md');
   const consultMarkdownPath =
     typeof parsed.consultMarkdownPath === 'string' ? parsed.consultMarkdownPath : join(runDir, 'CONSULT.md');
-  const rawPhase = (parsed as { phase?: unknown }).phase;
   return {
     ...parsed,
     runDir,
@@ -282,17 +296,27 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     progressJsonPath,
     progressMarkdownPath,
     consultMarkdownPath,
-    phase: rawPhase === 'codex_chunk' ? 'codex_scope' : parsed.phase,
-    claudeSessionId: typeof parsed.claudeSessionId === 'string' ? parsed.claudeSessionId : null,
+    phase: parsed.phase,
+    coderSessionId:
+      typeof (parsed as { coderSessionId?: unknown }).coderSessionId === 'string'
+        ? (parsed as { coderSessionId: string }).coderSessionId
+        : null,
+    reviewerSessionId:
+      typeof (parsed as { reviewerSessionId?: unknown }).reviewerSessionId === 'string'
+        ? (parsed as { reviewerSessionId: string }).reviewerSessionId
+        : null,
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
-    codexRetryCount: typeof parsed.codexRetryCount === 'number' ? parsed.codexRetryCount : 0,
+    coderRetryCount:
+      typeof (parsed as { coderRetryCount?: unknown }).coderRetryCount === 'number'
+        ? (parsed as { coderRetryCount: number }).coderRetryCount
+        : 0,
     consultRounds: Array.isArray(parsed.consultRounds) ? parsed.consultRounds.map(hydrateConsultRound) : [],
-    lastCodexMarker:
-      parsed.lastCodexMarker === 'AUTONOMY_SCOPE_DONE' ||
-      parsed.lastCodexMarker === 'AUTONOMY_CHUNK_DONE' ||
-      parsed.lastCodexMarker === 'AUTONOMY_DONE' ||
-      parsed.lastCodexMarker === 'AUTONOMY_BLOCKED'
-        ? parsed.lastCodexMarker
+    lastScopeMarker:
+      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_SCOPE_DONE' ||
+      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_CHUNK_DONE' ||
+      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_DONE' ||
+      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_BLOCKED'
+        ? (parsed as { lastScopeMarker: OrchestrationState['lastScopeMarker'] }).lastScopeMarker
         : null,
     rounds: parsed.rounds.map(hydrateRound),
     findings: parsed.findings.map(hydrateFinding),

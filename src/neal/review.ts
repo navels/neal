@@ -10,7 +10,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     '## Metadata',
     `- Plan: ${state.planDoc}`,
     `- Phase: ${state.phase}`,
-    `- Codex thread: ${state.codexThreadId ?? 'pending'}`,
+    `- Coder session: ${state.coderSessionId ?? 'pending'}`,
     `- Base commit: ${state.baseCommit ?? 'unknown'}`,
     `- Final commit: ${state.finalCommit ?? 'pending'}`,
     '',
@@ -36,8 +36,8 @@ export function renderReviewMarkdown(state: OrchestrationState) {
           `- Claim: ${finding.claim}`,
           `- Required action: ${finding.requiredAction}`,
           `- Round summary: ${finding.roundSummary}`,
-          `- Codex disposition: ${finding.codexDisposition ?? 'pending'}`,
-          `- Codex commit: ${finding.codexCommit ?? 'pending'}`,
+          `- Coder disposition: ${finding.coderDisposition ?? 'pending'}`,
+          `- Coder commit: ${finding.coderCommit ?? 'pending'}`,
         );
       }
     }

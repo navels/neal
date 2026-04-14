@@ -13,7 +13,7 @@ type PlanProgressState = {
   currentScope: {
     number: number;
     phase: OrchestrationState['phase'];
-    marker: OrchestrationState['lastCodexMarker'];
+    marker: OrchestrationState['lastScopeMarker'];
     baseCommit: string | null;
   } | null;
   completedScopes: OrchestrationState['completedScopes'];
@@ -33,7 +33,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
         : {
             number: state.currentScopeNumber,
             phase: state.phase,
-            marker: state.lastCodexMarker,
+            marker: state.lastScopeMarker,
             baseCommit: state.baseCommit,
           },
     completedScopes: state.completedScopes,

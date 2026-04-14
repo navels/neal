@@ -52,7 +52,7 @@ async function loadRunEvents(runDir: string): Promise<RunEvent[]> {
 
 function getScopeEvents(events: RunEvent[], scopeNumber: number) {
   const scopeStartIndexes = events.reduce<number[]>((indexes, event, index) => {
-    if (event.type === 'phase.start' && event.data?.phase === 'codex_scope') {
+    if (event.type === 'phase.start' && event.data?.phase === 'coder_scope') {
       indexes.push(index);
     }
     return indexes;
@@ -125,11 +125,11 @@ function buildAssessment(state: OrchestrationState, scopeEvents: RunEvent[]) {
   const assessments: string[] = [];
 
   if (findingCounts.blocking > 0 && dispositions.fixed > 0) {
-    assessments.push(`- Claude added clear value: it surfaced ${findingCounts.blocking} blocking finding(s) and Codex fixed ${dispositions.fixed} before acceptance.`);
+    assessments.push(`- The reviewer added clear value: it surfaced ${findingCounts.blocking} blocking finding(s) and the coder fixed ${dispositions.fixed} before acceptance.`);
   } else if (findingCounts.total === 0) {
-    assessments.push('- Claude did not raise any findings. Review overhead was low, but the value added in this checkpoint is unclear.');
+    assessments.push('- The reviewer did not raise any findings. Review overhead was low, but the value added in this checkpoint is unclear.');
   } else if (findingCounts.non_blocking > 0 && findingCounts.blocking === 0) {
-    assessments.push(`- Claude found only non-blocking issues (${findingCounts.non_blocking}). Review added polish more than risk reduction.`);
+    assessments.push(`- The reviewer found only non-blocking issues (${findingCounts.non_blocking}). Review added polish more than risk reduction.`);
   }
 
   if (state.rounds.length > 1) {
@@ -137,11 +137,11 @@ function buildAssessment(state: OrchestrationState, scopeEvents: RunEvent[]) {
   }
 
   if (state.createdCommits.length > 1) {
-    assessments.push(`- Codex created ${state.createdCommits.length} commits before final squash. That suggests rework during the scope, which may be acceptable but is worth watching.`);
+    assessments.push(`- The coder created ${state.createdCommits.length} commits before final squash. That suggests rework during the scope, which may be acceptable but is worth watching.`);
   }
 
   if (continuationCount > 0) {
-    assessments.push(`- Claude needed ${continuationCount} same-session continuation(s) to finish the review. Review prompt scope or tool usage may still be inefficient.`);
+    assessments.push(`- The reviewer needed ${continuationCount} same-session continuation(s) to finish the review. Review prompt scope or tool usage may still be inefficient.`);
   }
 
   if (phaseErrors.length > 0) {
@@ -163,7 +163,7 @@ function summarizeFindings(state: OrchestrationState) {
   return state.findings
     .map((finding, index) => {
       const files = finding.files.length > 0 ? finding.files.join(', ') : 'n/a';
-      const disposition = finding.codexDisposition ? ` | Codex: ${finding.codexDisposition}` : '';
+      const disposition = finding.coderDisposition ? ` | Coder: ${finding.coderDisposition}` : '';
       return `- ${index + 1}. [${finding.severity}] ${finding.claim} | Files: ${files}${disposition}`;
     })
     .join('\n');
@@ -176,8 +176,8 @@ function summarizeBlocker(state: OrchestrationState) {
   const consultRequestBlocker = latestConsult?.request.blocker?.trim() || null;
   const consultDiagnosis = latestConsult?.response?.diagnosis?.trim() || null;
   const consultRecommendations = latestConsult?.response?.recommendations ?? [];
-  const codexDisposition = latestConsult?.disposition?.summary?.trim() || null;
-  const codexRemainingBlocker = latestConsult?.disposition?.blocker?.trim() || null;
+  const coderDisposition = latestConsult?.disposition?.summary?.trim() || null;
+  const coderRemainingBlocker = latestConsult?.disposition?.blocker?.trim() || null;
   const lines: string[] = [];
 
   if (persistedBlocker) {
@@ -189,23 +189,23 @@ function summarizeBlocker(state: OrchestrationState) {
   }
 
   if (consultDiagnosis) {
-    lines.push(`- Claude diagnosis: ${consultDiagnosis}`);
+    lines.push(`- Reviewer diagnosis: ${consultDiagnosis}`);
   }
 
   if (consultRecommendations.length > 0) {
     const display = consultRecommendations.slice(0, 4);
-    lines.push(`- Claude recommendations: ${display.join(' | ')}`);
+    lines.push(`- Reviewer recommendations: ${display.join(' | ')}`);
     if (consultRecommendations.length > display.length) {
       lines.push(`- Additional recommendations omitted: ${consultRecommendations.length - display.length}`);
     }
   }
 
-  if (codexDisposition) {
-    lines.push(`- Codex follow-through: ${codexDisposition}`);
+  if (coderDisposition) {
+    lines.push(`- Coder follow-through: ${coderDisposition}`);
   }
 
-  if (codexRemainingBlocker && codexRemainingBlocker !== persistedBlocker) {
-    lines.push(`- Remaining blocker after consult: ${codexRemainingBlocker}`);
+  if (coderRemainingBlocker && coderRemainingBlocker !== persistedBlocker) {
+    lines.push(`- Remaining blocker after consult: ${coderRemainingBlocker}`);
   }
 
   if (lines.length === 0) {
@@ -229,8 +229,8 @@ function summarizeCompletedScopes(state: OrchestrationState) {
     .join('\n');
 }
 
-function getLatestClaudeSessionId(state: OrchestrationState) {
-  return state.claudeSessionId ?? state.rounds.at(-1)?.claudeSessionId ?? null;
+function getLatestReviewerSessionId(state: OrchestrationState) {
+  return state.reviewerSessionId ?? state.rounds.at(-1)?.reviewerSessionId ?? null;
 }
 
 async function summarizeChangedFiles(state: OrchestrationState) {
@@ -276,7 +276,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const verificationSummary = summarizeVerification(commands);
   const assessment = buildAssessment(state, scopeEvents);
   const completedScopesSummary = kind === 'done' ? summarizeCompletedScopes(state) : null;
-  const latestClaudeSessionId = getLatestClaudeSessionId(state);
+  const latestReviewerSessionId = getLatestReviewerSessionId(state);
   const blockerSummary = kind === 'blocked' || kind === 'failed' ? summarizeBlocker(state) : null;
 
   return [
@@ -289,11 +289,11 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     `- Scope: ${state.currentScopeNumber}`,
     `- Status: ${state.status}`,
     `- Final commit: ${state.finalCommit ?? 'n/a'}`,
-    `- Codex thread: ${state.codexThreadId ?? 'n/a'}`,
-    `- Claude session: ${latestClaudeSessionId ?? 'n/a'}`,
-    `- Claude rounds: ${state.rounds.length}`,
+    `- Coder session: ${state.coderSessionId ?? 'n/a'}`,
+    `- Reviewer session: ${latestReviewerSessionId ?? 'n/a'}`,
+    `- Reviewer rounds: ${state.rounds.length}`,
     `- Findings: ${findings.total} total (${findings.blocking} blocking, ${findings.non_blocking} non-blocking)`,
-    `- Codex dispositions: ${dispositions.fixed} fixed, ${dispositions.rejected} rejected, ${dispositions.deferred} deferred`,
+    `- Coder dispositions: ${dispositions.fixed} fixed, ${dispositions.rejected} rejected, ${dispositions.deferred} deferred`,
     '',
     `## Work Summary`,
     changedFiles,

@@ -1,17 +1,17 @@
 export type OrchestrationPhase =
-  | 'codex_plan'
-  | 'claude_plan_review'
-  | 'codex_plan_response'
-  | 'codex_scope'
-  | 'claude_review'
-  | 'codex_response'
-  | 'claude_consult'
-  | 'codex_consult_response'
+  | 'coder_plan'
+  | 'reviewer_plan'
+  | 'coder_plan_response'
+  | 'coder_scope'
+  | 'reviewer_scope'
+  | 'coder_response'
+  | 'reviewer_consult'
+  | 'coder_consult_response'
   | 'final_squash'
   | 'done'
   | 'blocked';
 
-export type CodexMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
+export type ScopeMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
 export type AgentProvider = 'openai-codex' | 'anthropic-claude';
 
 export type AgentRoleConfig = {
@@ -37,13 +37,13 @@ export type ReviewFinding = {
   requiredAction: string;
   status: FindingStatus;
   roundSummary: string;
-  codexDisposition: string | null;
-  codexCommit: string | null;
+  coderDisposition: string | null;
+  coderCommit: string | null;
 };
 
 export type ReviewRound = {
   round: number;
-  claudeSessionId: string | null;
+  reviewerSessionId: string | null;
   commitRange: {
     base: string;
     head: string;
@@ -52,7 +52,7 @@ export type ReviewRound = {
   findings: string[];
 };
 
-export type CodexConsultRequest = {
+export type CoderConsultRequest = {
   summary: string;
   blocker: string;
   question: string;
@@ -61,7 +61,7 @@ export type CodexConsultRequest = {
   verificationContext: string[];
 };
 
-export type ClaudeConsultResponse = {
+export type ReviewerConsultResponse = {
   summary: string;
   diagnosis: string;
   confidence: 'low' | 'medium' | 'high';
@@ -71,7 +71,7 @@ export type ClaudeConsultResponse = {
   rationale: string;
 };
 
-export type CodexConsultDisposition = {
+export type CoderConsultDisposition = {
   outcome: 'resumed' | 'blocked';
   summary: string;
   blocker: string;
@@ -81,17 +81,17 @@ export type CodexConsultDisposition = {
 
 export type ConsultRound = {
   number: number;
-  sourcePhase: 'codex_scope' | 'codex_response';
-  codexThreadId: string | null;
-  claudeSessionId: string | null;
-  request: CodexConsultRequest;
-  response: ClaudeConsultResponse | null;
-  disposition: CodexConsultDisposition | null;
+  sourcePhase: 'coder_scope' | 'coder_response';
+  coderSessionId: string | null;
+  reviewerSessionId: string | null;
+  request: CoderConsultRequest;
+  response: ReviewerConsultResponse | null;
+  disposition: CoderConsultDisposition | null;
 };
 
 export type ProgressScope = {
   number: number;
-  marker: CodexMarker;
+  marker: ScopeMarker;
   result: 'accepted' | 'blocked';
   baseCommit: string | null;
   finalCommit: string | null;
@@ -119,11 +119,11 @@ export type OrchestrationState = {
   archivedReviewPath: string | null;
   baseCommit: string | null;
   finalCommit: string | null;
-  codexThreadId: string | null;
-  claudeSessionId: string | null;
+  coderSessionId: string | null;
+  reviewerSessionId: string | null;
   currentScopeNumber: number;
-  codexRetryCount: number;
-  lastCodexMarker: CodexMarker | null;
+  coderRetryCount: number;
+  lastScopeMarker: ScopeMarker | null;
   rounds: ReviewRound[];
   consultRounds: ConsultRound[];
   findings: ReviewFinding[];
