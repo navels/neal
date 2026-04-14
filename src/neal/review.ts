@@ -10,7 +10,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     '## Metadata',
     `- Plan: ${state.planDoc}`,
     `- Phase: ${state.phase}`,
-    `- Coder session: ${state.coderSessionId ?? 'pending'}`,
+    `- Coder session: ${state.coderSessionHandle ?? 'pending'}`,
     `- Base commit: ${state.baseCommit ?? 'unknown'}`,
     `- Final commit: ${state.finalCommit ?? 'pending'}`,
     '',

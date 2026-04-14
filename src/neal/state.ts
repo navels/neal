@@ -75,8 +75,8 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     archivedReviewPath: null,
     baseCommit,
     finalCommit: null,
-    coderSessionId: null,
-    reviewerSessionId: null,
+    coderSessionHandle: null,
+    reviewerSessionHandle: null,
     currentScopeNumber: 1,
     coderRetryCount: 0,
     lastScopeMarker: null,
@@ -150,13 +150,13 @@ function hydrateConsultRound(value: unknown): ConsultRound {
   return {
     number: typeof round.number === 'number' ? round.number : 0,
     sourcePhase: round.sourcePhase === 'coder_response' ? 'coder_response' : 'coder_scope',
-    coderSessionId:
-      typeof (round as { coderSessionId?: unknown }).coderSessionId === 'string'
-        ? (round as { coderSessionId: string }).coderSessionId
+    coderSessionHandle:
+      typeof (round as { coderSessionHandle?: unknown }).coderSessionHandle === 'string'
+        ? (round as { coderSessionHandle: string }).coderSessionHandle
         : null,
-    reviewerSessionId:
-      typeof (round as { reviewerSessionId?: unknown }).reviewerSessionId === 'string'
-        ? (round as { reviewerSessionId: string }).reviewerSessionId
+    reviewerSessionHandle:
+      typeof (round as { reviewerSessionHandle?: unknown }).reviewerSessionHandle === 'string'
+        ? (round as { reviewerSessionHandle: string }).reviewerSessionHandle
         : null,
     request: {
       summary: typeof round.request?.summary === 'string' ? round.request.summary : '',
@@ -237,9 +237,9 @@ function hydrateRound(value: unknown): ReviewRound {
 
   return {
     round: typeof round.round === 'number' ? round.round : 0,
-    reviewerSessionId:
-      typeof (round as { reviewerSessionId?: unknown }).reviewerSessionId === 'string'
-        ? (round as { reviewerSessionId: string }).reviewerSessionId
+    reviewerSessionHandle:
+      typeof (round as { reviewerSessionHandle?: unknown }).reviewerSessionHandle === 'string'
+        ? (round as { reviewerSessionHandle: string }).reviewerSessionHandle
         : null,
     commitRange: {
       base: typeof round.commitRange?.base === 'string' ? round.commitRange.base : '',
@@ -297,13 +297,13 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     progressMarkdownPath,
     consultMarkdownPath,
     phase: parsed.phase,
-    coderSessionId:
-      typeof (parsed as { coderSessionId?: unknown }).coderSessionId === 'string'
-        ? (parsed as { coderSessionId: string }).coderSessionId
+    coderSessionHandle:
+      typeof (parsed as { coderSessionHandle?: unknown }).coderSessionHandle === 'string'
+        ? (parsed as { coderSessionHandle: string }).coderSessionHandle
         : null,
-    reviewerSessionId:
-      typeof (parsed as { reviewerSessionId?: unknown }).reviewerSessionId === 'string'
-        ? (parsed as { reviewerSessionId: string }).reviewerSessionId
+    reviewerSessionHandle:
+      typeof (parsed as { reviewerSessionHandle?: unknown }).reviewerSessionHandle === 'string'
+        ? (parsed as { reviewerSessionHandle: string }).reviewerSessionHandle
         : null,
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
     coderRetryCount:

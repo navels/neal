@@ -13,12 +13,12 @@ import type {
 const DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS = Number(process.env.CODEX_INACTIVITY_TIMEOUT_MS ?? 600_000);
 
 export class OpenAICodexProviderError extends Error {
-  readonly threadId: string | null;
+  readonly sessionHandle: string | null;
 
-  constructor(message: string, threadId: string | null) {
+  constructor(message: string, sessionHandle: string | null) {
     super(message);
     this.name = 'OpenAICodexProviderError';
-    this.threadId = threadId;
+    this.sessionHandle = sessionHandle;
   }
 }
 
@@ -46,7 +46,7 @@ async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promi
   });
 }
 
-function createCodexThread(cwd: string, threadId?: string | null, model?: string): Thread {
+function createCodexThread(cwd: string, sessionHandle?: string | null, model?: string): Thread {
   const codex = new Codex();
   const threadOptions = {
     ...(model ? { model } : {}),
@@ -54,19 +54,19 @@ function createCodexThread(cwd: string, threadId?: string | null, model?: string
     sandboxMode: 'danger-full-access' as const,
     workingDirectory: cwd,
   };
-  return threadId
-    ? codex.resumeThread(threadId, threadOptions)
+  return sessionHandle
+    ? codex.resumeThread(sessionHandle, threadOptions)
     : codex.startThread(threadOptions);
 }
 
 async function consumeCodexTurn(
   turn: Awaited<ReturnType<Thread['runStreamed']>>,
   logger?: RunLogger,
-  onThreadStarted?: (threadId: string) => void | Promise<void>,
+  onSessionStarted?: (sessionHandle: string) => void | Promise<void>,
 ) {
   let finalResponse = '';
   let fatalError: string | null = null;
-  let threadId: string | null = null;
+  let sessionHandle: string | null = null;
   const iterator = turn.events[Symbol.asyncIterator]();
 
   while (true) {
@@ -75,7 +75,7 @@ async function consumeCodexTurn(
       next = await nextWithTimeout(iterator.next(), DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new OpenAICodexProviderError(message, threadId);
+      throw new OpenAICodexProviderError(message, sessionHandle);
     }
 
     if (next.done) {
@@ -85,10 +85,10 @@ async function consumeCodexTurn(
     const event = next.value;
     switch (event.type) {
       case 'thread.started':
-        threadId = event.thread_id;
+        sessionHandle = event.thread_id;
         writeDiagnostic(`[codex] thread ${event.thread_id}\n`, logger);
-        void logger?.event('coder.thread_started', { threadId: event.thread_id, provider: 'openai-codex' });
-        await onThreadStarted?.(event.thread_id);
+        void logger?.event('coder.thread_started', { sessionHandle: event.thread_id, provider: 'openai-codex' });
+        await onSessionStarted?.(event.thread_id);
         break;
       case 'item.completed':
         if (event.item.type === 'command_execution') {
@@ -121,10 +121,10 @@ async function consumeCodexTurn(
   }
 
   if (fatalError) {
-    throw new OpenAICodexProviderError(fatalError, threadId);
+    throw new OpenAICodexProviderError(fatalError, sessionHandle);
   }
 
-  return { finalResponse, threadId };
+  return { finalResponse, sessionHandle };
 }
 
 async function consumeCodexAdvisorTurn(
@@ -134,7 +134,7 @@ async function consumeCodexAdvisorTurn(
 ) {
   let finalResponse = '';
   let fatalError: string | null = null;
-  let threadId: string | null = null;
+  let sessionHandle: string | null = null;
   const iterator = turn.events[Symbol.asyncIterator]();
 
   while (true) {
@@ -143,7 +143,7 @@ async function consumeCodexAdvisorTurn(
       next = await nextWithTimeout(iterator.next(), DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new OpenAICodexProviderError(message, threadId);
+      throw new OpenAICodexProviderError(message, sessionHandle);
     }
 
     if (next.done) {
@@ -153,7 +153,7 @@ async function consumeCodexAdvisorTurn(
     const event = next.value;
     switch (event.type) {
       case 'thread.started':
-        threadId = event.thread_id;
+        sessionHandle = event.thread_id;
         writeDiagnostic(`[codex:${label}] thread ${event.thread_id}\n`, logger);
         void logger?.event('advisor.status', {
           label,
@@ -191,22 +191,22 @@ async function consumeCodexAdvisorTurn(
   }
 
   if (fatalError) {
-    throw new OpenAICodexProviderError(fatalError, threadId);
+    throw new OpenAICodexProviderError(fatalError, sessionHandle);
   }
 
-  return { finalResponse, threadId };
+  return { finalResponse, sessionHandle };
 }
 
 class OpenAICodexCoderAdapter implements CoderAdapter {
   constructor(private readonly options: { model?: string | null } = {}) {}
 
   async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
-    const thread = createCodexThread(args.cwd, args.threadId, this.options.model ?? undefined);
+    const thread = createCodexThread(args.cwd, args.resumeHandle, this.options.model ?? undefined);
     const streamedTurn = await thread.runStreamed(args.prompt, args.outputSchema ? { outputSchema: args.outputSchema } : undefined);
-    const result = await consumeCodexTurn(streamedTurn, args.logger, args.onThreadStarted);
+    const result = await consumeCodexTurn(streamedTurn, args.logger, args.onSessionStarted);
 
     return {
-      threadId: thread.id,
+      sessionHandle: thread.id,
       finalResponse: result.finalResponse,
     };
   }
@@ -216,7 +216,7 @@ class OpenAICodexStructuredAdvisorAdapter implements StructuredAdvisorAdapter {
   constructor(private readonly options: { model?: string | null } = {}) {}
 
   async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs): Promise<StructuredAdvisorRoundResult<TStructured>> {
-    const thread = createCodexThread(args.cwd, args.resumeSessionId, this.options.model ?? undefined);
+    const thread = createCodexThread(args.cwd, args.resumeHandle, this.options.model ?? undefined);
     const streamedTurn = await thread.runStreamed(args.prompt, { outputSchema: args.schema });
     const result = await consumeCodexAdvisorTurn(streamedTurn, args.label, args.logger);
 
@@ -231,7 +231,7 @@ class OpenAICodexStructuredAdvisorAdapter implements StructuredAdvisorAdapter {
     void args.logger?.event('advisor.result', { label: args.label, provider: 'openai-codex' });
 
     return {
-      sessionId: thread.id,
+      sessionHandle: thread.id,
       structured,
     };
   }

@@ -72,7 +72,7 @@ function printReviewResult(
 ) {
   const blocking = findings.filter((finding) => finding.severity === 'blocking').length;
   const nonBlocking = findings.length - blocking;
-  const header = kind === 'review' ? '[claude:review]' : '[claude:plan-review]';
+  const header = kind === 'review' ? '[reviewer:review]' : '[reviewer:plan-review]';
   const message = [
     `${header} summary: ${summary}`,
     `${header} findings: ${blocking} blocking, ${nonBlocking} non-blocking`,
@@ -98,16 +98,16 @@ function startPhaseHeartbeat(
     const payload = {
       phase,
       elapsedMs,
-      coderSessionId: state.coderSessionId,
-      reviewerSessionId: state.reviewerSessionId,
+      coderSessionHandle: state.coderSessionHandle,
+      reviewerSessionHandle: state.reviewerSessionHandle,
       currentScopeNumber: state.currentScopeNumber,
       topLevelMode: state.topLevelMode,
     };
     void logger.event('phase.heartbeat', payload);
     writeDiagnostic(
       `[neal] heartbeat phase=${phase} elapsed=${Math.round(elapsedMs / 1000)}s` +
-        `${state.coderSessionId ? ` coder=${state.coderSessionId}` : ''}` +
-        `${state.reviewerSessionId ? ` reviewer=${state.reviewerSessionId}` : ''}\n`,
+        `${state.coderSessionHandle ? ` coder=${state.coderSessionHandle}` : ''}` +
+        `${state.reviewerSessionHandle ? ` reviewer=${state.reviewerSessionHandle}` : ''}\n`,
       logger,
     );
   }, intervalMs);
@@ -124,14 +124,14 @@ async function persistCoderFailureState(
 ) {
   const failedState = await saveState(statePath, {
     ...state,
-    coderSessionId: error.threadId ?? state.coderSessionId,
+    coderSessionHandle: error.sessionHandle ?? state.coderSessionHandle,
     status: 'failed',
   });
   await writeExecutionArtifacts(failedState);
   await writeCheckpointRetrospective(failedState, 'failed');
   await logger?.event('phase.error', {
     phase,
-    threadId: error.threadId ?? state.coderSessionId,
+    sessionHandle: error.sessionHandle ?? state.coderSessionHandle,
     message: error.message,
   });
   return failedState;
@@ -182,8 +182,8 @@ function buildConsultRequest(args: {
   return {
     number: countConsultsForCurrentScope(args.state) + 1,
     sourcePhase: args.sourcePhase,
-    coderSessionId: args.state.coderSessionId,
-    reviewerSessionId: null,
+    coderSessionHandle: args.state.coderSessionHandle,
+    reviewerSessionHandle: null,
     request: {
       summary: trimmedSummary,
       blocker: trimmedBlocker,
@@ -353,23 +353,23 @@ function escapeForPkillPattern(text: string) {
   return text.replace(/[\\.^$|?*+()[\]{}]/g, '\\$&');
 }
 
-async function bestEffortCleanupTimedOutCoderResume(threadId: string | null, logger?: RunLogger) {
-  if (!threadId) {
+async function bestEffortCleanupTimedOutCoderResume(sessionHandle: string | null, logger?: RunLogger) {
+  if (!sessionHandle) {
     return;
   }
 
-  const pattern = `codex.*resume ${escapeForPkillPattern(threadId)}`;
+  const pattern = `codex.*resume ${escapeForPkillPattern(sessionHandle)}`;
   try {
     await execFile('pkill', ['-f', pattern]);
-    await logger?.event('codex.timeout_cleanup', {
-      threadId,
+    await logger?.event('coder.timeout_cleanup', {
+      sessionHandle,
       pattern,
       result: 'killed',
     });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
-    await logger?.event('codex.timeout_cleanup', {
-      threadId,
+    await logger?.event('coder.timeout_cleanup', {
+      sessionHandle,
       pattern,
       result: 'not_found_or_failed',
       details,
@@ -384,10 +384,10 @@ async function scheduleCoderTimeoutRetry(
   error: CoderRoundError,
   logger?: RunLogger,
 ) {
-  await bestEffortCleanupTimedOutCoderResume(error.threadId ?? state.coderSessionId, logger);
+  await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
   const retryState = await saveState(statePath, {
     ...state,
-    coderSessionId: null,
+    coderSessionHandle: null,
     coderRetryCount: state.coderRetryCount + 1,
     status: 'running',
     phase,
@@ -395,7 +395,7 @@ async function scheduleCoderTimeoutRetry(
   await writeExecutionArtifacts(retryState);
   await logger?.event('phase.retry', {
     phase,
-    threadId: error.threadId ?? state.coderSessionId,
+    sessionHandle: error.sessionHandle ?? state.coderSessionHandle,
     retryCount: retryState.coderRetryCount,
     message: error.message,
   });
@@ -420,12 +420,12 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
-      threadId: state.coderSessionId,
-      onThreadStarted: async (threadId) => {
-        state.coderSessionId = threadId;
+      sessionHandle: state.coderSessionHandle,
+      onSessionStarted: async (sessionHandle) => {
+        state.coderSessionHandle = sessionHandle;
         workingState = await saveState(statePath, {
           ...workingState,
-          coderSessionId: threadId,
+          coderSessionHandle: sessionHandle,
         });
       },
       logger,
@@ -436,7 +436,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
         return scheduleCoderTimeoutRetry(workingState, statePath, 'coder_scope', error, logger);
       }
       if (isCoderTimeoutError(error)) {
-        await bestEffortCleanupTimedOutCoderResume(error.threadId ?? workingState.coderSessionId, logger);
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
       }
       const failedState = await persistCoderFailureState(workingState, statePath, 'coder_scope', error, logger);
       if (isCoderTimeoutError(error)) {
@@ -451,7 +451,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
 
   const nextState = await saveState(statePath, {
     ...workingState,
-    coderSessionId: codex.threadId,
+    coderSessionHandle: codex.sessionHandle,
     lastScopeMarker: codex.marker as ScopeMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'reviewer_scope',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
@@ -464,7 +464,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
   await logger?.event('phase.complete', {
     phase: 'coder_scope',
     marker: codex.marker,
-    threadId: codex.threadId,
+    sessionHandle: codex.sessionHandle,
     createdCommits,
     nextPhase: nextState.phase,
   });
@@ -492,7 +492,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
         scopeNumber: consultState.currentScopeNumber,
         consultRound: consultRound?.number,
         sourcePhase: consultRound?.sourcePhase,
-        coderSessionId: consultRound?.coderSessionId,
+        coderSessionHandle: consultRound?.coderSessionHandle,
         blocker: consultRound?.request.blocker,
       });
       return consultState;
@@ -517,12 +517,12 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
       coder: state.agentConfig.coder,
       cwd: state.cwd,
       planDoc: state.planDoc,
-      threadId: state.coderSessionId,
-      onThreadStarted: async (threadId) => {
-        state.coderSessionId = threadId;
+      sessionHandle: state.coderSessionHandle,
+      onSessionStarted: async (sessionHandle) => {
+        state.coderSessionHandle = sessionHandle;
         workingState = await saveState(statePath, {
           ...workingState,
-          coderSessionId: threadId,
+          coderSessionHandle: sessionHandle,
         });
       },
       logger,
@@ -533,7 +533,7 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
         return scheduleCoderTimeoutRetry(workingState, statePath, 'coder_plan', error, logger);
       }
       if (isCoderTimeoutError(error)) {
-        await bestEffortCleanupTimedOutCoderResume(error.threadId ?? workingState.coderSessionId, logger);
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
       }
       await persistCoderFailureState(workingState, statePath, 'coder_plan', error, logger);
     }
@@ -543,7 +543,7 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
 
   const nextState = await saveState(statePath, {
     ...workingState,
-    coderSessionId: codex.threadId,
+    coderSessionHandle: codex.sessionHandle,
     lastScopeMarker: codex.marker as ScopeMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'reviewer_plan',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
@@ -554,7 +554,7 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
   await logger?.event('phase.complete', {
     phase: 'coder_plan',
     marker: codex.marker,
-    threadId: codex.threadId,
+    sessionHandle: codex.sessionHandle,
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked') {
@@ -600,14 +600,14 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
     if (error instanceof ReviewerRoundError) {
       const failedState = await saveState(statePath, {
         ...state,
-        reviewerSessionId: error.sessionId,
+        reviewerSessionHandle: error.sessionHandle,
         status: 'failed',
       });
       await writeExecutionArtifacts(failedState);
       await logger?.event('phase.error', {
         phase: 'reviewer_scope',
         round,
-        sessionId: error.sessionId,
+        sessionHandle: error.sessionHandle,
         subtype: error.subtype,
         message: error.message,
       });
@@ -646,7 +646,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
 
   const nextState = await saveState(statePath, {
     ...state,
-    reviewerSessionId: claude.sessionId,
+    reviewerSessionHandle: claude.sessionHandle,
     phase: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
@@ -665,7 +665,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
       ...state.rounds,
       {
         round,
-        reviewerSessionId: claude.sessionId,
+        reviewerSessionHandle: claude.sessionHandle,
         commitRange: {
           base: state.baseCommit,
           head: headCommit,
@@ -682,7 +682,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   await logger?.event('phase.complete', {
     phase: 'reviewer_scope',
     round,
-    sessionId: claude.sessionId,
+    sessionHandle: claude.sessionHandle,
     findings: findings.length,
     blockingFindings: findings.filter((finding) => finding.severity === 'blocking').length,
     nextPhase: nextState.phase,
@@ -712,14 +712,14 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
     if (error instanceof ReviewerRoundError) {
       const failedState = await saveState(statePath, {
         ...state,
-        reviewerSessionId: error.sessionId,
+        reviewerSessionHandle: error.sessionHandle,
         status: 'failed',
       });
       await writeExecutionArtifacts(failedState);
       await logger?.event('phase.error', {
         phase: 'reviewer_plan',
         round,
-        sessionId: error.sessionId,
+        sessionHandle: error.sessionHandle,
         subtype: error.subtype,
         message: error.message,
       });
@@ -758,7 +758,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
 
   const nextState = await saveState(statePath, {
     ...state,
-    reviewerSessionId: claude.sessionId,
+    reviewerSessionHandle: claude.sessionHandle,
     phase: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
@@ -777,7 +777,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       ...state.rounds,
       {
         round,
-        reviewerSessionId: claude.sessionId,
+        reviewerSessionHandle: claude.sessionHandle,
         commitRange: {
           base: state.baseCommit ?? '',
           head: state.finalCommit ?? state.baseCommit ?? '',
@@ -794,7 +794,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   await logger?.event('phase.complete', {
     phase: 'reviewer_plan',
     round,
-    sessionId: claude.sessionId,
+    sessionHandle: claude.sessionHandle,
     findings: findings.length,
     blockingFindings: findings.filter((finding) => finding.severity === 'blocking').length,
     nextPhase: nextState.phase,
@@ -831,14 +831,14 @@ async function runConsultPhase(state: OrchestrationState, statePath: string, log
     if (error instanceof ReviewerRoundError) {
       const failedState = await saveState(statePath, {
         ...state,
-        reviewerSessionId: error.sessionId,
+        reviewerSessionHandle: error.sessionHandle,
         status: 'failed',
       });
       await writeExecutionArtifacts(failedState);
       await logger?.event('phase.error', {
         phase: 'reviewer_consult',
         consultRound: consultRound.number,
-        sessionId: error.sessionId,
+        sessionHandle: error.sessionHandle,
         subtype: error.subtype,
         message: error.message,
       });
@@ -848,14 +848,14 @@ async function runConsultPhase(state: OrchestrationState, statePath: string, log
 
   const nextState = await saveState(statePath, {
     ...state,
-    reviewerSessionId: claude.sessionId,
+    reviewerSessionHandle: claude.sessionHandle,
     phase: 'coder_consult_response',
     status: 'running',
     consultRounds: state.consultRounds.map((round) =>
       round.number === consultRound.number
         ? {
             ...round,
-            reviewerSessionId: claude.sessionId,
+            reviewerSessionHandle: claude.sessionHandle,
             response: claude.response,
           }
         : round,
@@ -867,8 +867,8 @@ async function runConsultPhase(state: OrchestrationState, statePath: string, log
     scopeNumber: nextState.currentScopeNumber,
     consultRound: consultRound.number,
     sourcePhase: consultRound.sourcePhase,
-    coderSessionId: consultRound.coderSessionId,
-    reviewerSessionId: claude.sessionId,
+    coderSessionHandle: consultRound.coderSessionHandle,
+    reviewerSessionHandle: claude.sessionHandle,
     recoverable: claude.response.recoverable,
   });
   await logger?.event('phase.complete', {
@@ -1046,7 +1046,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
         files: finding.files,
         roundSummary: finding.roundSummary,
       })),
-      threadId: state.coderSessionId,
+      sessionHandle: state.coderSessionHandle,
       logger,
     });
   } catch (error) {
@@ -1055,7 +1055,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
         return scheduleCoderTimeoutRetry(state, statePath, 'coder_response', error, logger);
       }
       if (isCoderTimeoutError(error)) {
-        await bestEffortCleanupTimedOutCoderResume(error.threadId ?? state.coderSessionId, logger);
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
       const failedState = await persistCoderFailureState(state, statePath, 'coder_response', error, logger);
       if (isCoderTimeoutError(error)) {
@@ -1085,7 +1085,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
 
   const nextState = await saveState(statePath, {
     ...state,
-    coderSessionId: codex.threadId,
+    coderSessionHandle: codex.sessionHandle,
     findings,
     createdCommits: [...state.createdCommits, ...createdCommits],
     phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'reviewer_scope',
@@ -1126,7 +1126,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
         scopeNumber: consultState.currentScopeNumber,
         consultRound: consultRound?.number,
         sourcePhase: consultRound?.sourcePhase,
-        coderSessionId: consultRound?.coderSessionId,
+        coderSessionHandle: consultRound?.coderSessionHandle,
         blocker: consultRound?.request.blocker,
       });
       return consultState;
@@ -1156,7 +1156,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
       consultMarkdownPath: state.consultMarkdownPath,
       request: consultRound.request,
       response: consultRound.response,
-      threadId: state.coderSessionId,
+      sessionHandle: state.coderSessionHandle,
       logger,
     });
   } catch (error) {
@@ -1173,7 +1173,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
   const nextPhase = codex.payload.outcome === 'resumed' ? consultRound.sourcePhase : 'blocked';
   const nextState = await saveState(statePath, {
     ...state,
-    coderSessionId: codex.threadId,
+    coderSessionHandle: codex.sessionHandle,
     createdCommits: [...state.createdCommits, ...createdCommits],
     phase: nextPhase,
     status: codex.payload.outcome === 'resumed' ? 'running' : 'blocked',
@@ -1182,7 +1182,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
       round.number === consultRound.number
         ? {
             ...round,
-            coderSessionId: codex.threadId,
+            coderSessionHandle: codex.sessionHandle,
             disposition: codex.payload,
           }
         : round,
@@ -1194,7 +1194,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
     scopeNumber: nextState.currentScopeNumber,
     consultRound: consultRound.number,
     sourcePhase: consultRound.sourcePhase,
-    coderSessionId: codex.threadId,
+    coderSessionHandle: codex.sessionHandle,
     outcome: codex.payload.outcome,
   });
   await logger?.event('phase.complete', {
@@ -1213,7 +1213,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
 }
 
 async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  if (!state.coderSessionId) {
+  if (!state.coderSessionHandle) {
     throw new Error('Cannot run coder plan response phase without an existing coder session');
   }
 
@@ -1249,7 +1249,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
         files: finding.files,
         roundSummary: finding.roundSummary,
       })),
-      threadId: state.coderSessionId,
+      sessionHandle: state.coderSessionHandle,
       logger,
     });
   } catch (error) {
@@ -1258,7 +1258,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
         return scheduleCoderTimeoutRetry(state, statePath, 'coder_plan_response', error, logger);
       }
       if (isCoderTimeoutError(error)) {
-        await bestEffortCleanupTimedOutCoderResume(error.threadId ?? state.coderSessionId, logger);
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
       await persistCoderFailureState(state, statePath, 'coder_plan_response', error, logger);
     }
@@ -1282,7 +1282,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
 
   const nextState = await saveState(statePath, {
     ...state,
-    coderSessionId: codex.threadId,
+    coderSessionHandle: codex.sessionHandle,
     findings,
     phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'reviewer_plan',
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
@@ -1354,7 +1354,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
           ...state,
           baseCommit: finalCommit,
           finalCommit: null,
-          coderSessionId: null,
+          coderSessionHandle: null,
           currentScopeNumber: state.currentScopeNumber + 1,
           lastScopeMarker: null,
           rounds: [],
@@ -1405,7 +1405,7 @@ export async function runOnePass(
   logger?: RunLogger,
   options?: {
     shouldStopAfterCurrentScope?: () => boolean;
-    onCoderSession?: (sessionId: string | null) => void;
+    onCoderSessionHandle?: (sessionHandle: string | null) => void;
   },
 ) {
   let currentState = state;
@@ -1425,7 +1425,7 @@ export async function runOnePass(
     try {
     if (currentState.phase === 'coder_plan') {
       currentState = await runCoderPlanPhase(currentState, statePath, logger);
-      options?.onCoderSession?.(currentState.coderSessionId);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
       continue;
     }
 
@@ -1436,13 +1436,13 @@ export async function runOnePass(
 
     if (currentState.phase === 'coder_plan_response') {
       currentState = await runCoderPlanResponsePhase(currentState, statePath, logger);
-      options?.onCoderSession?.(currentState.coderSessionId);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
       continue;
     }
 
     if (currentState.phase === 'coder_scope') {
       currentState = await runCoderScopePhase(currentState, statePath, logger);
-      options?.onCoderSession?.(currentState.coderSessionId);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
       continue;
     }
 
@@ -1453,7 +1453,7 @@ export async function runOnePass(
 
     if (currentState.phase === 'coder_response') {
       currentState = await runCoderResponsePhase(currentState, statePath, logger);
-      options?.onCoderSession?.(currentState.coderSessionId);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
       continue;
     }
 
@@ -1464,7 +1464,7 @@ export async function runOnePass(
 
     if (currentState.phase === 'coder_consult_response') {
       currentState = await runCoderConsultResponsePhase(currentState, statePath, logger);
-      options?.onCoderSession?.(currentState.coderSessionId);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
       continue;
     }
 
@@ -1522,7 +1522,7 @@ export async function loadOrInitialize(
       agentConfig: state.agentConfig,
     });
 
-    if (state.status === 'blocked' && state.coderSessionId && isResumableBlockedPhase(state.blockedFromPhase)) {
+    if (state.status === 'blocked' && state.coderSessionHandle && isResumableBlockedPhase(state.blockedFromPhase)) {
       state = await saveState(resumeStatePath, {
         ...state,
         phase: state.blockedFromPhase,
@@ -1531,7 +1531,7 @@ export async function loadOrInitialize(
       await logger.event('run.resumed_from_blocked', {
         statePath: resumeStatePath,
         blockedFromPhase: state.blockedFromPhase,
-        coderSessionId: state.coderSessionId,
+        coderSessionHandle: state.coderSessionHandle,
       });
     }
 

@@ -229,8 +229,8 @@ function summarizeCompletedScopes(state: OrchestrationState) {
     .join('\n');
 }
 
-function getLatestReviewerSessionId(state: OrchestrationState) {
-  return state.reviewerSessionId ?? state.rounds.at(-1)?.reviewerSessionId ?? null;
+function getLatestReviewerSessionHandle(state: OrchestrationState) {
+  return state.reviewerSessionHandle ?? state.rounds.at(-1)?.reviewerSessionHandle ?? null;
 }
 
 async function summarizeChangedFiles(state: OrchestrationState) {
@@ -276,7 +276,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const verificationSummary = summarizeVerification(commands);
   const assessment = buildAssessment(state, scopeEvents);
   const completedScopesSummary = kind === 'done' ? summarizeCompletedScopes(state) : null;
-  const latestReviewerSessionId = getLatestReviewerSessionId(state);
+  const latestReviewerSessionHandle = getLatestReviewerSessionHandle(state);
   const blockerSummary = kind === 'blocked' || kind === 'failed' ? summarizeBlocker(state) : null;
 
   return [
@@ -289,8 +289,8 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     `- Scope: ${state.currentScopeNumber}`,
     `- Status: ${state.status}`,
     `- Final commit: ${state.finalCommit ?? 'n/a'}`,
-    `- Coder session: ${state.coderSessionId ?? 'n/a'}`,
-    `- Reviewer session: ${latestReviewerSessionId ?? 'n/a'}`,
+    `- Coder session: ${state.coderSessionHandle ?? 'n/a'}`,
+    `- Reviewer session: ${latestReviewerSessionHandle ?? 'n/a'}`,
     `- Reviewer rounds: ${state.rounds.length}`,
     `- Findings: ${findings.total} total (${findings.blocking} blocking, ${findings.non_blocking} non-blocking)`,
     `- Coder dispositions: ${dispositions.fixed} fixed, ${dispositions.rejected} rejected, ${dispositions.deferred} deferred`,

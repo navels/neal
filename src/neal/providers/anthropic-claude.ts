@@ -21,13 +21,13 @@ type ClaudeLogState = {
 };
 
 export class AnthropicClaudeProviderError extends Error {
-  readonly sessionId: string | null;
+  readonly sessionHandle: string | null;
   readonly subtype: string | null;
 
-  constructor(message: string, sessionId: string | null, subtype: string | null) {
+  constructor(message: string, sessionHandle: string | null, subtype: string | null) {
     super(message);
     this.name = 'AnthropicClaudeProviderError';
-    this.sessionId = sessionId;
+    this.sessionHandle = sessionHandle;
     this.subtype = subtype;
   }
 }
@@ -169,7 +169,7 @@ async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label:
 }
 
 async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, label: string, logger?: RunLogger) {
-  let sessionId: string | null = null;
+  let sessionHandle: string | null = null;
   let lastResult: SDKResultMessage | null = null;
   const logState: ClaudeLogState = { textBuffer: '', sawTextDelta: false };
   const assistantTexts: string[] = [];
@@ -182,7 +182,7 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, lab
     }
 
     const message = next.value;
-    sessionId = sessionId ?? message.session_id ?? null;
+    sessionHandle = sessionHandle ?? message.session_id ?? null;
     if (message.type === 'assistant') {
       const textBlocks = message.message.content
         .filter((block): block is Extract<(typeof message.message.content)[number], { type: 'text' }> => block.type === 'text')
@@ -199,7 +199,7 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, lab
   }
 
   flushClaudeText(label, logState, logger);
-  return { sessionId, lastResult, assistantText: assistantTexts.join('\n\n').trim() };
+  return { sessionHandle, lastResult, assistantText: assistantTexts.join('\n\n').trim() };
 }
 
 function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?: string | null) {
@@ -212,7 +212,7 @@ function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?:
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       maxTurns: DEFAULT_CLAUDE_MAX_TURNS,
-      ...(args.resumeSessionId ? { resume: args.resumeSessionId } : {}),
+      ...(args.resumeHandle ? { resume: args.resumeHandle } : {}),
       stderr: (data) => {
         writeDiagnostic(`[claude:${args.label}:stderr] ${data}`, args.logger);
       },
@@ -261,7 +261,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
   constructor(private readonly options: { model?: string | null } = {}) {}
 
   async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs): Promise<StructuredAdvisorRoundResult<TStructured>> {
-    let sessionId: string | null = args.resumeSessionId ?? null;
+    let sessionHandle: string | null = args.resumeHandle ?? null;
     let attempt = 0;
     let apiRetryCount = 0;
     let lastResult: SDKResultMessage | null = null;
@@ -276,7 +276,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
               'Present your final structured findings now. If there are no findings, return an empty findings array.',
             ].join('\n');
 
-      const stream = buildClaudeQueryStream({ ...args, prompt, resumeSessionId: sessionId }, this.options.model);
+      const stream = buildClaudeQueryStream({ ...args, prompt, resumeHandle: sessionHandle }, this.options.model);
       let result;
       try {
         result = await collectClaudeResult(stream, args.label, args.logger);
@@ -290,7 +290,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
           );
           void args.logger?.event('advisor.api_retry', {
             label: args.label,
-            sessionId,
+            sessionHandle,
             retryCount: apiRetryCount,
             retryLimit: DEFAULT_CLAUDE_API_RETRY_LIMIT,
             message,
@@ -298,15 +298,15 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
           });
           continue;
         }
-        throw new AnthropicClaudeProviderError(message, sessionId, 'api_error');
+        throw new AnthropicClaudeProviderError(message, sessionHandle, 'api_error');
       }
 
-      sessionId = result.sessionId ?? sessionId;
+      sessionHandle = result.sessionHandle ?? sessionHandle;
       lastResult = result.lastResult;
       const structured = (lastResult as { structured_output?: TStructured } | null)?.structured_output;
       if (structured) {
         return {
-          sessionId,
+          sessionHandle,
           structured,
         };
       }
@@ -321,7 +321,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
         );
         void args.logger?.event('advisor.api_retry', {
           label: args.label,
-          sessionId,
+          sessionHandle,
           retryCount: apiRetryCount,
           retryLimit: DEFAULT_CLAUDE_API_RETRY_LIMIT,
           subtype,
@@ -330,12 +330,12 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
         });
         continue;
       }
-      if (subtype !== 'error_max_turns' || !sessionId || attempt === DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
+      if (subtype !== 'error_max_turns' || !sessionHandle || attempt === DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
         throw new AnthropicClaudeProviderError(
           resultErrorMessage
             ? `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}: ${resultErrorMessage}`
             : `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}`,
-          sessionId,
+          sessionHandle,
           subtype,
         );
       }
@@ -346,7 +346,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
       );
       void args.logger?.event('advisor.round_continuation', {
         label: args.label,
-        sessionId,
+        sessionHandle,
         attempt: attempt + 1,
         continuationLimit: DEFAULT_CLAUDE_CONTINUATION_LIMIT,
         provider: 'anthropic-claude',
@@ -354,7 +354,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
       attempt += 1;
     }
 
-    throw new AnthropicClaudeProviderError(`Claude ${args.label} did not return structured output`, sessionId, lastResult?.subtype ?? null);
+    throw new AnthropicClaudeProviderError(`Claude ${args.label} did not return structured output`, sessionHandle, lastResult?.subtype ?? null);
   }
 }
 
@@ -367,7 +367,7 @@ function buildClaudeCoderQueryStream(args: CoderRunPromptArgs, defaultModel?: st
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      ...(args.threadId ? { resume: args.threadId } : {}),
+      ...(args.resumeHandle ? { resume: args.resumeHandle } : {}),
       ...(args.outputSchema
         ? {
             outputFormat: {
@@ -389,10 +389,10 @@ class AnthropicClaudeCoderAdapter implements CoderAdapter {
   async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
     const stream = buildClaudeCoderQueryStream(args, this.options.model);
     const result = await collectClaudeResult(stream, 'coder', args.logger);
-    const sessionId = result.sessionId ?? args.threadId ?? null;
+    const sessionHandle = result.sessionHandle ?? args.resumeHandle ?? null;
 
-    if (sessionId && sessionId !== args.threadId) {
-      await args.onThreadStarted?.(sessionId);
+    if (sessionHandle && sessionHandle !== args.resumeHandle) {
+      await args.onSessionStarted?.(sessionHandle);
     }
 
     const subtype = result.lastResult?.subtype ?? null;
@@ -402,7 +402,7 @@ class AnthropicClaudeCoderAdapter implements CoderAdapter {
         resultErrorMessage
           ? `Claude coder did not return a successful result (${subtype}): ${resultErrorMessage}`
           : `Claude coder did not return a successful result (${subtype})`,
-        sessionId,
+        sessionHandle,
         subtype,
       );
     }
@@ -410,22 +410,22 @@ class AnthropicClaudeCoderAdapter implements CoderAdapter {
     if (args.outputSchema) {
       const structuredOutput = (result.lastResult as { structured_output?: unknown } | null)?.structured_output;
       if (structuredOutput === undefined) {
-        throw new AnthropicClaudeProviderError('Claude coder did not return structured output', sessionId, subtype);
+        throw new AnthropicClaudeProviderError('Claude coder did not return structured output', sessionHandle, subtype);
       }
 
       return {
-        threadId: sessionId,
+        sessionHandle: sessionHandle,
         finalResponse: JSON.stringify(structuredOutput),
       };
     }
 
     const finalResponse = result.assistantText || getClaudeResultErrorMessage(result.lastResult) || '';
     if (!finalResponse.trim()) {
-      throw new AnthropicClaudeProviderError('Claude coder returned no final response', sessionId, subtype);
+      throw new AnthropicClaudeProviderError('Claude coder returned no final response', sessionHandle, subtype);
     }
 
     return {
-      threadId: sessionId,
+      sessionHandle: sessionHandle,
       finalResponse,
     };
   }

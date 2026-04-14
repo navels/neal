@@ -32,7 +32,7 @@ function isAgentProvider(value: string): value is AgentProvider {
 async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['state'], statePath: string, logger: RunLogger) {
   runLogger = logger;
   const stopController = createStopController();
-  let lastCoderSessionId: string | null = state.coderSessionId;
+  let lastCoderSessionHandle: string | null = state.coderSessionHandle;
   let shouldResumeLastThread = false;
 
   if (process.stdin.isTTY) {
@@ -45,9 +45,9 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
       shouldStopAfterCurrentScope() {
         return stopController.isStopRequested();
       },
-      onCoderSession(sessionId) {
-        if (sessionId) {
-          lastCoderSessionId = sessionId;
+      onCoderSessionHandle(sessionHandle) {
+        if (sessionHandle) {
+          lastCoderSessionHandle = sessionHandle;
         }
       },
     });
@@ -55,7 +55,7 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
       stopController.isStopRequested() &&
       finalState.phase === 'coder_scope' &&
       finalState.status === 'running' &&
-      Boolean(lastCoderSessionId);
+      Boolean(lastCoderSessionHandle);
   } finally {
     stopController.cleanup();
   }
@@ -77,8 +77,8 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
         archivedReviewPath: finalState.archivedReviewPath,
         baseCommit: finalState.baseCommit,
         finalCommit: finalState.finalCommit,
-        coderSessionId: finalState.coderSessionId,
-        reviewerSessionId: finalState.reviewerSessionId,
+        coderSessionHandle: finalState.coderSessionHandle,
+        reviewerSessionHandle: finalState.reviewerSessionHandle,
         rounds: finalState.rounds.length,
         findings: finalState.findings.length,
       },
@@ -87,9 +87,9 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
     ) + '\n',
   );
 
-  if (shouldResumeLastThread && lastCoderSessionId) {
-    process.stderr.write(`[neal] resuming ${lastCoderSessionId}\n`);
-    await resumeLastThread(lastCoderSessionId);
+  if (shouldResumeLastThread && lastCoderSessionHandle) {
+    process.stderr.write(`[neal] resuming ${lastCoderSessionHandle}\n`);
+    await resumeLastCoderSession(lastCoderSessionHandle);
   }
 }
 
@@ -117,9 +117,9 @@ async function createInlineExecutePlanDoc(cwd: string, prompt: string) {
   return filePath;
 }
 
-async function resumeLastThread(threadId: string) {
+async function resumeLastCoderSession(sessionHandle: string) {
   await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn('codex', ['resume', threadId], {
+    const child = spawn('codex', ['resume', sessionHandle], {
       stdio: 'inherit',
     });
 
@@ -297,8 +297,8 @@ void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   void runLogger?.event('run.failed', {
     message,
-    coderSessionId: error instanceof CoderRoundError ? error.threadId : null,
-    reviewerSessionId: error instanceof ReviewerRoundError ? error.sessionId : null,
+    coderSessionHandle: error instanceof CoderRoundError ? error.sessionHandle : null,
+    reviewerSessionHandle: error instanceof ReviewerRoundError ? error.sessionHandle : null,
     reviewerSubtype: error instanceof ReviewerRoundError ? error.subtype : null,
   });
   if (error instanceof Error && error.stack) {
@@ -306,10 +306,10 @@ void main().catch((error: unknown) => {
   } else {
     void runLogger?.stderr(`[fatal] ${message}\n`);
   }
-  if (error instanceof CoderRoundError && error.threadId) {
-    process.stderr.write(`[neal] ${message} (coder session: ${error.threadId})\n`);
-  } else if (error instanceof ReviewerRoundError && error.sessionId) {
-    process.stderr.write(`[neal] ${message} (reviewer session: ${error.sessionId})\n`);
+  if (error instanceof CoderRoundError && error.sessionHandle) {
+    process.stderr.write(`[neal] ${message} (coder session: ${error.sessionHandle})\n`);
+  } else if (error instanceof ReviewerRoundError && error.sessionHandle) {
+    process.stderr.write(`[neal] ${message} (reviewer session: ${error.sessionHandle})\n`);
   } else {
     process.stderr.write(`[neal] ${message}\n`);
   }

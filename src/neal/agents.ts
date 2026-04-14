@@ -4,7 +4,7 @@ import type { RunLogger } from './logger.js';
 import { AnthropicClaudeProviderError } from './providers/anthropic-claude.js';
 import { OpenAICodexProviderError } from './providers/openai-codex.js';
 import { getCoderAdapter, getStructuredAdvisorAdapter } from './providers/registry.js';
-import type { AgentRoleConfig, CoderConsultDisposition, CoderConsultRequest, ReviewFinding, ReviewerConsultResponse } from './types.js';
+import type { AgentRoleConfig, CoderConsultDisposition, CoderConsultRequest, ReviewFinding, ReviewerConsultResponse, ScopeMarker } from './types.js';
 
 const AUTONOMY_SCOPE_DONE = 'AUTONOMY_SCOPE_DONE';
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
@@ -71,11 +71,11 @@ function buildScopePrompt(planDoc: string, progressText: string) {
   ].join('\n');
 }
 
-function extractMarker(message: string) {
+function extractMarker(message: string): ScopeMarker | null {
   for (const rawLine of message.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line === AUTONOMY_SCOPE_DONE || line === AUTONOMY_CHUNK_DONE || line === AUTONOMY_DONE || line === AUTONOMY_BLOCKED) {
-      return line;
+      return line as ScopeMarker;
     }
   }
 
@@ -108,24 +108,24 @@ type CoderResponsePayload = {
 type CoderConsultDispositionPayload = CoderConsultDisposition;
 
 export class ReviewerRoundError extends Error {
-  readonly sessionId: string | null;
+  readonly sessionHandle: string | null;
   readonly subtype: string | null;
 
-  constructor(message: string, sessionId: string | null, subtype: string | null) {
+  constructor(message: string, sessionHandle: string | null, subtype: string | null) {
     super(message);
     this.name = 'ReviewerRoundError';
-    this.sessionId = sessionId;
+    this.sessionHandle = sessionHandle;
     this.subtype = subtype;
   }
 }
 
 export class CoderRoundError extends Error {
-  readonly threadId: string | null;
+  readonly sessionHandle: string | null;
 
-  constructor(message: string, threadId: string | null) {
+  constructor(message: string, sessionHandle: string | null) {
     super(message);
     this.name = 'CoderRoundError';
-    this.threadId = threadId;
+    this.sessionHandle = sessionHandle;
   }
 }
 
@@ -147,8 +147,24 @@ function parseCoderConsultDispositionPayload(raw: string): CoderConsultDispositi
   }
 }
 
-function reviewerHasRepoTools(config: AgentRoleConfig) {
-  return config.provider === 'openai-codex' || config.provider === 'anthropic-claude';
+function translateReviewerProviderError(error: unknown): ReviewerRoundError | unknown {
+  if (error instanceof AnthropicClaudeProviderError) {
+    return new ReviewerRoundError(error.message, error.sessionHandle, error.subtype);
+  }
+  if (error instanceof OpenAICodexProviderError) {
+    return new ReviewerRoundError(error.message, error.sessionHandle, null);
+  }
+  return error;
+}
+
+function translateCoderProviderError(error: unknown): CoderRoundError | unknown {
+  if (error instanceof OpenAICodexProviderError) {
+    return new CoderRoundError(error.message, error.sessionHandle);
+  }
+  if (error instanceof AnthropicClaudeProviderError) {
+    return new CoderRoundError(error.message, error.sessionHandle);
+  }
+  return error;
 }
 
 async function safeReadText(path: string) {
@@ -159,7 +175,6 @@ async function safeReadText(path: string) {
   }
 }
 
-
 async function runReviewerStructuredRound(args: {
   reviewer: AgentRoleConfig;
   label: 'review' | 'plan-review' | 'consult';
@@ -167,7 +182,7 @@ async function runReviewerStructuredRound(args: {
   prompt: string;
   schema: Record<string, unknown>;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; structured: ReviewerPayload }> {
+}): Promise<{ sessionHandle: string | null; structured: ReviewerPayload }> {
   try {
     const advisor = getStructuredAdvisorAdapter(args.reviewer);
     const result = await advisor.runStructuredRound<ReviewerPayload>({
@@ -179,17 +194,11 @@ async function runReviewerStructuredRound(args: {
     });
 
     return {
-      sessionId: result.sessionId,
+      sessionHandle: result.sessionHandle,
       structured: result.structured,
     };
   } catch (error) {
-    if (error instanceof AnthropicClaudeProviderError) {
-      throw new ReviewerRoundError(error.message, error.sessionId, error.subtype);
-    }
-    if (error instanceof OpenAICodexProviderError) {
-      throw new ReviewerRoundError(error.message, error.threadId, null);
-    }
-    throw error;
+    throw translateReviewerProviderError(error);
   }
 }
 
@@ -207,7 +216,7 @@ export async function runReviewerRound(args: {
   round: number;
   reviewMarkdownPath: string;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
+}): Promise<{ sessionHandle: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
   const changedFilesText = args.changedFiles.length > 0 ? args.changedFiles.join('\n') : '(no changed files)';
   const commitsText = args.commits.length > 0 ? args.commits.join('\n') : '(no commits recorded)';
 
@@ -234,65 +243,36 @@ export async function runReviewerRound(args: {
     additionalProperties: false,
   } as const;
 
-  const prompt = reviewerHasRepoTools(args.reviewer)
-    ? [
-        `Review the current scope for plan ${args.planDoc}.`,
-        `Review round: ${args.round}.`,
-        `Commit range: ${args.baseCommit}..${args.headCommit}.`,
-        'Review that commit range directly with repository tools. The commit range is the source of truth for this review.',
-        '',
-        'Produce only structured review findings.',
-        'Use blocking severity for correctness, regression, or missing-verification issues.',
-        'Use non_blocking severity for suggestions that do not block acceptance.',
-        'Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.',
-        'Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.',
-        'If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
-        'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
-        args.previousHeadCommit
-          ? `Previous reviewer head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
-          : 'This is the first reviewer round for this scope.',
-        '',
-        'Commits in scope:',
-        commitsText,
-        '',
-        'Diff stat:',
-        args.diffStat || '(no diff stat)',
-        '',
-        'Changed files:',
-        changedFilesText,
-        '',
-        `Prior review history is available at ${args.reviewMarkdownPath} if you need earlier reviewer findings or coder responses, but review the current commit range directly.`,
-      ].join('\n')
-    : [
-        `Review the current scope for plan ${args.planDoc}.`,
-        `Review round: ${args.round}.`,
-        `Commit range: ${args.baseCommit}..${args.headCommit}.`,
-        'You do not have direct repository tool access in this adapter. Review only the supplied commit metadata and unified diff below.',
-        '',
-        'Produce only structured review findings.',
-        'Use blocking severity for correctness, regression, or missing-verification issues.',
-        'Use non_blocking severity for suggestions that do not block acceptance.',
-        'Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.',
-        'Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.',
-        'If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
-        args.previousHeadCommit
-          ? `Previous review head was ${args.previousHeadCommit}. Focus especially on changes since that commit.`
-          : 'This is the first review round for this scope.',
-        '',
-        'Commits in scope:',
-        commitsText,
-        '',
-        'Diff stat:',
-        args.diffStat || '(no diff stat)',
-        '',
-        'Changed files:',
-        changedFilesText,
-        '',
-        'Unified diff:',
-        args.diff || '(no diff)',
-      ].join('\n');
+  const prompt = [
+    `Review the current scope for plan ${args.planDoc}.`,
+    `Review round: ${args.round}.`,
+    `Commit range: ${args.baseCommit}..${args.headCommit}.`,
+    'Review that commit range directly with repository tools. The commit range is the source of truth for this review.',
+    '',
+    'Produce only structured review findings.',
+    'Use blocking severity for correctness, regression, or missing-verification issues.',
+    'Use non_blocking severity for suggestions that do not block acceptance.',
+    'Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.',
+    'Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.',
+    'If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.',
+    'Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.',
+    args.previousHeadCommit
+      ? `Previous reviewer head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
+      : 'This is the first reviewer round for this scope.',
+    '',
+    'Commits in scope:',
+    commitsText,
+    '',
+    'Diff stat:',
+    args.diffStat || '(no diff stat)',
+    '',
+    'Changed files:',
+    changedFilesText,
+    '',
+    `Prior review history is available at ${args.reviewMarkdownPath} if you need earlier reviewer findings or coder responses, but review the current commit range directly.`,
+  ].join('\n');
 
-  const { sessionId, structured } = await runReviewerStructuredRound({
+  const { sessionHandle, structured } = await runReviewerStructuredRound({
     reviewer: args.reviewer,
     label: 'review',
     cwd: args.cwd,
@@ -302,7 +282,7 @@ export async function runReviewerRound(args: {
   });
 
   return {
-    sessionId,
+    sessionHandle,
     summary: structured.summary,
     findings: structured.findings.map((finding) => ({
       round: args.round,
@@ -322,9 +302,7 @@ export async function runPlanReviewerRound(args: {
   round: number;
   reviewMarkdownPath: string;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
-  const planText = reviewerHasRepoTools(args.reviewer) ? '' : await safeReadText(args.planDoc);
-  const reviewHistoryText = reviewerHasRepoTools(args.reviewer) ? '' : await safeReadText(args.reviewMarkdownPath);
+}): Promise<{ sessionHandle: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
   const schema = {
     type: 'object',
     properties: {
@@ -348,41 +326,23 @@ export async function runPlanReviewerRound(args: {
     additionalProperties: false,
   } as const;
 
-  const prompt = reviewerHasRepoTools(args.reviewer)
-    ? [
-        `Review the plan document at ${args.planDoc}.`,
-        `Review round: ${args.round}.`,
-        '',
-        'Produce only structured review findings.',
-        'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
-        'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
-        'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
-        'Use non_blocking severity for clarity improvements that do not block execution.',
-        'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
-        'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
-        `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
-        '',
-        'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
-      ].join('\n')
-    : [
-        `Review the plan document at ${args.planDoc}.`,
-        `Review round: ${args.round}.`,
-        'You do not have direct repository tool access in this adapter. Review only the supplied plan text and prior review history below.',
-        '',
-        'Produce only structured review findings.',
-        'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
-        'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
-        'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
-        'Use non_blocking severity for clarity improvements that do not block execution.',
-        '',
-        'Plan contents:',
-        planText || '(unable to read plan file)',
-        '',
-        'Prior review history:',
-        reviewHistoryText || '(no prior review history)',
-      ].join('\n');
+  const prompt = [
+    `Review the plan document at ${args.planDoc}.`,
+    `Review round: ${args.round}.`,
+    '',
+    'Produce only structured review findings.',
+    'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
+    'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
+    'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
+    'Use non_blocking severity for clarity improvements that do not block execution.',
+    'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
+    'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
+    `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
+    '',
+    'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
+  ].join('\n');
 
-  const { sessionId, structured } = await runReviewerStructuredRound({
+  const { sessionHandle, structured } = await runReviewerStructuredRound({
     reviewer: args.reviewer,
     label: 'plan-review',
     cwd: args.cwd,
@@ -392,7 +352,7 @@ export async function runPlanReviewerRound(args: {
   });
 
   return {
-    sessionId,
+    sessionHandle,
     summary: structured.summary,
     findings: structured.findings.map((finding) => ({
       round: args.round,
@@ -412,7 +372,7 @@ export async function runConsultReviewerRound(args: {
   request: CoderConsultRequest;
   consultMarkdownPath: string;
   logger?: RunLogger;
-}): Promise<{ sessionId: string | null; response: ReviewerConsultResponse }> {
+}): Promise<{ sessionHandle: string | null; response: ReviewerConsultResponse }> {
   const schema = {
     type: 'object',
     properties: {
@@ -436,19 +396,15 @@ export async function runConsultReviewerRound(args: {
     'You are not allowed to grant policy exceptions, authorize baseline failures, waive verification gates, or reinterpret the plan on behalf of the user or wrapper.',
     'If the blocker would require explicit user or wrapper authorization, say that directly. You may recommend asking for authorization, but you must not treat it as already granted.',
     'Do not tell the coder to consider a failure "allowed", "authorized", or "baseline" unless that authorization is already explicitly present in the blocker request or the referenced plan/context.',
-    reviewerHasRepoTools(args.reviewer)
-      ? `Read ${args.consultMarkdownPath} if you need prior consult history.`
-      : 'You do not have direct repository tool access in this adapter. Use only the supplied blocker context.',
+    `Read ${args.consultMarkdownPath} if you need prior consult history.`,
     '',
     'Current blocker request:',
     JSON.stringify(args.request, null, 2),
     '',
-    reviewerHasRepoTools(args.reviewer)
-      ? 'Use repository inspection only as needed. Prefer concrete, file-specific advice.'
-      : 'Prefer concrete, file-specific advice based on the supplied blocker context.',
+    'Use repository inspection only as needed. Prefer concrete, file-specific advice.',
   ].join('\n');
 
-  const { sessionId, structured } = await runReviewerStructuredRound({
+  const { sessionHandle, structured } = await runReviewerStructuredRound({
     reviewer: args.reviewer,
     label: 'consult',
     cwd: args.cwd,
@@ -458,7 +414,7 @@ export async function runConsultReviewerRound(args: {
   });
 
   return {
-    sessionId,
+    sessionHandle,
     response: structured as unknown as ReviewerConsultResponse,
   };
 }
@@ -468,38 +424,32 @@ export async function runCoderScopeRound(args: {
   cwd: string;
   planDoc: string;
   progressMarkdownPath: string;
-  threadId?: string | null;
-  onThreadStarted?: (threadId: string) => void | Promise<void>;
+  sessionHandle?: string | null;
+  onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
+}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null }> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
   const prompt = buildScopePrompt(args.planDoc, progressText);
   let finalResponse: string;
-  let threadId: string | null;
+  let sessionHandle: string | null;
   try {
     const result = await coder.runPrompt({
       cwd: args.cwd,
       prompt,
-      threadId: args.threadId,
-      onThreadStarted: args.onThreadStarted,
+      resumeHandle: args.sessionHandle,
+      onSessionStarted: args.onSessionStarted,
       logger: args.logger,
     });
     finalResponse = result.finalResponse;
-    threadId = result.threadId;
+    sessionHandle = result.sessionHandle;
   } catch (error) {
-    if (error instanceof OpenAICodexProviderError) {
-      throw new CoderRoundError(error.message, error.threadId);
-    }
-    if (error instanceof AnthropicClaudeProviderError) {
-      throw new CoderRoundError(error.message, error.sessionId);
-    }
-    throw error;
+    throw translateCoderProviderError(error);
   }
   const marker = extractMarker(finalResponse);
 
   return {
-    threadId,
+    sessionHandle,
     finalResponse,
     marker,
   };
@@ -509,36 +459,30 @@ export async function runCoderPlanRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
-  threadId?: string | null;
-  onThreadStarted?: (threadId: string) => void | Promise<void>;
+  sessionHandle?: string | null;
+  onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; finalResponse: string; marker: string | null }> {
+}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null }> {
   const coder = getCoderAdapter(args.coder);
   let finalResponse: string;
-  let threadId: string | null;
+  let sessionHandle: string | null;
   try {
     const result = await coder.runPrompt({
       cwd: args.cwd,
       prompt: buildPlanningPrompt(args.planDoc),
-      threadId: args.threadId,
-      onThreadStarted: args.onThreadStarted,
+      resumeHandle: args.sessionHandle,
+      onSessionStarted: args.onSessionStarted,
       logger: args.logger,
     });
     finalResponse = result.finalResponse;
-    threadId = result.threadId;
+    sessionHandle = result.sessionHandle;
   } catch (error) {
-    if (error instanceof OpenAICodexProviderError) {
-      throw new CoderRoundError(error.message, error.threadId);
-    }
-    if (error instanceof AnthropicClaudeProviderError) {
-      throw new CoderRoundError(error.message, error.sessionId);
-    }
-    throw error;
+    throw translateCoderProviderError(error);
   }
   const marker = extractMarker(finalResponse);
 
   return {
-    threadId,
+    sessionHandle,
     finalResponse,
     marker,
   };
@@ -551,9 +495,9 @@ export async function runCoderResponseRound(args: {
   progressMarkdownPath: string;
   verificationHint: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
-  threadId?: string | null;
+  sessionHandle?: string | null;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; payload: CoderResponsePayload }> {
+}): Promise<{ sessionHandle: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
 
@@ -604,30 +548,24 @@ export async function runCoderResponseRound(args: {
   ].join('\n');
 
   let finalResponse: string;
-  let threadId: string | null;
+  let sessionHandle: string | null;
   try {
     const result = await coder.runPrompt({
       cwd: args.cwd,
       prompt,
-      threadId: args.threadId,
+      resumeHandle: args.sessionHandle,
       outputSchema: schema,
       logger: args.logger,
     });
     finalResponse = result.finalResponse;
-    threadId = result.threadId;
+    sessionHandle = result.sessionHandle;
   } catch (error) {
-    if (error instanceof OpenAICodexProviderError) {
-      throw new CoderRoundError(error.message, error.threadId);
-    }
-    if (error instanceof AnthropicClaudeProviderError) {
-      throw new CoderRoundError(error.message, error.sessionId);
-    }
-    throw error;
+    throw translateCoderProviderError(error);
   }
   const payload = parseCoderResponsePayload(finalResponse);
 
   return {
-    threadId,
+    sessionHandle,
     payload,
   };
 }
@@ -640,9 +578,9 @@ export async function runCoderConsultResponseRound(args: {
   consultMarkdownPath: string;
   request: CoderConsultRequest;
   response: ReviewerConsultResponse;
-  threadId?: string | null;
+  sessionHandle?: string | null;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; payload: CoderConsultDispositionPayload }> {
+}): Promise<{ sessionHandle: string | null; payload: CoderConsultDispositionPayload }> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
 
@@ -682,30 +620,24 @@ export async function runCoderConsultResponseRound(args: {
   ].join('\n');
 
   let finalResponse: string;
-  let threadId: string | null;
+  let sessionHandle: string | null;
   try {
     const result = await coder.runPrompt({
       cwd: args.cwd,
       prompt,
-      threadId: args.threadId,
+      resumeHandle: args.sessionHandle,
       outputSchema: schema,
       logger: args.logger,
     });
     finalResponse = result.finalResponse;
-    threadId = result.threadId;
+    sessionHandle = result.sessionHandle;
   } catch (error) {
-    if (error instanceof OpenAICodexProviderError) {
-      throw new CoderRoundError(error.message, error.threadId);
-    }
-    if (error instanceof AnthropicClaudeProviderError) {
-      throw new CoderRoundError(error.message, error.sessionId);
-    }
-    throw error;
+    throw translateCoderProviderError(error);
   }
   const payload = parseCoderConsultDispositionPayload(finalResponse);
 
   return {
-    threadId,
+    sessionHandle,
     payload,
   };
 }
@@ -715,9 +647,9 @@ export async function runCoderPlanResponseRound(args: {
   cwd: string;
   planDoc: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
-  threadId: string;
+  sessionHandle: string;
   logger?: RunLogger;
-}): Promise<{ threadId: string | null; payload: CoderResponsePayload }> {
+}): Promise<{ sessionHandle: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
 
   const schema = {
@@ -765,30 +697,24 @@ export async function runCoderPlanResponseRound(args: {
   ].join('\n');
 
   let finalResponse: string;
-  let threadId: string | null;
+  let sessionHandle: string | null;
   try {
     const result = await coder.runPrompt({
       cwd: args.cwd,
       prompt,
-      threadId: args.threadId,
+      resumeHandle: args.sessionHandle,
       outputSchema: schema,
       logger: args.logger,
     });
     finalResponse = result.finalResponse;
-    threadId = result.threadId;
+    sessionHandle = result.sessionHandle;
   } catch (error) {
-    if (error instanceof OpenAICodexProviderError) {
-      throw new CoderRoundError(error.message, error.threadId);
-    }
-    if (error instanceof AnthropicClaudeProviderError) {
-      throw new CoderRoundError(error.message, error.sessionId);
-    }
-    throw error;
+    throw translateCoderProviderError(error);
   }
   const payload = parseCoderResponsePayload(finalResponse);
 
   return {
-    threadId,
+    sessionHandle,
     payload,
   };
 }

@@ -43,7 +43,7 @@ export type ReviewFinding = {
 
 export type ReviewRound = {
   round: number;
-  reviewerSessionId: string | null;
+  reviewerSessionHandle: string | null;
   commitRange: {
     base: string;
     head: string;
@@ -82,8 +82,8 @@ export type CoderConsultDisposition = {
 export type ConsultRound = {
   number: number;
   sourcePhase: 'coder_scope' | 'coder_response';
-  coderSessionId: string | null;
-  reviewerSessionId: string | null;
+  coderSessionHandle: string | null;
+  reviewerSessionHandle: string | null;
   request: CoderConsultRequest;
   response: ReviewerConsultResponse | null;
   disposition: CoderConsultDisposition | null;
@@ -119,8 +119,8 @@ export type OrchestrationState = {
   archivedReviewPath: string | null;
   baseCommit: string | null;
   finalCommit: string | null;
-  coderSessionId: string | null;
-  reviewerSessionId: string | null;
+  coderSessionHandle: string | null;
+  reviewerSessionHandle: string | null;
   currentScopeNumber: number;
   coderRetryCount: number;
   lastScopeMarker: ScopeMarker | null;
