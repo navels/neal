@@ -1,3 +1,5 @@
+import { execFile as execFileCallback } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -24,6 +26,7 @@ import { createInitialState, getSessionStatePath, loadState, saveState } from '.
 import type { CodexConsultRequest, CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
+const execFile = promisify(execFileCallback);
 
 function writeDiagnostic(message: string, logger?: RunLogger) {
   process.stderr.write(message);
@@ -320,17 +323,58 @@ function isCodexTimeoutError(error: CodexRoundError) {
   return /\btimed out after\b/i.test(error.message);
 }
 
-function shouldRetryCodexTimeout(state: OrchestrationState, error: CodexRoundError) {
-  return state.topLevelMode === 'execute' && isCodexTimeoutError(error) && state.codexRetryCount < 1;
+function shouldRetryCodexTimeout(
+  state: OrchestrationState,
+  phase: 'codex_scope' | 'codex_plan' | 'codex_response' | 'codex_plan_response',
+  error: CodexRoundError,
+) {
+  if (!isCodexTimeoutError(error) || state.codexRetryCount >= 1) {
+    return false;
+  }
+
+  if (state.topLevelMode === 'execute') {
+    return phase === 'codex_scope' || phase === 'codex_response';
+  }
+
+  return phase === 'codex_plan' || phase === 'codex_plan_response';
+}
+
+function escapeForPkillPattern(text: string) {
+  return text.replace(/[\\.^$|?*+()[\]{}]/g, '\\$&');
+}
+
+async function bestEffortCleanupTimedOutCodexResume(threadId: string | null, logger?: RunLogger) {
+  if (!threadId) {
+    return;
+  }
+
+  const pattern = `codex.*resume ${escapeForPkillPattern(threadId)}`;
+  try {
+    await execFile('pkill', ['-f', pattern]);
+    await logger?.event('codex.timeout_cleanup', {
+      threadId,
+      pattern,
+      result: 'killed',
+    });
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    await logger?.event('codex.timeout_cleanup', {
+      threadId,
+      pattern,
+      result: 'not_found_or_failed',
+      details,
+    });
+  }
 }
 
 async function scheduleCodexTimeoutRetry(
   state: OrchestrationState,
   statePath: string,
-  phase: 'codex_scope' | 'codex_response',
+  phase: 'codex_scope' | 'codex_plan' | 'codex_response' | 'codex_plan_response',
   error: CodexRoundError,
   logger?: RunLogger,
 ) {
+  await bestEffortCleanupTimedOutCodexResume(error.threadId ?? state.codexThreadId, logger);
   const retryState = await saveState(statePath, {
     ...state,
     codexThreadId: null,
@@ -347,7 +391,9 @@ async function scheduleCodexTimeoutRetry(
   });
   await notifyRetry(
     retryState,
-    `scope ${retryState.currentScopeNumber} timed out in ${phase}; retrying with a fresh Codex thread`,
+    state.topLevelMode === 'plan'
+      ? `planning phase ${phase} timed out; retrying with a fresh Codex thread`
+      : `scope ${retryState.currentScopeNumber} timed out in ${phase}; retrying with a fresh Codex thread`,
     logger,
   );
   return retryState;
@@ -375,8 +421,11 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
-      if (shouldRetryCodexTimeout(workingState, error)) {
+      if (shouldRetryCodexTimeout(workingState, 'codex_scope', error)) {
         return scheduleCodexTimeoutRetry(workingState, statePath, 'codex_scope', error, logger);
+      }
+      if (isCodexTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCodexResume(error.threadId ?? workingState.codexThreadId, logger);
       }
       const failedState = await persistCodexFailureState(workingState, statePath, 'codex_scope', error, logger);
       if (isCodexTimeoutError(error)) {
@@ -467,6 +516,12 @@ async function runCodexPlanPhase(state: OrchestrationState, statePath: string, l
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
+      if (shouldRetryCodexTimeout(workingState, 'codex_plan', error)) {
+        return scheduleCodexTimeoutRetry(workingState, statePath, 'codex_plan', error, logger);
+      }
+      if (isCodexTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCodexResume(error.threadId ?? workingState.codexThreadId, logger);
+      }
       await persistCodexFailureState(workingState, statePath, 'codex_plan', error, logger);
     }
     throw error;
@@ -968,8 +1023,11 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
-      if (shouldRetryCodexTimeout(state, error)) {
+      if (shouldRetryCodexTimeout(state, 'codex_response', error)) {
         return scheduleCodexTimeoutRetry(state, statePath, 'codex_response', error, logger);
+      }
+      if (isCodexTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCodexResume(error.threadId ?? state.codexThreadId, logger);
       }
       const failedState = await persistCodexFailureState(state, statePath, 'codex_response', error, logger);
       if (isCodexTimeoutError(error)) {
@@ -1164,6 +1222,12 @@ async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: s
     });
   } catch (error) {
     if (error instanceof CodexRoundError) {
+      if (shouldRetryCodexTimeout(state, 'codex_plan_response', error)) {
+        return scheduleCodexTimeoutRetry(state, statePath, 'codex_plan_response', error, logger);
+      }
+      if (isCodexTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCodexResume(error.threadId ?? state.codexThreadId, logger);
+      }
       await persistCodexFailureState(state, statePath, 'codex_plan_response', error, logger);
     }
     throw error;

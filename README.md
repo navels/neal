@@ -68,6 +68,8 @@ Codex turns now get the same treatment. If a Codex streamed turn goes silent for
 
 In execute mode, a Codex inactivity timeout now triggers one automatic retry on a fresh Codex thread for the current scope phase. `neal` sends a retry notification when that happens. If the fresh-thread retry also times out, the run fails and sends a failure notification.
 
+Planning mode now gets the same one-shot fresh-thread retry for `codex_plan` and `codex_plan_response` inactivity timeouts. When a timed-out Codex phase was running as `resume <threadId>`, `neal` also makes a best-effort attempt to terminate that orphaned resume subprocess before retrying or failing.
+
 For review quality, `neal` gives Claude the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. Claude is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
 
 If Codex blocks during scope execution or during a review-response pass, `neal` now routes that blocker through a bounded Claude consult loop before stopping. The consult is wrapper-owned and recorded in `CONSULT.md`; Codex remains the implementation owner. New runs default to up to `4` consult rounds per scope. Consult advice is diagnostic only: it cannot authorize baseline failures, waive verification gates, or override explicit user/wrapper policy.
