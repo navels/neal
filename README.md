@@ -60,7 +60,7 @@ Fresh `neal --execute ...` runs require a clean worktree. If a scope was interru
 
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 
-`neal` also writes wrapper-generated retrospectives into the run directory. `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, and checkpoint-specific archives are written alongside it so you can inspect whether the review loop is adding value or exposing inefficiencies.
+`neal` also writes wrapper-generated consult and retrospective artifacts into the run directory. `CONSULT.md` reflects the latest blocker consultation state, and `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, with checkpoint-specific archives written alongside them so you can inspect whether the review loop is adding value or exposing inefficiencies.
 
 Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Claude review sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, `neal` will continue the same Claude session up to `2` times by default when it hits `error_max_turns` before returning structured findings, and transient Claude API/internal failures are retried up to `2` times by default. Override those limits with `CLAUDE_REVIEW_CONTINUATION_LIMIT` and `CLAUDE_REVIEW_API_RETRY_LIMIT`.
 
@@ -69,6 +69,8 @@ Codex turns now get the same treatment. If a Codex streamed turn goes silent for
 In execute mode, a Codex inactivity timeout now triggers one automatic retry on a fresh Codex thread for the current scope phase. `neal` sends a retry notification when that happens. If the fresh-thread retry also times out, the run fails and sends a failure notification.
 
 For review quality, `neal` gives Claude the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. Claude is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
+
+If Codex blocks during scope execution or during a review-response pass, `neal` now routes that blocker through one bounded Claude consult before stopping. The consult is wrapper-owned and recorded in `CONSULT.md`; Codex remains the implementation owner.
 
 Each `neal` run also writes persistent diagnostics under `.neal/runs/<timestamp>-<id>/`:
 

@@ -2,7 +2,7 @@ import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/cla
 import { Codex, type Thread } from '@openai/codex-sdk';
 
 import type { RunLogger } from './logger.js';
-import type { ReviewFinding } from './types.js';
+import type { ClaudeConsultResponse, CodexConsultDisposition, CodexConsultRequest, ReviewFinding } from './types.js';
 
 const AUTONOMY_SCOPE_DONE = 'AUTONOMY_SCOPE_DONE';
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
@@ -174,6 +174,8 @@ type CodexResponsePayload = {
   }>;
 };
 
+type CodexConsultDispositionPayload = CodexConsultDisposition;
+
 export class ClaudeRoundError extends Error {
   readonly sessionId: string | null;
   readonly subtype: string | null;
@@ -235,6 +237,15 @@ function parseCodexResponsePayload(raw: string): CodexResponsePayload {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Codex response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
+  }
+}
+
+function parseCodexConsultDispositionPayload(raw: string): CodexConsultDispositionPayload {
+  try {
+    return JSON.parse(raw) as CodexConsultDispositionPayload;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Codex consult-response round returned invalid JSON: ${message}\nRaw response:\n${raw}`);
   }
 }
 
@@ -356,7 +367,7 @@ function buildClaudeQueryStream(
 }
 
 async function runClaudeStructuredRound(args: {
-  label: 'review' | 'plan-review';
+  label: 'review' | 'plan-review' | 'consult';
   cwd: string;
   prompt: string;
   schema: Record<string, unknown>;
@@ -520,7 +531,7 @@ export async function runClaudeReviewRound(args: {
   ].join('\n');
 
   const { sessionId, structured } = await runClaudeStructuredRound({
-    label: 'review',
+    label: 'consult',
     cwd: args.cwd,
     prompt,
     schema,
@@ -606,6 +617,55 @@ export async function runClaudePlanReviewRound(args: {
       requiredAction: finding.requiredAction,
       roundSummary: structured.summary,
     })),
+  };
+}
+
+export async function runClaudeConsultRound(args: {
+  cwd: string;
+  planDoc: string;
+  request: CodexConsultRequest;
+  consultMarkdownPath: string;
+  logger?: RunLogger;
+}): Promise<{ sessionId: string | null; response: ClaudeConsultResponse }> {
+  const schema = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      diagnosis: { type: 'string' },
+      confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+      recoverable: { type: 'boolean' },
+      recommendations: { type: 'array', items: { type: 'string' } },
+      relevantFiles: { type: 'array', items: { type: 'string' } },
+      rationale: { type: 'string' },
+    },
+    required: ['summary', 'diagnosis', 'confidence', 'recoverable', 'recommendations', 'relevantFiles', 'rationale'],
+    additionalProperties: false,
+  } as const;
+
+  const prompt = [
+    `Handle a blocker consultation for the active neal scope in ${args.planDoc}.`,
+    'This is a blocker consultation, not a code review.',
+    'Codex remains the implementation owner. Your job is to diagnose the blocker and recommend bounded next steps.',
+    'Do not expand scope unnecessarily.',
+    `Read ${args.consultMarkdownPath} if you need prior consult history.`,
+    '',
+    'Current blocker request:',
+    JSON.stringify(args.request, null, 2),
+    '',
+    'Use repository inspection only as needed. Prefer concrete, file-specific advice.',
+  ].join('\n');
+
+  const { sessionId, structured } = await runClaudeStructuredRound({
+    label: 'review',
+    cwd: args.cwd,
+    prompt,
+    schema,
+    logger: args.logger,
+  });
+
+  return {
+    sessionId,
+    response: structured as unknown as ClaudeConsultResponse,
   };
 }
 
@@ -719,6 +779,60 @@ export async function runCodexResponseRound(args: {
   });
   const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
   const payload = parseCodexResponsePayload(finalResponse);
+
+  return {
+    threadId: thread.id,
+    payload,
+  };
+}
+
+export async function runCodexConsultResponseRound(args: {
+  cwd: string;
+  planDoc: string;
+  progressMarkdownPath: string;
+  consultMarkdownPath: string;
+  request: CodexConsultRequest;
+  response: ClaudeConsultResponse;
+  threadId?: string | null;
+  logger?: RunLogger;
+}): Promise<{ threadId: string | null; payload: CodexConsultDispositionPayload }> {
+  const thread = createCodexThread(args.cwd, args.threadId);
+
+  const schema = {
+    type: 'object',
+    properties: {
+      outcome: { type: 'string', enum: ['resumed', 'blocked'] },
+      summary: { type: 'string' },
+      blocker: { type: 'string' },
+      decision: { type: 'string', enum: ['followed', 'partially_followed', 'rejected'] },
+      rationale: { type: 'string' },
+    },
+    required: ['outcome', 'summary', 'blocker', 'decision', 'rationale'],
+    additionalProperties: false,
+  } as const;
+
+  const prompt = [
+    `Continue the current neal scope for plan ${args.planDoc}.`,
+    `Read ${args.progressMarkdownPath} before changing code so you stay on the current scope.`,
+    `Read ${args.consultMarkdownPath} before responding so you understand the current blocker context.`,
+    'You are still working on the same scope. Do not start a new scope.',
+    'Use Claude advisory feedback below to continue the same scope if possible.',
+    'Make code changes if needed, run relevant verification, and create a real git commit if you changed code.',
+    'Return outcome=`resumed` if you followed the advice enough to continue the scope.',
+    'Return outcome=`blocked` only if the blocker is still real after reasonable follow-through.',
+    '',
+    'Codex blocker request:',
+    JSON.stringify(args.request, null, 2),
+    '',
+    'Claude consultation response:',
+    JSON.stringify(args.response, null, 2),
+  ].join('\n');
+
+  const streamedTurn = await thread.runStreamed(prompt, {
+    outputSchema: schema,
+  });
+  const finalResponse = await consumeCodexTurn(streamedTurn, args.logger);
+  const payload = parseCodexConsultDispositionPayload(finalResponse);
 
   return {
     threadId: thread.id,

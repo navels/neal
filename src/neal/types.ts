@@ -5,6 +5,8 @@ export type OrchestrationPhase =
   | 'codex_scope'
   | 'claude_review'
   | 'codex_response'
+  | 'claude_consult'
+  | 'codex_consult_response'
   | 'final_squash'
   | 'done'
   | 'blocked';
@@ -39,6 +41,43 @@ export type ReviewRound = {
   findings: string[];
 };
 
+export type CodexConsultRequest = {
+  summary: string;
+  blocker: string;
+  question: string;
+  attempts: string[];
+  relevantFiles: string[];
+  verificationContext: string[];
+};
+
+export type ClaudeConsultResponse = {
+  summary: string;
+  diagnosis: string;
+  confidence: 'low' | 'medium' | 'high';
+  recoverable: boolean;
+  recommendations: string[];
+  relevantFiles: string[];
+  rationale: string;
+};
+
+export type CodexConsultDisposition = {
+  outcome: 'resumed' | 'blocked';
+  summary: string;
+  blocker: string;
+  decision: 'followed' | 'partially_followed' | 'rejected';
+  rationale: string;
+};
+
+export type ConsultRound = {
+  number: number;
+  sourcePhase: 'codex_scope' | 'codex_response';
+  codexThreadId: string | null;
+  claudeSessionId: string | null;
+  request: CodexConsultRequest;
+  response: ClaudeConsultResponse | null;
+  disposition: CodexConsultDisposition | null;
+};
+
 export type ProgressScope = {
   number: number;
   marker: CodexMarker;
@@ -60,6 +99,7 @@ export type OrchestrationState = {
   topLevelMode: 'plan' | 'execute';
   progressJsonPath: string;
   progressMarkdownPath: string;
+  consultMarkdownPath: string;
   phase: OrchestrationPhase;
   createdAt: string;
   updatedAt: string;
@@ -73,10 +113,12 @@ export type OrchestrationState = {
   codexRetryCount: number;
   lastCodexMarker: CodexMarker | null;
   rounds: ReviewRound[];
+  consultRounds: ConsultRound[];
   findings: ReviewFinding[];
   createdCommits: string[];
   completedScopes: ProgressScope[];
   maxRounds: number;
+  maxConsultsPerScope: number;
   status: 'running' | 'done' | 'blocked' | 'failed';
 };
 
@@ -89,5 +131,6 @@ export type OrchestratorInit = {
   progressJsonPath: string;
   progressMarkdownPath: string;
   reviewMarkdownPath: string;
+  consultMarkdownPath: string;
   maxRounds: number;
 };

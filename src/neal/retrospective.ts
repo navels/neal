@@ -181,6 +181,10 @@ function summarizeCompletedScopes(state: OrchestrationState) {
     .join('\n');
 }
 
+function getLatestClaudeSessionId(state: OrchestrationState) {
+  return state.claudeSessionId ?? state.rounds.at(-1)?.claudeSessionId ?? null;
+}
+
 async function summarizeChangedFiles(state: OrchestrationState) {
   if (!state.baseCommit || !state.finalCommit) {
     return '- Changed files unavailable for this checkpoint.';
@@ -224,6 +228,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const verificationSummary = summarizeVerification(commands);
   const assessment = buildAssessment(state, scopeEvents);
   const completedScopesSummary = kind === 'done' ? summarizeCompletedScopes(state) : null;
+  const latestClaudeSessionId = getLatestClaudeSessionId(state);
 
   return [
     `# Neal Retrospective`,
@@ -235,6 +240,8 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     `- Scope: ${state.currentScopeNumber}`,
     `- Status: ${state.status}`,
     `- Final commit: ${state.finalCommit ?? 'n/a'}`,
+    `- Codex thread: ${state.codexThreadId ?? 'n/a'}`,
+    `- Claude session: ${latestClaudeSessionId ?? 'n/a'}`,
     `- Claude rounds: ${state.rounds.length}`,
     `- Findings: ${findings.total} total (${findings.blocking} blocking, ${findings.non_blocking} non-blocking)`,
     `- Codex dispositions: ${dispositions.fixed} fixed, ${dispositions.rejected} rejected, ${dispositions.deferred} deferred`,

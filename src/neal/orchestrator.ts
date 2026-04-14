@@ -5,20 +5,23 @@ import { notify } from '../notifier.js';
 import {
   ClaudeRoundError,
   CodexRoundError,
+  runClaudeConsultRound,
   runClaudePlanReviewRound,
   runClaudeReviewRound,
+  runCodexConsultResponseRound,
   runCodexScopeRound,
   runCodexPlanResponseRound,
   runCodexPlanRound,
   runCodexResponseRound,
 } from './agents.js';
+import { writeConsultMarkdown } from './consult.js';
 import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
-import type { CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
+import type { CodexConsultRequest, CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
 
@@ -110,7 +113,7 @@ function startPhaseHeartbeat(
 async function persistCodexFailureState(
   state: OrchestrationState,
   statePath: string,
-  phase: 'codex_scope' | 'codex_plan' | 'codex_response' | 'codex_plan_response',
+  phase: 'codex_scope' | 'codex_plan' | 'codex_response' | 'codex_plan_response' | 'codex_consult_response',
   error: CodexRoundError,
   logger?: RunLogger,
 ) {
@@ -149,7 +152,44 @@ function getPlanningCompletionProblem(marker: string | null) {
 
 async function writeExecutionArtifacts(state: OrchestrationState) {
   await writeReviewMarkdown(state.reviewMarkdownPath, state);
+  await writeConsultMarkdown(state.consultMarkdownPath, state);
   await writePlanProgressArtifacts(state);
+}
+
+function countConsultsForCurrentScope(state: OrchestrationState) {
+  return state.consultRounds.length;
+}
+
+function shouldConsultBlockedCodex(state: OrchestrationState) {
+  return state.topLevelMode === 'execute' && countConsultsForCurrentScope(state) < state.maxConsultsPerScope;
+}
+
+function buildConsultRequest(args: {
+  state: OrchestrationState;
+  sourcePhase: 'codex_scope' | 'codex_response';
+  blocker: string;
+  summary: string;
+  relevantFiles: string[];
+  verificationContext?: string[];
+}) {
+  const trimmedSummary = args.summary.trim() || args.blocker.trim() || 'Codex requested blocker help';
+  const trimmedBlocker = args.blocker.trim() || trimmedSummary;
+  return {
+    number: countConsultsForCurrentScope(args.state) + 1,
+    sourcePhase: args.sourcePhase,
+    codexThreadId: args.state.codexThreadId,
+    claudeSessionId: null,
+    request: {
+      summary: trimmedSummary,
+      blocker: trimmedBlocker,
+      question: `What is the best concrete next step to unblock this scope? ${trimmedBlocker}`,
+      attempts: [],
+      relevantFiles: args.relevantFiles,
+      verificationContext: args.verificationContext ?? [],
+    } satisfies CodexConsultRequest,
+    response: null,
+    disposition: null,
+  };
 }
 
 export async function initializeOrchestration(
@@ -175,6 +215,7 @@ export async function initializeOrchestration(
     progressJsonPath: join(logger.runDir, 'plan-progress.json'),
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
+    consultMarkdownPath: join(logger.runDir, 'CONSULT.md'),
     maxRounds: 3,
   };
 
@@ -368,6 +409,33 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   });
   if (nextState.status === 'blocked') {
     const reason = completionProblem ?? 'Codex reported a blocker during scope execution';
+    if (shouldConsultBlockedCodex(nextState)) {
+      const consultState = await saveState(statePath, {
+        ...nextState,
+        phase: 'claude_consult',
+        status: 'running',
+        consultRounds: [
+          ...nextState.consultRounds,
+          buildConsultRequest({
+            state: nextState,
+            sourcePhase: 'codex_scope',
+            blocker: reason,
+            summary: codex.finalResponse.replace(/\s*AUTONOMY_BLOCKED\s*$/m, '').trim(),
+            relevantFiles: createdCommits.length > 0 ? await getChangedFilesForRange(state.cwd, beforeHead, afterHead) : [],
+          }),
+        ],
+      });
+      await writeExecutionArtifacts(consultState);
+      const consultRound = consultState.consultRounds.at(-1);
+      await logger?.event('consult.start', {
+        scopeNumber: consultState.currentScopeNumber,
+        consultRound: consultRound?.number,
+        sourcePhase: consultRound?.sourcePhase,
+        codexThreadId: consultRound?.codexThreadId,
+        blocker: consultRound?.request.blocker,
+      });
+      return consultState;
+    }
     const persistedState = await persistBlockedScope(nextState, statePath, reason);
     await notifyBlocked(
       persistedState,
@@ -667,6 +735,74 @@ async function runClaudePlanPhase(state: OrchestrationState, statePath: string, 
   return nextState;
 }
 
+async function runClaudeConsultPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  const consultRound = state.consultRounds.at(-1);
+  if (!consultRound || consultRound.response) {
+    throw new Error('Cannot run Claude consult without a pending consult request');
+  }
+
+  await logger?.event('phase.start', { phase: 'claude_consult', consultRound: consultRound.number });
+  let claude;
+  try {
+    claude = await runClaudeConsultRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      request: consultRound.request,
+      consultMarkdownPath: state.consultMarkdownPath,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof ClaudeRoundError) {
+      const failedState = await saveState(statePath, {
+        ...state,
+        claudeSessionId: error.sessionId,
+        status: 'failed',
+      });
+      await writeExecutionArtifacts(failedState);
+      await logger?.event('phase.error', {
+        phase: 'claude_consult',
+        consultRound: consultRound.number,
+        sessionId: error.sessionId,
+        subtype: error.subtype,
+        message: error.message,
+      });
+    }
+    throw error;
+  }
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    claudeSessionId: claude.sessionId,
+    phase: 'codex_consult_response',
+    status: 'running',
+    consultRounds: state.consultRounds.map((round) =>
+      round.number === consultRound.number
+        ? {
+            ...round,
+            claudeSessionId: claude.sessionId,
+            response: claude.response,
+          }
+        : round,
+    ),
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('consult.response', {
+    scopeNumber: nextState.currentScopeNumber,
+    consultRound: consultRound.number,
+    sourcePhase: consultRound.sourcePhase,
+    codexThreadId: consultRound.codexThreadId,
+    claudeSessionId: claude.sessionId,
+    recoverable: claude.response.recoverable,
+  });
+  await logger?.event('phase.complete', {
+    phase: 'claude_consult',
+    consultRound: consultRound.number,
+    nextPhase: nextState.phase,
+  });
+  return nextState;
+}
+
 function isOpenBlockingFinding(finding: ReviewFinding) {
   return finding.status === 'open' && finding.severity === 'blocking';
 }
@@ -881,6 +1017,105 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
   });
   if (nextState.status === 'blocked') {
     const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'Codex reported a blocker during review response';
+    if (shouldConsultBlockedCodex(nextState)) {
+      const consultState = await saveState(statePath, {
+        ...nextState,
+        phase: 'claude_consult',
+        status: 'running',
+        consultRounds: [
+          ...nextState.consultRounds,
+          buildConsultRequest({
+            state: nextState,
+            sourcePhase: 'codex_response',
+            blocker,
+            summary: codex.payload.summary,
+            relevantFiles: [...new Set(openFindings.flatMap((finding) => finding.files))],
+          }),
+        ],
+      });
+      await writeExecutionArtifacts(consultState);
+      const consultRound = consultState.consultRounds.at(-1);
+      await logger?.event('consult.start', {
+        scopeNumber: consultState.currentScopeNumber,
+        consultRound: consultRound?.number,
+        sourcePhase: consultRound?.sourcePhase,
+        codexThreadId: consultRound?.codexThreadId,
+        blocker: consultRound?.request.blocker,
+      });
+      return consultState;
+    }
+    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    await notifyBlocked(persistedState, blocker, logger);
+    return persistedState;
+  }
+  return nextState;
+}
+
+async function runCodexConsultResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  const consultRound = state.consultRounds.at(-1);
+  if (!consultRound || !consultRound.response || consultRound.disposition) {
+    throw new Error('Cannot run Codex consult response without a completed consult response');
+  }
+
+  await logger?.event('phase.start', { phase: 'codex_consult_response', consultRound: consultRound.number });
+  const beforeHead = await getHeadCommit(state.cwd);
+  let codex;
+  try {
+    codex = await runCodexConsultResponseRound({
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      progressMarkdownPath: state.progressMarkdownPath,
+      consultMarkdownPath: state.consultMarkdownPath,
+      request: consultRound.request,
+      response: consultRound.response,
+      threadId: state.codexThreadId,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CodexRoundError) {
+      const failedState = await persistCodexFailureState(state, statePath, 'codex_consult_response', error, logger);
+      if (isCodexTimeoutError(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+  const afterHead = await getHeadCommit(state.cwd);
+  const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
+  const nextPhase = codex.payload.outcome === 'resumed' ? consultRound.sourcePhase : 'blocked';
+  const nextState = await saveState(statePath, {
+    ...state,
+    codexThreadId: codex.threadId,
+    createdCommits: [...state.createdCommits, ...createdCommits],
+    phase: nextPhase,
+    status: codex.payload.outcome === 'resumed' ? 'running' : 'blocked',
+    consultRounds: state.consultRounds.map((round) =>
+      round.number === consultRound.number
+        ? {
+            ...round,
+            codexThreadId: codex.threadId,
+            disposition: codex.payload,
+          }
+        : round,
+    ),
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('consult.disposition', {
+    scopeNumber: nextState.currentScopeNumber,
+    consultRound: consultRound.number,
+    sourcePhase: consultRound.sourcePhase,
+    codexThreadId: codex.threadId,
+    outcome: codex.payload.outcome,
+  });
+  await logger?.event('phase.complete', {
+    phase: 'codex_consult_response',
+    consultRound: consultRound.number,
+    nextPhase,
+    createdCommits,
+  });
+  if (nextState.status === 'blocked') {
+    const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'Codex remained blocked after Claude consultation';
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
@@ -1026,6 +1261,7 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
           currentScopeNumber: state.currentScopeNumber + 1,
           lastCodexMarker: null,
           rounds: [],
+          consultRounds: [],
           findings: [],
           createdCommits: [],
           completedScopes,
@@ -1084,6 +1320,8 @@ export async function runOnePass(
     currentState.phase === 'codex_scope' ||
     currentState.phase === 'claude_review' ||
     currentState.phase === 'codex_response' ||
+    currentState.phase === 'claude_consult' ||
+    currentState.phase === 'codex_consult_response' ||
     currentState.phase === 'final_squash'
   ) {
     const stopHeartbeat = startPhaseHeartbeat(currentState.phase, () => currentState, logger);
@@ -1118,6 +1356,17 @@ export async function runOnePass(
 
     if (currentState.phase === 'codex_response') {
       currentState = await runCodexResponsePhase(currentState, statePath, logger);
+      options?.onCodexThread?.(currentState.codexThreadId);
+      continue;
+    }
+
+    if (currentState.phase === 'claude_consult') {
+      currentState = await runClaudeConsultPhase(currentState, statePath, logger);
+      continue;
+    }
+
+    if (currentState.phase === 'codex_consult_response') {
+      currentState = await runCodexConsultResponsePhase(currentState, statePath, logger);
       options?.onCodexThread?.(currentState.codexThreadId);
       continue;
     }
