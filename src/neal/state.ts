@@ -37,6 +37,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     completedScopes: [],
     maxRounds: init.maxRounds,
     maxConsultsPerScope: 4,
+    blockedFromPhase: null,
     status: 'running',
   };
 }
@@ -246,5 +247,6 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     findings: parsed.findings.map(hydrateFinding),
     completedScopes: Array.isArray(parsed.completedScopes) ? parsed.completedScopes.map(hydrateCompletedScope) : [],
     maxConsultsPerScope: typeof parsed.maxConsultsPerScope === 'number' ? parsed.maxConsultsPerScope : 4,
+    blockedFromPhase: typeof parsed.blockedFromPhase === 'string' ? parsed.blockedFromPhase as OrchestrationState['phase'] : null,
   };
 }

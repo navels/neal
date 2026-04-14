@@ -26,6 +26,8 @@ import { createInitialState, getSessionStatePath, loadState, saveState } from '.
 import type { CodexConsultRequest, CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
+const DEFAULT_MAX_REVIEW_ROUNDS = Number(process.env.NEAL_MAX_REVIEW_ROUNDS ?? 20);
+const REVIEW_STUCK_NON_REDUCTION_WINDOW = Number(process.env.NEAL_REVIEW_STUCK_WINDOW ?? 3);
 const execFile = promisify(execFileCallback);
 
 function writeDiagnostic(message: string, logger?: RunLogger) {
@@ -219,7 +221,7 @@ export async function initializeOrchestration(
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
     consultMarkdownPath: join(logger.runDir, 'CONSULT.md'),
-    maxRounds: 3,
+    maxRounds: DEFAULT_MAX_REVIEW_ROUNDS,
   };
 
   await mkdir(stateDir, { recursive: true });
@@ -285,6 +287,7 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
 
   const nextState = await saveState(statePath, {
     ...state,
+    blockedFromPhase: state.blockedFromPhase ?? state.phase,
     completedScopes: appendCompletedScope(state, 'blocked', {
       finalCommit: null,
       commitSubject: null,
@@ -294,6 +297,10 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   });
   await writeExecutionArtifacts(nextState);
   return nextState;
+}
+
+function isResumableBlockedPhase(phase: OrchestrationState['phase'] | null): phase is 'codex_scope' | 'codex_response' | 'codex_plan' | 'codex_plan_response' {
+  return phase === 'codex_scope' || phase === 'codex_response' || phase === 'codex_plan' || phase === 'codex_plan_response';
 }
 
 function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
@@ -444,6 +451,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
     lastCodexMarker: codex.marker as CodexMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_review',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
+    blockedFromPhase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'codex_scope' : null,
     createdCommits: [...workingState.createdCommits, ...createdCommits],
     codexRetryCount: 0,
   });
@@ -534,6 +542,7 @@ async function runCodexPlanPhase(state: OrchestrationState, statePath: string, l
     lastCodexMarker: codex.marker as CodexMarker | null,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'claude_plan_review',
     status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'blocked' : 'running',
+    blockedFromPhase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'codex_plan' : null,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -616,13 +625,13 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
   const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
   const reachedMaxRounds = round >= state.maxRounds;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
-  const stalledBlockingCount = hasTwoConsecutiveNonReductions(state.rounds, openBlockingCanonicalCount);
+  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
   const reopenedCanonical = getReopenedCanonical(mergedFindings);
   const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
   const blockReason = reopenedCanonical
-    ? `blocking finding ${reopenedCanonical} reopened across multiple Claude rounds`
+    ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple Claude rounds`
     : stalledBlockingCount
-      ? 'blocking findings did not decrease for two consecutive Claude rounds'
+      ? `review_stuck: blocking findings did not decrease across ${REVIEW_STUCK_NON_REDUCTION_WINDOW} consecutive Claude rounds`
       : reachedMaxRounds && hasBlockingFindings
         ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
         : null;
@@ -658,6 +667,7 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
       },
     ],
     findings: mergedFindings,
+    blockedFromPhase: shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds) ? 'claude_review' : null,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -726,13 +736,13 @@ async function runClaudePlanPhase(state: OrchestrationState, statePath: string, 
   const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
   const reachedMaxRounds = round >= state.maxRounds;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
-  const stalledBlockingCount = hasTwoConsecutiveNonReductions(state.rounds, openBlockingCanonicalCount);
+  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
   const reopenedCanonical = getReopenedCanonical(mergedFindings);
   const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
   const blockReason = reopenedCanonical
-    ? `blocking finding ${reopenedCanonical} reopened across multiple Claude rounds`
+    ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple Claude rounds`
     : stalledBlockingCount
-      ? 'blocking findings did not decrease for two consecutive Claude rounds'
+      ? `review_stuck: blocking findings did not decrease across ${REVIEW_STUCK_NON_REDUCTION_WINDOW} consecutive Claude rounds`
       : reachedMaxRounds && hasBlockingFindings
         ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
         : null;
@@ -768,6 +778,7 @@ async function runClaudePlanPhase(state: OrchestrationState, statePath: string, 
       },
     ],
     findings: mergedFindings,
+    blockedFromPhase: shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds) ? 'claude_plan_review' : null,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -893,14 +904,20 @@ function countOpenBlockingCanonicals(findings: ReviewFinding[]) {
   return new Set(findings.filter(isOpenBlockingFinding).map((finding) => finding.canonicalId)).size;
 }
 
-function hasTwoConsecutiveNonReductions(rounds: OrchestrationState['rounds'], currentCount: number) {
-  if (rounds.length < 2) {
+function hasRepeatedNonReduction(rounds: OrchestrationState['rounds'], currentCount: number) {
+  const counts = [...rounds.map((round) => round.openBlockingCanonicalCount), currentCount];
+  if (counts.length < REVIEW_STUCK_NON_REDUCTION_WINDOW || currentCount <= 0) {
     return false;
   }
 
-  const previousCount = rounds[rounds.length - 1].openBlockingCanonicalCount;
-  const priorCount = rounds[rounds.length - 2].openBlockingCanonicalCount;
-  return currentCount >= previousCount && previousCount >= priorCount;
+  const recentCounts = counts.slice(-REVIEW_STUCK_NON_REDUCTION_WINDOW);
+  for (let index = 1; index < recentCounts.length; index += 1) {
+    if (recentCounts[index] < recentCounts[index - 1]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function getReopenedCanonical(findings: ReviewFinding[]) {
@@ -948,7 +965,7 @@ function appendCompletedScope(
 ) {
   const marker = (state.lastCodexMarker ?? 'AUTONOMY_BLOCKED') as CodexMarker;
   return [
-    ...state.completedScopes,
+    ...state.completedScopes.filter((scope) => scope.number !== state.currentScopeNumber),
     {
       number: state.currentScopeNumber,
       marker,
@@ -1062,6 +1079,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
     createdCommits: [...state.createdCommits, ...createdCommits],
     phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'claude_review',
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
+    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'codex_response' : null,
     codexRetryCount: 0,
   });
 
@@ -1147,6 +1165,7 @@ async function runCodexConsultResponsePhase(state: OrchestrationState, statePath
     createdCommits: [...state.createdCommits, ...createdCommits],
     phase: nextPhase,
     status: codex.payload.outcome === 'resumed' ? 'running' : 'blocked',
+    blockedFromPhase: codex.payload.outcome === 'resumed' ? null : consultRound.sourcePhase,
     consultRounds: state.consultRounds.map((round) =>
       round.number === consultRound.number
         ? {
@@ -1254,6 +1273,7 @@ async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: s
     findings,
     phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'claude_plan_review',
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
+    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'codex_plan_response' : null,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -1472,7 +1492,7 @@ export async function loadOrInitialize(
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   if (resumeStatePath) {
-    const state = await loadState(resumeStatePath);
+    let state = await loadState(resumeStatePath);
     const logger = await createRunLogger({
       cwd: state.cwd,
       stateDir: dirname(resumeStatePath),
@@ -1486,6 +1506,20 @@ export async function loadOrInitialize(
       phase: state.phase,
       status: state.status,
     });
+
+    if (state.status === 'blocked' && state.codexThreadId && isResumableBlockedPhase(state.blockedFromPhase)) {
+      state = await saveState(resumeStatePath, {
+        ...state,
+        phase: state.blockedFromPhase,
+        status: 'running',
+      });
+      await logger.event('run.resumed_from_blocked', {
+        statePath: resumeStatePath,
+        blockedFromPhase: state.blockedFromPhase,
+        codexThreadId: state.codexThreadId,
+      });
+    }
+
     return {
       state,
       statePath: resumeStatePath,

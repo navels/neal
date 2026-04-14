@@ -119,6 +119,7 @@ export type OrchestrationState = {
   completedScopes: ProgressScope[];
   maxRounds: number;
   maxConsultsPerScope: number;
+  blockedFromPhase: OrchestrationPhase | null;
   status: 'running' | 'done' | 'blocked' | 'failed';
 };
 
