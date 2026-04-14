@@ -88,7 +88,7 @@ function countDispositions(state: OrchestrationState) {
 
 function extractCommands(events: RunEvent[]) {
   return events
-    .filter((event) => event.type === 'codex.command_execution')
+    .filter((event) => event.type === 'coder.command_execution' || event.type === 'codex.command_execution')
     .map((event) => String(event.data?.command ?? ''))
     .filter(Boolean);
 }
@@ -118,7 +118,9 @@ function summarizeVerification(commands: string[]) {
 function buildAssessment(state: OrchestrationState, scopeEvents: RunEvent[]) {
   const findingCounts = countFindingsBySeverity(state);
   const dispositions = countDispositions(state);
-  const continuationCount = scopeEvents.filter((event) => event.type === 'claude.review_continuation').length;
+  const continuationCount = scopeEvents.filter(
+    (event) => event.type === 'advisor.round_continuation' || event.type === 'claude.review_continuation',
+  ).length;
   const phaseErrors = scopeEvents.filter((event) => event.type === 'phase.error');
   const assessments: string[] = [];
 

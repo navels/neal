@@ -17,13 +17,13 @@ import {
   runCodexResponseRound,
 } from './agents.js';
 import { writeConsultMarkdown } from './consult.js';
-import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
+import { getChangedFilesForRange, getCommitMessage, getCommitRange, getCommitSubjects, getDiffForRange, getDiffStatForRange, getHeadCommit, getWorktreeStatus, squashCommits } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
-import type { CodexConsultRequest, CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
+import type { AgentConfig, CodexConsultRequest, CodexMarker, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding } from './types.js';
 
 const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
 const DEFAULT_MAX_REVIEW_ROUNDS = Number(process.env.NEAL_MAX_REVIEW_ROUNDS ?? 20);
@@ -200,6 +200,7 @@ function buildConsultRequest(args: {
 export async function initializeOrchestration(
   planDoc: string,
   cwd: string,
+  agentConfig: AgentConfig,
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
   const absolutePlanDoc = resolve(planDoc);
@@ -217,6 +218,7 @@ export async function initializeOrchestration(
     stateDir,
     runDir: logger.runDir,
     topLevelMode,
+    agentConfig,
     progressJsonPath: join(logger.runDir, 'plan-progress.json'),
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
@@ -235,6 +237,7 @@ export async function initializeOrchestration(
     statePath,
     baseCommit,
     topLevelMode,
+    agentConfig: savedState.agentConfig,
     reviewMarkdownPath: savedState.reviewMarkdownPath,
     progressJsonPath: savedState.progressJsonPath,
     progressMarkdownPath: savedState.progressMarkdownPath,
@@ -413,6 +416,7 @@ async function runCodexPhase(state: OrchestrationState, statePath: string, logge
   let codex;
   try {
     codex = await runCodexScopeRound({
+      coder: state.agentConfig.coder,
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
@@ -510,6 +514,7 @@ async function runCodexPlanPhase(state: OrchestrationState, statePath: string, l
   let codex;
   try {
     codex = await runCodexPlanRound({
+      coder: state.agentConfig.coder,
       cwd: state.cwd,
       planDoc: state.planDoc,
       threadId: state.codexThreadId,
@@ -572,10 +577,12 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
   const previousHeadCommit = state.rounds.at(-1)?.commitRange.head ?? null;
   const commits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
   const diffStat = await getDiffStatForRange(state.cwd, state.baseCommit, headCommit);
+  const diff = await getDiffForRange(state.cwd, state.baseCommit, headCommit);
   const changedFiles = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
   let claude;
   try {
     claude = await runClaudeReviewRound({
+      reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
       planDoc: state.planDoc,
       baseCommit: state.baseCommit,
@@ -583,6 +590,7 @@ async function runClaudePhase(state: OrchestrationState, statePath: string, logg
       commits,
       previousHeadCommit,
       diffStat,
+      diff,
       changedFiles,
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
@@ -693,6 +701,7 @@ async function runClaudePlanPhase(state: OrchestrationState, statePath: string, 
   let claude;
   try {
     claude = await runClaudePlanReviewRound({
+      reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
       planDoc: state.planDoc,
       round,
@@ -811,6 +820,7 @@ async function runClaudeConsultPhase(state: OrchestrationState, statePath: strin
   let claude;
   try {
     claude = await runClaudeConsultRound({
+      reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
       planDoc: state.planDoc,
       request: consultRound.request,
@@ -1023,6 +1033,7 @@ async function runCodexResponsePhase(state: OrchestrationState, statePath: strin
   let codex;
   try {
     codex = await runCodexResponseRound({
+      coder: state.agentConfig.coder,
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
@@ -1138,6 +1149,7 @@ async function runCodexConsultResponsePhase(state: OrchestrationState, statePath
   let codex;
   try {
     codex = await runCodexConsultResponseRound({
+      coder: state.agentConfig.coder,
       cwd: state.cwd,
       planDoc: state.planDoc,
       progressMarkdownPath: state.progressMarkdownPath,
@@ -1226,6 +1238,7 @@ async function runCodexPlanResponsePhase(state: OrchestrationState, statePath: s
   let codex;
   try {
     codex = await runCodexPlanResponseRound({
+      coder: state.agentConfig.coder,
       cwd: state.cwd,
       planDoc: state.planDoc,
       openFindings: openFindings.map((finding) => ({
@@ -1488,6 +1501,7 @@ export async function runOnePass(
 export async function loadOrInitialize(
   planDoc: string | null,
   cwd: string,
+  agentConfig: AgentConfig,
   resumeStatePath?: string,
   topLevelMode: 'plan' | 'execute' = 'execute',
 ) {
@@ -1505,6 +1519,7 @@ export async function loadOrInitialize(
       statePath: resumeStatePath,
       phase: state.phase,
       status: state.status,
+      agentConfig: state.agentConfig,
     });
 
     if (state.status === 'blocked' && state.codexThreadId && isResumableBlockedPhase(state.blockedFromPhase)) {
@@ -1540,5 +1555,5 @@ export async function loadOrInitialize(
     }
   }
 
-  return initializeOrchestration(planDoc, cwd, topLevelMode);
+  return initializeOrchestration(planDoc, cwd, agentConfig, topLevelMode);
 }

@@ -12,6 +12,17 @@ export type OrchestrationPhase =
   | 'blocked';
 
 export type CodexMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
+export type AgentProvider = 'openai-codex' | 'anthropic-claude';
+
+export type AgentRoleConfig = {
+  provider: AgentProvider;
+  model: string | null;
+};
+
+export type AgentConfig = {
+  coder: AgentRoleConfig;
+  reviewer: AgentRoleConfig;
+};
 
 export type FindingSeverity = 'blocking' | 'non_blocking';
 export type FindingStatus = 'open' | 'fixed' | 'rejected' | 'deferred';
@@ -97,6 +108,7 @@ export type OrchestrationState = {
   cwd: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';
+  agentConfig: AgentConfig;
   progressJsonPath: string;
   progressMarkdownPath: string;
   consultMarkdownPath: string;
@@ -129,6 +141,7 @@ export type OrchestratorInit = {
   stateDir: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';
+  agentConfig: AgentConfig;
   progressJsonPath: string;
   progressMarkdownPath: string;
   reviewMarkdownPath: string;

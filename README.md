@@ -23,12 +23,15 @@ Install dependencies:
 pnpm install
 ```
 
+`neal` loads environment variables from a standard `.env` file at process startup via `dotenv`. Because you normally run it from the target repository, provider credentials and overrides can live in that repo's `.env`.
+
 Run from the target repository:
 
 ```bash
 cd /path/to/repo
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md
 pnpm --dir ~/code/personal/codex-chunked start -- --execute "fix failing tests"
+pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --coder-model gpt-5.4 --reviewer-model claude-opus-4-6
 ```
 
 `pnpm build` also refreshes the globally linked `neal` binary.
@@ -55,8 +58,25 @@ Execution semantics:
 - `neal --plan PLAN.md` revises a draft plan in place without making commits
 - `neal --execute PLAN.md` executes the plan scope by scope until it completes or blocks
 - `neal --execute "..."` treats the argument as an inline ad hoc execution prompt when it is not an existing file path, writes a wrapper-owned prompt file under `.neal/adhoc/`, and runs the normal execute loop against that generated prompt
+- new runs also accept:
+  - `--coder-provider <provider>`
+  - `--coder-model <model>`
+  - `--reviewer-provider <provider>`
+  - `--reviewer-model <model>`
+  - these flags apply only to new `--plan` / `--execute` runs, not `--resume`
 - `neal --summaries [runs-dir]` pages through retrospective reports written under `.neal/runs`
 - after an accepted scope, `neal` continues into the next scope automatically when the marker is `AUTONOMY_SCOPE_DONE` (or legacy `AUTONOMY_CHUNK_DONE`) until the plan completes or blocks
+
+Current provider support in this slice is:
+
+- coder providers:
+  - `openai-codex`
+  - `anthropic-claude`
+- reviewer providers:
+  - `openai-codex`
+  - `anthropic-claude`
+
+Model overrides are supported for both roles. The config surface is symmetric: the same provider can be used for coder and reviewer with different models when that provider implements both capabilities. In this slice, the configured OpenAI and Anthropic providers both support both roles. Unsupported provider-role combinations fail fast.
 
 Fresh `neal --execute ...` runs require a clean worktree. If a scope was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted Codex thread, `neal --resume` will automatically re-enter the last blocked Codex phase when that phase is resumable.
 
@@ -64,7 +84,7 @@ Fresh `neal --execute ...` runs require a clean worktree. If a scope was interru
 
 `neal` also writes wrapper-generated consult and retrospective artifacts into the run directory. `CONSULT.md` reflects the latest blocker consultation state, and `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, with checkpoint-specific archives written alongside them so you can inspect whether the review loop is adding value or exposing inefficiencies.
 
-Claude review rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Claude review sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, `neal` will continue the same Claude session up to `2` times by default when it hits `error_max_turns` before returning structured findings, and transient Claude API/internal failures are retried up to `2` times by default. Override those limits with `CLAUDE_REVIEW_CONTINUATION_LIMIT` and `CLAUDE_REVIEW_API_RETRY_LIMIT`.
+Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS` if your environment needs a longer review window. Claude review sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, `neal` will continue the same Claude session up to `2` times by default when it hits `error_max_turns` before returning structured findings, and transient Claude API/internal failures are retried up to `2` times by default. Override those limits with `CLAUDE_REVIEW_CONTINUATION_LIMIT` and `CLAUDE_REVIEW_API_RETRY_LIMIT`.
 
 Execute and planning review loops now default to `20` rounds via `NEAL_MAX_REVIEW_ROUNDS`. `neal` also detects `review_stuck` conditions and blocks early when blocking findings keep reopening or the open blocking count fails to decrease across multiple consecutive review rounds. Override that non-reduction window with `NEAL_REVIEW_STUCK_WINDOW`.
 

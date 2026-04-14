@@ -73,6 +73,14 @@ export async function getDiffStatForRange(cwd: string, base: string, head: strin
   return runGit(['diff', '--stat', `${base}..${head}`], cwd);
 }
 
+export async function getDiffForRange(cwd: string, base: string, head: string) {
+  if (base === head) {
+    return '';
+  }
+
+  return runGit(['diff', '--unified=3', `${base}..${head}`], cwd);
+}
+
 export async function getChangedFilesForRange(cwd: string, base: string, head: string) {
   if (base === head) {
     return [];

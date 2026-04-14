@@ -6,3 +6,4 @@ dist
 PROGRESS.md
 tmp/
 *.log
+.env

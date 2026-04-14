@@ -1,7 +1,56 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import type { ConsultRound, OrchestrationState, OrchestratorInit, ReviewFinding, ReviewRound } from './types.js';
+import type { AgentConfig, AgentProvider, ConsultRound, OrchestrationState, OrchestratorInit, ReviewFinding, ReviewRound } from './types.js';
+
+const AGENT_PROVIDERS = new Set(['openai-codex', 'anthropic-claude']);
+
+export function getDefaultAgentConfig(): AgentConfig {
+  return {
+    coder: {
+      provider: 'openai-codex',
+      model: null,
+    },
+    reviewer: {
+      provider: 'anthropic-claude',
+      model: null,
+    },
+  };
+}
+
+function hydrateAgentConfig(value: unknown): AgentConfig {
+  const defaults = getDefaultAgentConfig();
+  if (!value || typeof value !== 'object') {
+    return defaults;
+  }
+
+  const config = value as Partial<AgentConfig>;
+  const coderProvider = config.coder?.provider;
+  const reviewerProvider = config.reviewer?.provider;
+
+  if (typeof coderProvider === 'string' && !AGENT_PROVIDERS.has(coderProvider)) {
+    throw new Error(`Invalid session state: unsupported coder provider ${coderProvider}`);
+  }
+
+  if (typeof reviewerProvider === 'string' && !AGENT_PROVIDERS.has(reviewerProvider)) {
+    throw new Error(`Invalid session state: unsupported reviewer provider ${reviewerProvider}`);
+  }
+
+  function hydrateProvider(provider: unknown, fallback: AgentProvider): AgentProvider {
+    return typeof provider === 'string' && AGENT_PROVIDERS.has(provider) ? (provider as AgentProvider) : fallback;
+  }
+
+  return {
+    coder: {
+      provider: hydrateProvider(config.coder?.provider, defaults.coder.provider),
+      model: typeof config.coder?.model === 'string' ? config.coder.model : null,
+    },
+    reviewer: {
+      provider: hydrateProvider(config.reviewer?.provider, defaults.reviewer.provider),
+      model: typeof config.reviewer?.model === 'string' ? config.reviewer.model : null,
+    },
+  };
+}
 
 export function getSessionStatePath(stateDir: string) {
   return join(stateDir, 'session.json');
@@ -15,6 +64,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     cwd: init.cwd,
     runDir: init.runDir,
     topLevelMode: init.topLevelMode,
+    agentConfig: init.agentConfig,
     progressJsonPath: init.progressJsonPath,
     progressMarkdownPath: init.progressMarkdownPath,
     consultMarkdownPath: init.consultMarkdownPath,
@@ -228,6 +278,7 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     ...parsed,
     runDir,
     topLevelMode: parsed.topLevelMode === 'plan' ? 'plan' : 'execute',
+    agentConfig: hydrateAgentConfig(parsed.agentConfig),
     progressJsonPath,
     progressMarkdownPath,
     consultMarkdownPath,

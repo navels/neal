@@ -1,22 +1,96 @@
 #!/usr/bin/env node
 
+import 'dotenv/config';
+
 import { spawn } from 'node:child_process';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 
-import { ClaudeRoundError, CodexRoundError } from './agents.js';
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
+import { assertSupportedAgentConfig } from './providers/registry.js';
+import { getDefaultAgentConfig } from './state.js';
 import { showSummaries } from './summaries.js';
+import { ClaudeRoundError, CodexRoundError } from './agents.js';
+import type { AgentProvider } from './types.js';
 
 function usage(): never {
   console.error('Usage: neal --execute <plan-doc|inline-prompt>');
   console.error('   or: neal --plan <plan-doc>');
   console.error('   or: neal --resume [state-file]');
   console.error('   or: neal --summaries [runs-dir]');
+  console.error('Optional new-run flags: --coder-provider <provider> --coder-model <model> --reviewer-provider <provider> --reviewer-model <model>');
   process.exit(1);
+}
+
+function isAgentProvider(value: string): value is AgentProvider {
+  return value === 'openai-codex' || value === 'anthropic-claude';
+}
+
+async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['state'], statePath: string, logger: RunLogger) {
+  runLogger = logger;
+  const stopController = createStopController();
+  let lastThreadId: string | null = state.codexThreadId;
+  let shouldResumeLastThread = false;
+
+  if (process.stdin.isTTY) {
+    process.stderr.write('[neal] press q to stop after the current scope\n');
+  }
+
+  let finalState;
+  try {
+    finalState = await runOnePass(state, statePath, logger, {
+      shouldStopAfterCurrentScope() {
+        return stopController.isStopRequested();
+      },
+      onCodexThread(threadId) {
+        if (threadId) {
+          lastThreadId = threadId;
+        }
+      },
+    });
+    shouldResumeLastThread =
+      stopController.isStopRequested() &&
+      finalState.phase === 'codex_scope' &&
+      finalState.status === 'running' &&
+      Boolean(lastThreadId);
+  } finally {
+    stopController.cleanup();
+  }
+
+  process.stdout.write(
+    JSON.stringify(
+      {
+        ok: true,
+        phase: finalState.phase,
+        status: finalState.status,
+        topLevelMode: finalState.topLevelMode,
+        agentConfig: finalState.agentConfig,
+        planDoc: finalState.planDoc,
+        statePath,
+        runDir: finalState.runDir,
+        progressJsonPath: finalState.progressJsonPath,
+        progressMarkdownPath: finalState.progressMarkdownPath,
+        reviewMarkdownPath: finalState.reviewMarkdownPath,
+        archivedReviewPath: finalState.archivedReviewPath,
+        baseCommit: finalState.baseCommit,
+        finalCommit: finalState.finalCommit,
+        codexThreadId: finalState.codexThreadId,
+        claudeSessionId: finalState.claudeSessionId,
+        rounds: finalState.rounds.length,
+        findings: finalState.findings.length,
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+
+  if (shouldResumeLastThread && lastThreadId) {
+    process.stderr.write(`[neal] resuming ${lastThreadId}\n`);
+    await resumeLastThread(lastThreadId);
+  }
 }
 
 async function createInlineExecutePlanDoc(cwd: string, prompt: string) {
@@ -129,6 +203,7 @@ async function main() {
   let topLevelMode: 'plan' | 'execute' = 'execute';
   let planDoc: string | null = null;
   let resumeStatePath: string | undefined;
+  const agentConfig = getDefaultAgentConfig();
   let index = 0;
   let sawExplicitMode = false;
 
@@ -147,85 +222,73 @@ async function main() {
   }
 
   if (firstArg === '--resume') {
+    if (args.length > index + 2) {
+      throw new Error('neal --resume accepts only an optional state-file path and does not accept agent config flags');
+    }
     resumeStatePath = resolve(args[index + 1] ?? '.neal/session.json');
     await access(resumeStatePath);
-  } else {
-    if (!sawExplicitMode) {
-      usage();
-    }
-    try {
-      planDoc = resolve(firstArg);
-      await access(planDoc);
-    } catch {
-      if (topLevelMode !== 'execute') {
-        throw new Error(`Plan file not found: ${firstArg}`);
-      }
-      planDoc = await createInlineExecutePlanDoc(process.cwd(), firstArg);
-    }
+    const loaded = await loadOrInitialize(null, process.cwd(), agentConfig, resumeStatePath, topLevelMode);
+    assertSupportedAgentConfig(loaded.state.agentConfig);
+    await executeRun(loaded.state, loaded.statePath, loaded.logger);
+    return;
   }
 
-  const resolvedPlanDoc = resumeStatePath ? null : planDoc;
-  const { state, statePath, logger } = await loadOrInitialize(resolvedPlanDoc, process.cwd(), resumeStatePath, topLevelMode);
-  runLogger = logger;
-  const stopController = createStopController();
-  let lastThreadId: string | null = state.codexThreadId;
-  let shouldResumeLastThread = false;
-
-  if (process.stdin.isTTY) {
-    process.stderr.write('[neal] press q to stop after the current scope\n');
-  }
-
-  let finalState;
-  try {
-    finalState = await runOnePass(state, statePath, logger, {
-      shouldStopAfterCurrentScope() {
-        return stopController.isStopRequested();
-      },
-      onCodexThread(threadId) {
-        if (threadId) {
-          lastThreadId = threadId;
+  index += 1;
+  while (index < args.length) {
+    const flag = args[index];
+    const value = args[index + 1];
+    switch (flag) {
+      case '--coder-provider':
+        if (!value || !isAgentProvider(value)) {
+          throw new Error(`Invalid --coder-provider value: ${String(value)}`);
         }
-      },
-    });
-    shouldResumeLastThread =
-      stopController.isStopRequested() &&
-      finalState.phase === 'codex_scope' &&
-      finalState.status === 'running' &&
-      Boolean(lastThreadId);
-  } finally {
-    stopController.cleanup();
+        agentConfig.coder.provider = value;
+        index += 2;
+        break;
+      case '--coder-model':
+        if (!value) {
+          throw new Error('--coder-model requires a value');
+        }
+        agentConfig.coder.model = value;
+        index += 2;
+        break;
+      case '--reviewer-provider':
+        if (!value || !isAgentProvider(value)) {
+          throw new Error(`Invalid --reviewer-provider value: ${String(value)}`);
+        }
+        agentConfig.reviewer.provider = value;
+        index += 2;
+        break;
+      case '--reviewer-model':
+        if (!value) {
+          throw new Error('--reviewer-model requires a value');
+        }
+        agentConfig.reviewer.model = value;
+        index += 2;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${flag}`);
+    }
   }
 
-  process.stdout.write(
-    JSON.stringify(
-      {
-        ok: true,
-        phase: finalState.phase,
-        status: finalState.status,
-        topLevelMode: finalState.topLevelMode,
-        planDoc: finalState.planDoc,
-        statePath,
-        runDir: finalState.runDir,
-        progressJsonPath: finalState.progressJsonPath,
-        progressMarkdownPath: finalState.progressMarkdownPath,
-        reviewMarkdownPath: finalState.reviewMarkdownPath,
-        archivedReviewPath: finalState.archivedReviewPath,
-        baseCommit: finalState.baseCommit,
-        finalCommit: finalState.finalCommit,
-        codexThreadId: finalState.codexThreadId,
-        claudeSessionId: finalState.claudeSessionId,
-        rounds: finalState.rounds.length,
-        findings: finalState.findings.length,
-      },
-      null,
-      2,
-    ) + '\n',
-  );
+  assertSupportedAgentConfig(agentConfig);
 
-  if (shouldResumeLastThread && lastThreadId) {
-    process.stderr.write(`[neal] resuming ${lastThreadId}\n`);
-    await resumeLastThread(lastThreadId);
+  if (!sawExplicitMode) {
+    usage();
   }
+  try {
+    planDoc = resolve(firstArg);
+    await access(planDoc);
+  } catch {
+    if (topLevelMode !== 'execute') {
+      throw new Error(`Plan file not found: ${firstArg}`);
+    }
+    planDoc = await createInlineExecutePlanDoc(process.cwd(), firstArg);
+  }
+
+  const loaded = await loadOrInitialize(planDoc, process.cwd(), agentConfig, undefined, topLevelMode);
+  assertSupportedAgentConfig(loaded.state.agentConfig);
+  await executeRun(loaded.state, loaded.statePath, loaded.logger);
 }
 
 let runLogger: RunLogger | undefined;
