@@ -28,6 +28,7 @@ Run from the target repository:
 ```bash
 cd /path/to/repo
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md
+pnpm --dir ~/code/personal/codex-chunked start -- --execute "fix failing tests"
 ```
 
 `pnpm build` also refreshes the globally linked `neal` binary.
@@ -53,6 +54,7 @@ Execution semantics:
 
 - `neal --plan PLAN.md` revises a draft plan in place without making commits
 - `neal --execute PLAN.md` executes the plan scope by scope until it completes or blocks
+- `neal --execute "..."` treats the argument as an inline ad hoc execution prompt when it is not an existing file path, writes a wrapper-owned prompt file under `.neal/adhoc/`, and runs the normal execute loop against that generated prompt
 - `neal --summaries [runs-dir]` pages through retrospective reports written under `.neal/runs`
 - after an accepted scope, `neal` continues into the next scope automatically when the marker is `AUTONOMY_SCOPE_DONE` (or legacy `AUTONOMY_CHUNK_DONE`) until the plan completes or blocks
 
