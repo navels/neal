@@ -4,3 +4,5 @@ dist
 .forge/
 .codex-claude-chunked/
 PROGRESS.md
+tmp/
+*.log
