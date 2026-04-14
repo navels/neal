@@ -70,7 +70,7 @@ In execute mode, a Codex inactivity timeout now triggers one automatic retry on 
 
 For review quality, `neal` gives Claude the authoritative commit range, commit list, diff stat, and changed-file list for the current scope. Claude is expected to inspect that commit range directly with repository tools rather than relying on a wrapper-inlined patch.
 
-If Codex blocks during scope execution or during a review-response pass, `neal` now routes that blocker through a bounded Claude consult loop before stopping. The consult is wrapper-owned and recorded in `CONSULT.md`; Codex remains the implementation owner. New runs default to up to `4` consult rounds per scope.
+If Codex blocks during scope execution or during a review-response pass, `neal` now routes that blocker through a bounded Claude consult loop before stopping. The consult is wrapper-owned and recorded in `CONSULT.md`; Codex remains the implementation owner. New runs default to up to `4` consult rounds per scope. Consult advice is diagnostic only: it cannot authorize baseline failures, waive verification gates, or override explicit user/wrapper policy.
 
 Each `neal` run also writes persistent diagnostics under `.neal/runs/<timestamp>-<id>/`:
 
