@@ -84,6 +84,39 @@ function writeDiagnostic(message: string, logger?: RunLogger) {
   void logger?.stderr(message);
 }
 
+type ClaudeLogState = {
+  textBuffer: string;
+  sawTextDelta: boolean;
+};
+
+function flushClaudeText(label: string, state: ClaudeLogState, logger?: RunLogger) {
+  const trimmed = state.textBuffer.trim();
+  if (!trimmed) {
+    state.textBuffer = '';
+    return;
+  }
+
+  writeDiagnostic(`[claude:${label}] ${trimmed}\n`, logger);
+  void logger?.event('claude.assistant_text', { label, text: trimmed });
+  state.textBuffer = '';
+}
+
+function appendClaudeText(label: string, state: ClaudeLogState, text: string, logger?: RunLogger) {
+  state.sawTextDelta = true;
+  state.textBuffer += text;
+
+  const lines = state.textBuffer.split('\n');
+  state.textBuffer = lines.pop() ?? '';
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    writeDiagnostic(`[claude:${label}] ${trimmed}\n`, logger);
+    void logger?.event('claude.assistant_text', { label, text: trimmed });
+  }
+}
+
 async function consumeCodexTurn(
   turn: Awaited<ReturnType<Thread['runStreamed']>>,
   logger?: RunLogger,
@@ -249,8 +282,36 @@ function parseCodexConsultDispositionPayload(raw: string): CodexConsultDispositi
   }
 }
 
-function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger) {
+function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger, state?: ClaudeLogState) {
   switch (message.type) {
+    case 'assistant': {
+      if (state?.sawTextDelta) {
+        break;
+      }
+
+      const textBlocks = message.message.content
+        .filter((block): block is Extract<(typeof message.message.content)[number], { type: 'text' }> => block.type === 'text')
+        .map((block) => block.text.trim())
+        .filter(Boolean);
+
+      if (textBlocks.length > 0) {
+        for (const text of textBlocks) {
+          writeDiagnostic(`[claude:${label}] ${text}\n`, logger);
+          void logger?.event('claude.assistant_text', { label, text });
+        }
+      }
+      break;
+    }
+    case 'stream_event': {
+      if (message.event.type === 'content_block_delta') {
+        if (message.event.delta.type === 'text_delta' && state) {
+          appendClaudeText(label, state, message.event.delta.text, logger);
+        }
+      } else if (message.event.type === 'content_block_stop' && state) {
+        flushClaudeText(label, state, logger);
+      }
+      break;
+    }
     case 'tool_progress':
       writeDiagnostic(`[claude:${label}] tool ${message.tool_name} running (${message.elapsed_time_seconds}s)\n`, logger);
       void logger?.event('claude.tool_progress', {
@@ -265,6 +326,14 @@ function logClaudeMessage(label: string, message: SDKMessage, logger?: RunLogger
       break;
     case 'system':
       switch (message.subtype) {
+        case 'notification':
+          writeDiagnostic(`[claude:${label}] ${message.text}\n`, logger);
+          void logger?.event('claude.notification', { label, text: message.text, priority: message.priority });
+          break;
+        case 'local_command_output':
+          writeDiagnostic(`[claude:${label}] ${message.content}\n`, logger);
+          void logger?.event('claude.local_command_output', { label, content: message.content });
+          break;
         case 'task_started':
           writeDiagnostic(`[claude:${label}] task started: ${message.description}\n`, logger);
           void logger?.event('claude.task_started', { label, description: message.description });
@@ -319,6 +388,7 @@ async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label:
 async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, label: string, timeoutMs = DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, logger?: RunLogger) {
   let sessionId: string | null = null;
   let lastResult: SDKResultMessage | null = null;
+  const logState: ClaudeLogState = { textBuffer: '', sawTextDelta: false };
   const iterator = stream[Symbol.asyncIterator]();
 
   while (true) {
@@ -329,11 +399,13 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, lab
 
     const message = next.value;
     sessionId = sessionId ?? message.session_id ?? null;
-    logClaudeMessage(label, message, logger);
+    logClaudeMessage(label, message, logger, logState);
     if (message.type === 'result') {
       lastResult = message;
     }
   }
+
+  flushClaudeText(label, logState, logger);
 
   return { sessionId, lastResult };
 }
