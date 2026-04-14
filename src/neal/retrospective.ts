@@ -167,6 +167,52 @@ function summarizeFindings(state: OrchestrationState) {
     .join('\n');
 }
 
+function summarizeBlocker(state: OrchestrationState) {
+  const latestCompletedScope = state.completedScopes.at(-1) ?? null;
+  const persistedBlocker = latestCompletedScope?.blocker?.trim() || null;
+  const latestConsult = state.consultRounds.at(-1) ?? null;
+  const consultRequestBlocker = latestConsult?.request.blocker?.trim() || null;
+  const consultDiagnosis = latestConsult?.response?.diagnosis?.trim() || null;
+  const consultRecommendations = latestConsult?.response?.recommendations ?? [];
+  const codexDisposition = latestConsult?.disposition?.summary?.trim() || null;
+  const codexRemainingBlocker = latestConsult?.disposition?.blocker?.trim() || null;
+  const lines: string[] = [];
+
+  if (persistedBlocker) {
+    lines.push(`- Final blocker: ${persistedBlocker}`);
+  }
+
+  if (consultRequestBlocker && consultRequestBlocker !== persistedBlocker) {
+    lines.push(`- Consult request: ${consultRequestBlocker}`);
+  }
+
+  if (consultDiagnosis) {
+    lines.push(`- Claude diagnosis: ${consultDiagnosis}`);
+  }
+
+  if (consultRecommendations.length > 0) {
+    const display = consultRecommendations.slice(0, 4);
+    lines.push(`- Claude recommendations: ${display.join(' | ')}`);
+    if (consultRecommendations.length > display.length) {
+      lines.push(`- Additional recommendations omitted: ${consultRecommendations.length - display.length}`);
+    }
+  }
+
+  if (codexDisposition) {
+    lines.push(`- Codex follow-through: ${codexDisposition}`);
+  }
+
+  if (codexRemainingBlocker && codexRemainingBlocker !== persistedBlocker) {
+    lines.push(`- Remaining blocker after consult: ${codexRemainingBlocker}`);
+  }
+
+  if (lines.length === 0) {
+    lines.push('- No blocker summary was captured.');
+  }
+
+  return lines.join('\n');
+}
+
 function summarizeCompletedScopes(state: OrchestrationState) {
   if (state.completedScopes.length === 0) {
     return '- No completed scopes recorded yet.';
@@ -229,6 +275,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const assessment = buildAssessment(state, scopeEvents);
   const completedScopesSummary = kind === 'done' ? summarizeCompletedScopes(state) : null;
   const latestClaudeSessionId = getLatestClaudeSessionId(state);
+  const blockerSummary = kind === 'blocked' || kind === 'failed' ? summarizeBlocker(state) : null;
 
   return [
     `# Neal Retrospective`,
@@ -254,6 +301,13 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     '',
     `## Verification`,
     verificationSummary,
+    ...(blockerSummary
+      ? [
+          '',
+          `## Blocker Summary`,
+          blockerSummary,
+        ]
+      : []),
     '',
     `## Assessment`,
     assessment,

@@ -36,7 +36,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     createdCommits: [],
     completedScopes: [],
     maxRounds: init.maxRounds,
-    maxConsultsPerScope: 1,
+    maxConsultsPerScope: 4,
     status: 'running',
   };
 }
@@ -245,6 +245,6 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     rounds: parsed.rounds.map(hydrateRound),
     findings: parsed.findings.map(hydrateFinding),
     completedScopes: Array.isArray(parsed.completedScopes) ? parsed.completedScopes.map(hydrateCompletedScope) : [],
-    maxConsultsPerScope: typeof parsed.maxConsultsPerScope === 'number' ? parsed.maxConsultsPerScope : 1,
+    maxConsultsPerScope: typeof parsed.maxConsultsPerScope === 'number' ? parsed.maxConsultsPerScope : 4,
   };
 }
