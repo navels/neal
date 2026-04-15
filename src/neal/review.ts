@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { getCurrentScopeLabel } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 export function renderReviewMarkdown(state: OrchestrationState) {
@@ -9,6 +10,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     '',
     '## Metadata',
     `- Plan: ${state.planDoc}`,
+    `- Scope: ${getCurrentScopeLabel(state)}`,
     `- Phase: ${state.phase}`,
     `- Coder session: ${state.coderSessionHandle ?? 'pending'}`,
     `- Base commit: ${state.baseCommit ?? 'unknown'}`,

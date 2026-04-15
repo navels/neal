@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { getCurrentScopeLabel } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 type PlanProgressState = {
@@ -11,7 +12,7 @@ type PlanProgressState = {
   updatedAt: string;
   finalCommit: string | null;
   currentScope: {
-    number: number;
+    number: string;
     phase: OrchestrationState['phase'];
     marker: OrchestrationState['lastScopeMarker'];
     baseCommit: string | null;
@@ -35,7 +36,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
       state.status === 'done'
         ? null
         : {
-            number: state.currentScopeNumber,
+            number: getCurrentScopeLabel(state),
             phase: state.phase,
             marker: state.lastScopeMarker,
             baseCommit: state.baseCommit,

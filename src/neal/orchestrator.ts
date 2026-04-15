@@ -38,6 +38,7 @@ import { createRunLogger, type RunLogger } from './logger.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
+import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, hasAcceptedDerivedPlan, isExecutingDerivedPlan } from './scopes.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type { AgentConfig, CoderConsultRequest, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding, ScopeMarker } from './types.js';
 
@@ -286,12 +287,13 @@ async function notifyComplete(state: OrchestrationState, message: string, logger
 
 async function notifyScopeAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
+  const scopeLabel = getCurrentScopeLabel(state);
   await logger?.event('notify.scope_complete', {
     message,
     planName,
-    scopeNumber: state.currentScopeNumber,
+    scopeNumber: scopeLabel,
   });
-  await notify('complete', `[neal] ${planName}: scope ${state.currentScopeNumber} complete: ${message}`);
+  await notify('complete', `[neal] ${planName}: scope ${scopeLabel} complete: ${message}`);
 }
 
 async function notifyRetry(state: OrchestrationState, message: string, logger?: RunLogger) {
@@ -299,14 +301,15 @@ async function notifyRetry(state: OrchestrationState, message: string, logger?: 
   await logger?.event('notify.retry', {
     message,
     planName,
-    scopeNumber: state.currentScopeNumber,
+    scopeNumber: getCurrentScopeLabel(state),
     phase: state.phase,
   });
   await notify('retry', `[neal] ${planName}: ${message}`);
 }
 
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
-  if (state.completedScopes.some((scope) => scope.number === state.currentScopeNumber)) {
+  const scopeLabel = getCurrentScopeLabel(state);
+  if (state.completedScopes.some((scope) => scope.number === scopeLabel)) {
     return state;
   }
 
@@ -314,10 +317,12 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
     ...state,
     blockedFromPhase: state.blockedFromPhase ?? state.phase,
     completedScopes: appendCompletedScope(state, 'blocked', {
+      scopeLabel: getCurrentScopeLabel(state),
       finalCommit: null,
       commitSubject: null,
       archivedReviewPath: state.archivedReviewPath,
       blocker: reason,
+      derivedFromParentScope: isExecutingDerivedPlan(state) ? getParentScopeLabel(state) : null,
     }),
   });
   await writeExecutionArtifacts(nextState);
@@ -651,7 +656,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
     codex = await runCoderScopeRound({
       coder: state.agentConfig.coder,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getExecutionPlanPath(state),
       progressMarkdownPath: state.progressMarkdownPath,
       sessionHandle: state.coderSessionHandle,
       onSessionStarted: async (sessionHandle) => {
@@ -830,7 +835,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
     claude = await runReviewerRound({
       reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getExecutionPlanPath(state),
       baseCommit: state.baseCommit,
       headCommit,
       commits,
@@ -1248,17 +1253,22 @@ function appendCompletedScope(
   state: OrchestrationState,
   result: 'accepted' | 'blocked',
   details: {
+    scopeLabel?: string;
     finalCommit: string | null;
     commitSubject: string | null;
     archivedReviewPath: string | null;
     blocker: string | null;
+    marker?: ScopeMarker;
+    derivedFromParentScope?: string | null;
+    replacedByDerivedPlanPath?: string | null;
   },
 ) {
-  const marker = (state.lastScopeMarker ?? 'AUTONOMY_BLOCKED') as ScopeMarker;
+  const scopeLabel = details.scopeLabel ?? getCurrentScopeLabel(state);
+  const marker = details.marker ?? ((state.lastScopeMarker ?? 'AUTONOMY_BLOCKED') as ScopeMarker);
   return [
-    ...state.completedScopes.filter((scope) => scope.number !== state.currentScopeNumber),
+    ...state.completedScopes.filter((scope) => scope.number !== scopeLabel),
     {
-      number: state.currentScopeNumber,
+      number: scopeLabel,
       marker,
       result,
       baseCommit: state.baseCommit,
@@ -1268,8 +1278,30 @@ function appendCompletedScope(
       findings: state.findings.length,
       archivedReviewPath: details.archivedReviewPath,
       blocker: details.blocker,
+      derivedFromParentScope: details.derivedFromParentScope ?? null,
+      replacedByDerivedPlanPath: details.replacedByDerivedPlanPath ?? null,
     },
   ];
+}
+
+function adoptAcceptedDerivedPlan(state: OrchestrationState) {
+  if (!hasAcceptedDerivedPlan(state) || !state.derivedPlanPath) {
+    return state;
+  }
+
+  return {
+    ...state,
+    phase: 'coder_scope' as const,
+    status: 'running' as const,
+    derivedScopeIndex: state.derivedScopeIndex ?? 1,
+    coderSessionHandle: null,
+    coderRetryCount: 0,
+    rounds: [],
+    consultRounds: [],
+    findings: [],
+    createdCommits: [],
+    blockedFromPhase: null,
+  };
 }
 
 function buildVerificationHint(state: OrchestrationState) {
@@ -1316,7 +1348,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
     codex = await runCoderResponseRound({
       coder: state.agentConfig.coder,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getExecutionPlanPath(state),
       progressMarkdownPath: state.progressMarkdownPath,
       verificationHint: buildVerificationHint(state),
       openFindings: openFindings.map((finding) => ({
@@ -1452,7 +1484,7 @@ async function runCoderOptionalResponsePhase(state: OrchestrationState, statePat
     codex = await runCoderResponseRound({
       coder: state.agentConfig.coder,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getExecutionPlanPath(state),
       progressMarkdownPath: state.progressMarkdownPath,
       verificationHint: buildVerificationHint(state),
       openFindings: openFindings.map((finding) => ({
@@ -1554,7 +1586,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
     codex = await runCoderConsultResponseRound({
       coder: state.agentConfig.coder,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getExecutionPlanPath(state),
       progressMarkdownPath: state.progressMarkdownPath,
       consultMarkdownPath: state.consultMarkdownPath,
       request: consultRound.request,
@@ -1870,49 +1902,113 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     finalCommit,
     archivedReviewPath,
   };
-
-  const completedScopes = appendCompletedScope(state, 'accepted', {
+  const derivedExecution = isExecutingDerivedPlan(state);
+  const currentScopeLabel = getCurrentScopeLabel(state);
+  const subScopeCompletedScopes = appendCompletedScope(state, 'accepted', {
+    scopeLabel: currentScopeLabel,
     finalCommit,
     commitSubject: finalSubject,
     archivedReviewPath,
     blocker: null,
+    derivedFromParentScope: derivedExecution ? getParentScopeLabel(state) : null,
   });
+  const derivedPlanCompleted = derivedExecution && state.lastScopeMarker === 'AUTONOMY_DONE';
+  const completedScopes = derivedPlanCompleted
+    ? appendCompletedScope(
+        {
+          ...state,
+          completedScopes: subScopeCompletedScopes,
+        },
+        'accepted',
+        {
+          scopeLabel: getParentScopeLabel(state),
+          finalCommit,
+          commitSubject: finalSubject,
+          archivedReviewPath,
+          blocker: null,
+          marker: 'AUTONOMY_SCOPE_DONE',
+          replacedByDerivedPlanPath: state.derivedPlanPath,
+        },
+      )
+    : subScopeCompletedScopes;
   const retrospectiveState = {
     ...archivedReviewState,
     completedScopes,
   };
-  const continueScopes = state.lastScopeMarker !== 'AUTONOMY_DONE' && state.lastScopeMarker !== 'AUTONOMY_BLOCKED';
+  const continueScopes = derivedExecution
+    ? true
+    : state.lastScopeMarker !== 'AUTONOMY_DONE' && state.lastScopeMarker !== 'AUTONOMY_BLOCKED';
   const nextState = await saveState(
     statePath,
-    continueScopes
-      ? {
-          ...state,
-          baseCommit: finalCommit,
-          finalCommit: null,
-          coderSessionHandle: null,
-          currentScopeNumber: state.currentScopeNumber + 1,
-          lastScopeMarker: null,
-          derivedPlanPath: null,
-          derivedFromScopeNumber: null,
-          derivedPlanStatus: null,
-          splitPlanCountForCurrentScope: 0,
-          rounds: [],
-          consultRounds: [],
-          findings: [],
-          createdCommits: [],
-          completedScopes,
-          archivedReviewPath: null,
-          phase: 'coder_scope',
-          status: 'running',
-        }
-      : {
-          ...state,
-          finalCommit,
-          archivedReviewPath,
-          completedScopes,
-          phase: 'done',
-          status: 'done',
-        },
+    derivedExecution
+      ? derivedPlanCompleted
+        ? {
+            ...state,
+            baseCommit: finalCommit,
+            finalCommit: null,
+            coderSessionHandle: null,
+            currentScopeNumber: state.currentScopeNumber + 1,
+            lastScopeMarker: null,
+            derivedPlanPath: null,
+            derivedFromScopeNumber: null,
+            derivedPlanStatus: null,
+            derivedScopeIndex: null,
+            splitPlanCountForCurrentScope: 0,
+            rounds: [],
+            consultRounds: [],
+            findings: [],
+            createdCommits: [],
+            completedScopes,
+            archivedReviewPath: null,
+            phase: 'coder_scope',
+            status: 'running',
+          }
+        : {
+            ...state,
+            baseCommit: finalCommit,
+            finalCommit: null,
+            coderSessionHandle: null,
+            lastScopeMarker: null,
+            derivedScopeIndex: (state.derivedScopeIndex ?? 1) + 1,
+            rounds: [],
+            consultRounds: [],
+            findings: [],
+            createdCommits: [],
+            completedScopes,
+            archivedReviewPath: null,
+            phase: 'coder_scope',
+            status: 'running',
+          }
+      : continueScopes
+        ? {
+            ...state,
+            baseCommit: finalCommit,
+            finalCommit: null,
+            coderSessionHandle: null,
+            currentScopeNumber: state.currentScopeNumber + 1,
+            lastScopeMarker: null,
+            derivedPlanPath: null,
+            derivedFromScopeNumber: null,
+            derivedPlanStatus: null,
+            derivedScopeIndex: null,
+            splitPlanCountForCurrentScope: 0,
+            rounds: [],
+            consultRounds: [],
+            findings: [],
+            createdCommits: [],
+            completedScopes,
+            archivedReviewPath: null,
+            phase: 'coder_scope',
+            status: 'running',
+          }
+        : {
+            ...state,
+            finalCommit,
+            archivedReviewPath,
+            completedScopes,
+            phase: 'done',
+            status: 'done',
+          },
   );
 
   await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
@@ -1954,6 +2050,7 @@ export async function runOnePass(
     currentState.phase === 'reviewer_plan' ||
     currentState.phase === 'coder_plan_response' ||
     currentState.phase === 'coder_plan_optional_response' ||
+    currentState.phase === 'awaiting_derived_plan_execution' ||
     currentState.phase === 'coder_scope' ||
     currentState.phase === 'reviewer_scope' ||
     currentState.phase === 'coder_response' ||
@@ -1984,6 +2081,18 @@ export async function runOnePass(
     if (currentState.phase === 'coder_plan_optional_response') {
       currentState = await runCoderPlanOptionalResponsePhase(currentState, statePath, logger);
       options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
+      continue;
+    }
+
+    if (currentState.phase === 'awaiting_derived_plan_execution') {
+      currentState = await saveState(statePath, adoptAcceptedDerivedPlan(currentState));
+      await writeExecutionArtifacts(currentState);
+      await logger?.event('phase.complete', {
+        phase: 'awaiting_derived_plan_execution',
+        nextPhase: currentState.phase,
+        scopeNumber: getCurrentScopeLabel(currentState),
+        planDoc: getExecutionPlanPath(currentState),
+      });
       continue;
     }
 

@@ -93,7 +93,7 @@ export type ConsultRound = {
 };
 
 export type ProgressScope = {
-  number: number;
+  number: string;
   marker: ScopeMarker;
   result: 'accepted' | 'blocked';
   baseCommit: string | null;
@@ -103,6 +103,8 @@ export type ProgressScope = {
   findings: number;
   archivedReviewPath: string | null;
   blocker: string | null;
+  derivedFromParentScope: string | null;
+  replacedByDerivedPlanPath: string | null;
 };
 
 export type OrchestrationState = {
@@ -130,6 +132,7 @@ export type OrchestrationState = {
   derivedPlanPath: string | null;
   derivedFromScopeNumber: number | null;
   derivedPlanStatus: 'pending_review' | 'accepted' | 'rejected' | null;
+  derivedScopeIndex: number | null;
   splitPlanCountForCurrentScope: number;
   derivedPlanDepth: number;
   maxDerivedPlanReviewRounds: number;

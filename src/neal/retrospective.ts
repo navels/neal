@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { getChangedFilesForRange } from './git.js';
+import { getCurrentScopeLabel } from './scopes.js';
 import type { FindingSeverity, OrchestrationState } from './types.js';
 
 type RunEvent = {
@@ -21,17 +22,18 @@ function getCurrentRetrospectivePath(runDir: string) {
 }
 
 function getArchivedRetrospectivePath(state: OrchestrationState, kind: RetrospectiveKind) {
+  const scopeLabel = getCurrentScopeLabel(state);
   if (kind === 'scope_accepted') {
     const suffix = state.finalCommit ? `-${state.finalCommit}` : '';
-    return join(state.runDir, `RETROSPECTIVE-scope-${state.currentScopeNumber}${suffix}.md`);
+    return join(state.runDir, `RETROSPECTIVE-scope-${scopeLabel}${suffix}.md`);
   }
 
   if (kind === 'blocked') {
-    return join(state.runDir, `RETROSPECTIVE-blocked-scope-${state.currentScopeNumber}.md`);
+    return join(state.runDir, `RETROSPECTIVE-blocked-scope-${scopeLabel}.md`);
   }
 
   if (kind === 'failed') {
-    return join(state.runDir, `RETROSPECTIVE-failed-scope-${state.currentScopeNumber}.md`);
+    return join(state.runDir, `RETROSPECTIVE-failed-scope-${scopeLabel}.md`);
   }
 
   const suffix = state.finalCommit ? `-${state.finalCommit}` : '';
@@ -224,7 +226,9 @@ function summarizeCompletedScopes(state: OrchestrationState) {
     .map((scope) => {
       const commit = scope.finalCommit ? ` | Commit: ${scope.finalCommit}` : '';
       const blocker = scope.blocker ? ` | Blocker: ${scope.blocker}` : '';
-      return `- Scope ${scope.number}: ${scope.result} (${scope.marker}) | Review rounds: ${scope.reviewRounds} | Findings: ${scope.findings}${commit}${blocker}`;
+      const parent = scope.derivedFromParentScope ? ` | Parent: ${scope.derivedFromParentScope}` : '';
+      const derivedPlan = scope.replacedByDerivedPlanPath ? ` | Derived plan: ${scope.replacedByDerivedPlanPath}` : '';
+      return `- Scope ${scope.number}: ${scope.result} (${scope.marker}) | Review rounds: ${scope.reviewRounds} | Findings: ${scope.findings}${commit}${blocker}${parent}${derivedPlan}`;
     })
     .join('\n');
 }
@@ -263,14 +267,14 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const planName = basename(state.planDoc);
   const outcomeTitle =
     kind === 'scope_accepted'
-      ? `Scope ${state.currentScopeNumber} accepted`
+      ? `Scope ${getCurrentScopeLabel(state)} accepted`
       : kind === 'blocked'
-        ? `Scope ${state.currentScopeNumber} blocked`
+        ? `Scope ${getCurrentScopeLabel(state)} blocked`
         : kind === 'failed'
-          ? `Scope ${state.currentScopeNumber} failed`
-        : state.topLevelMode === 'plan'
-          ? 'Planning run complete'
-          : 'Plan implementation complete';
+          ? `Scope ${getCurrentScopeLabel(state)} failed`
+          : state.topLevelMode === 'plan'
+            ? 'Planning run complete'
+            : 'Plan implementation complete';
   const outcomeStatus =
     kind === 'scope_accepted'
       ? 'accepted'
@@ -294,7 +298,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     `- Plan: ${planName}`,
     `- Mode: ${state.topLevelMode}`,
     `- Summary: ${outcomeTitle}`,
-    `- Scope: ${state.currentScopeNumber}`,
+    `- Scope: ${getCurrentScopeLabel(state)}`,
     `- Status: ${outcomeStatus}`,
     `- Final commit: ${state.finalCommit ?? 'n/a'}`,
     `- Coder session: ${state.coderSessionHandle ?? 'n/a'}`,

@@ -83,6 +83,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     derivedPlanPath: null,
     derivedFromScopeNumber: null,
     derivedPlanStatus: null,
+    derivedScopeIndex: null,
     splitPlanCountForCurrentScope: 0,
     derivedPlanDepth: 0,
     maxDerivedPlanReviewRounds: 5,
@@ -264,7 +265,12 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
   const scope = value as Partial<OrchestrationState['completedScopes'][number]>;
 
   return {
-    number: typeof scope.number === 'number' ? scope.number : 0,
+    number:
+      typeof scope.number === 'string'
+        ? scope.number
+        : typeof scope.number === 'number'
+          ? String(scope.number)
+          : '0',
     marker:
       scope.marker === 'AUTONOMY_SCOPE_DONE' ||
       scope.marker === 'AUTONOMY_CHUNK_DONE' ||
@@ -281,6 +287,8 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
     findings: typeof scope.findings === 'number' ? scope.findings : 0,
     archivedReviewPath: typeof scope.archivedReviewPath === 'string' ? scope.archivedReviewPath : null,
     blocker: typeof scope.blocker === 'string' ? scope.blocker : null,
+    derivedFromParentScope: typeof scope.derivedFromParentScope === 'string' ? scope.derivedFromParentScope : null,
+    replacedByDerivedPlanPath: typeof scope.replacedByDerivedPlanPath === 'string' ? scope.replacedByDerivedPlanPath : null,
   };
 }
 
@@ -339,6 +347,10 @@ export async function loadState(path: string): Promise<OrchestrationState> {
       (parsed as { derivedPlanStatus?: unknown }).derivedPlanStatus === 'accepted' ||
       (parsed as { derivedPlanStatus?: unknown }).derivedPlanStatus === 'rejected'
         ? (parsed as { derivedPlanStatus: OrchestrationState['derivedPlanStatus'] }).derivedPlanStatus
+        : null,
+    derivedScopeIndex:
+      typeof (parsed as { derivedScopeIndex?: unknown }).derivedScopeIndex === 'number'
+        ? (parsed as { derivedScopeIndex: number }).derivedScopeIndex
         : null,
     splitPlanCountForCurrentScope:
       typeof (parsed as { splitPlanCountForCurrentScope?: unknown }).splitPlanCountForCurrentScope === 'number'
