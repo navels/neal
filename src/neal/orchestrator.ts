@@ -2008,7 +2008,7 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
   return nextState;
 }
 
-async function runFinalSquashPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+export async function runFinalSquashPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   if (!state.baseCommit) {
     throw new Error('Cannot finalize without a baseCommit');
   }
@@ -2048,6 +2048,9 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
     blocker: null,
     derivedFromParentScope: derivedExecution ? getParentScopeLabel(state) : null,
   });
+  // Inside derived execution, AUTONOMY_DONE means "the derived replacement plan is complete",
+  // not "the top-level execute plan is complete". In that case final squash rolls the last
+  // derived sub-scope up into the parent scope and resumes parent-plan execution.
   const derivedPlanCompleted = derivedExecution && state.lastScopeMarker === 'AUTONOMY_DONE';
   const completedScopes = derivedPlanCompleted
     ? appendCompletedScope(
