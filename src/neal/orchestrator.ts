@@ -1796,6 +1796,9 @@ export async function loadOrInitialize(
   agentConfig: AgentConfig,
   resumeStatePath?: string,
   topLevelMode: 'plan' | 'execute' = 'execute',
+  options?: {
+    ignoreLocalChanges?: boolean;
+  },
 ) {
   if (resumeStatePath) {
     let state = await loadState(resumeStatePath);
@@ -1880,11 +1883,11 @@ export async function loadOrInitialize(
     throw new Error('planDoc is required when initializing a new orchestration');
   }
 
-  if (topLevelMode === 'execute') {
+  if (topLevelMode === 'execute' && !options?.ignoreLocalChanges) {
     const statusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(cwd));
     if (statusOutput) {
       throw new Error(
-        `Cannot start neal --execute with a dirty worktree:\n${statusOutput}\n\nUse neal --resume for in-progress scope work.`,
+        `Cannot start neal --execute with a dirty worktree:\n${statusOutput}\n\nUse neal --resume for in-progress scope work, or pass --ignore-local-changes to bypass this check.`,
       );
     }
   }

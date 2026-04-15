@@ -23,7 +23,7 @@ function usage(): never {
   console.error('   or: neal --resume-coder [state-file]');
   console.error('   or: neal --resume-reviewer [state-file]');
   console.error('   or: neal --summaries [runs-dir]');
-  console.error('Optional new-run flags: --coder-provider <provider> --coder-model <model> --reviewer-provider <provider> --reviewer-model <model>');
+  console.error('Optional new-run flags: --coder-provider <provider> --coder-model <model> --reviewer-provider <provider> --reviewer-model <model> --ignore-local-changes');
   process.exit(1);
 }
 
@@ -242,6 +242,7 @@ async function main() {
   let planDoc: string | null = null;
   let resumeStatePath: string | undefined;
   const agentConfig = getDefaultAgentConfig();
+  let ignoreLocalChanges = false;
   let index = 0;
   let sawExplicitMode = false;
 
@@ -314,6 +315,10 @@ async function main() {
         agentConfig.reviewer.model = value;
         index += 2;
         break;
+      case '--ignore-local-changes':
+        ignoreLocalChanges = true;
+        index += 1;
+        break;
       default:
         throw new Error(`Unknown argument: ${flag}`);
     }
@@ -334,7 +339,9 @@ async function main() {
     planDoc = await createInlineExecutePlanDoc(process.cwd(), firstArg);
   }
 
-  const loaded = await loadOrInitialize(planDoc, process.cwd(), agentConfig, undefined, topLevelMode);
+  const loaded = await loadOrInitialize(planDoc, process.cwd(), agentConfig, undefined, topLevelMode, {
+    ignoreLocalChanges,
+  });
   assertSupportedAgentConfig(loaded.state.agentConfig);
   await executeRun(loaded.state, loaded.statePath, loaded.logger);
 }

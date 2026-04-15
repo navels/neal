@@ -32,6 +32,7 @@ cd /path/to/repo
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md
 pnpm --dir ~/code/personal/codex-chunked start -- --execute "fix failing tests"
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --coder-model gpt-5.4 --reviewer-model claude-opus-4-6
+pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --ignore-local-changes
 ```
 
 `pnpm build` also refreshes the globally linked `neal` binary.
@@ -120,7 +121,7 @@ Current provider support in this slice is:
 
 Model overrides are supported for both roles. The config surface is symmetric: the same provider can be used for coder and reviewer with different models when that provider implements both capabilities. In this slice, the configured OpenAI and Anthropic providers both support both roles. Unsupported provider-role combinations fail fast.
 
-Fresh `neal --execute ...` runs require a clean worktree. If a scope was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted coder session, `neal --resume` will automatically re-enter the last blocked coder phase when that phase is resumable.
+Fresh `neal --execute ...` runs require a clean worktree by default. If you intentionally want to start a fresh execute run on top of local changes, pass `--ignore-local-changes`. If a scope was interrupted with in-progress local changes, prefer `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted coder session, `neal --resume` will automatically re-enter the last blocked coder phase when that phase is resumable.
 
 The direct session-resume commands dispatch by persisted provider:
 
