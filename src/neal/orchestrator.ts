@@ -651,6 +651,46 @@ export async function flushDerivedPlanNotifications(
   return nextState;
 }
 
+async function finalizePlanReviewResponseWithoutOpenFindings(
+  state: OrchestrationState,
+  statePath: string,
+  phase: 'coder_plan_response' | 'coder_plan_optional_response',
+  derivedPlanReview: boolean,
+  logger?: RunLogger,
+) {
+  let nextState = await saveState(statePath, {
+    ...state,
+    phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
+    status: derivedPlanReview ? 'running' : 'done',
+    derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
+  });
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase,
+    openFindings: 0,
+    nextPhase: nextState.phase,
+  });
+  nextState = await flushDerivedPlanNotifications(nextState, statePath, logger);
+  if (nextState.status === 'done') {
+    await notifyComplete(nextState, 'Plan review converged', logger);
+  }
+  return nextState;
+}
+
+async function finalizeBlockedPlanReviewResponse(
+  state: OrchestrationState,
+  statePath: string,
+  derivedPlanReview: boolean,
+  blocker: string,
+  logger?: RunLogger,
+) {
+  const persistedState = await persistBlockedScope(state, statePath, blocker);
+  if (!derivedPlanReview) {
+    await notifyBlocked(persistedState, blocker, logger);
+  }
+  return flushDerivedPlanNotifications(persistedState, statePath, logger, blocker);
+}
+
 function isTransientApiFailureMessage(message: string, subtype?: string | null) {
   const text = `${subtype ?? ''}\n${message}`.toLowerCase();
   return (
@@ -1431,6 +1471,111 @@ export function adoptAcceptedDerivedPlan(state: OrchestrationState) {
   };
 }
 
+type FinalSquashNextStateArgs = {
+  state: OrchestrationState;
+  finalCommit: string;
+  completedScopes: OrchestrationState['completedScopes'];
+  archivedReviewPath: string | null;
+};
+
+export function computeNextScopeStateAfterSquash({
+  state,
+  finalCommit,
+  completedScopes,
+  archivedReviewPath,
+}: FinalSquashNextStateArgs): OrchestrationState {
+  const derivedExecution = isExecutingDerivedPlan(state);
+  const derivedPlanCompleted = derivedExecution && state.lastScopeMarker === 'AUTONOMY_DONE';
+  const continueScopes = derivedExecution
+    ? true
+    : state.lastScopeMarker !== 'AUTONOMY_DONE' && state.lastScopeMarker !== 'AUTONOMY_BLOCKED';
+
+  if (derivedExecution && derivedPlanCompleted) {
+    return {
+      ...state,
+      baseCommit: finalCommit,
+      finalCommit: null,
+      coderSessionHandle: null,
+      currentScopeNumber: state.currentScopeNumber + 1,
+      lastScopeMarker: null,
+      derivedPlanPath: null,
+      derivedFromScopeNumber: null,
+      derivedPlanStatus: null,
+      derivedScopeIndex: null,
+      splitPlanStartedNotified: false,
+      derivedPlanAcceptedNotified: false,
+      splitPlanBlockedNotified: false,
+      splitPlanCountForCurrentScope: 0,
+      rounds: [],
+      consultRounds: [],
+      findings: [],
+      createdCommits: [],
+      completedScopes,
+      archivedReviewPath: null,
+      phase: 'coder_scope',
+      status: 'running',
+    };
+  }
+
+  if (derivedExecution) {
+    return {
+      ...state,
+      baseCommit: finalCommit,
+      finalCommit: null,
+      coderSessionHandle: null,
+      lastScopeMarker: null,
+      derivedScopeIndex: (state.derivedScopeIndex ?? 1) + 1,
+      splitPlanStartedNotified: false,
+      derivedPlanAcceptedNotified: false,
+      splitPlanBlockedNotified: false,
+      rounds: [],
+      consultRounds: [],
+      findings: [],
+      createdCommits: [],
+      completedScopes,
+      archivedReviewPath: null,
+      phase: 'coder_scope',
+      status: 'running',
+    };
+  }
+
+  if (continueScopes) {
+    return {
+      ...state,
+      baseCommit: finalCommit,
+      finalCommit: null,
+      coderSessionHandle: null,
+      currentScopeNumber: state.currentScopeNumber + 1,
+      lastScopeMarker: null,
+      derivedPlanPath: null,
+      derivedFromScopeNumber: null,
+      derivedPlanStatus: null,
+      derivedScopeIndex: null,
+      splitPlanStartedNotified: false,
+      derivedPlanAcceptedNotified: false,
+      splitPlanBlockedNotified: false,
+      splitPlanCountForCurrentScope: 0,
+      rounds: [],
+      consultRounds: [],
+      findings: [],
+      createdCommits: [],
+      completedScopes,
+      archivedReviewPath: null,
+      phase: 'coder_scope',
+      status: 'running',
+    };
+  }
+
+  return {
+    ...state,
+    finalCommit,
+    archivedReviewPath,
+    completedScopes,
+    phase: 'done',
+    status: 'done',
+  };
+}
+
 function buildVerificationHint(state: OrchestrationState) {
   const latestRound = state.rounds.at(-1);
   if (!latestRound) {
@@ -1783,23 +1928,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
   const derivedPlanReview = isDerivedPlanReviewState(state);
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
-    let nextState = await saveState(statePath, {
-      ...state,
-      phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
-      status: derivedPlanReview ? 'running' : 'done',
-      derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
-    });
-    await writeExecutionArtifacts(nextState);
-    await logger?.event('phase.complete', {
-      phase: 'coder_plan_response',
-      openFindings: 0,
-      nextPhase: nextState.phase,
-    });
-    nextState = await flushDerivedPlanNotifications(nextState, statePath, logger);
-    if (nextState.status === 'done') {
-      await notifyComplete(nextState, 'Plan review converged', logger);
-    }
-    return nextState;
+    return finalizePlanReviewResponseWithoutOpenFindings(state, statePath, 'coder_plan_response', derivedPlanReview, logger);
   }
 
   let codex;
@@ -1875,11 +2004,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       state,
       codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during plan response',
     );
-    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
-    if (!derivedPlanReview) {
-      await notifyBlocked(persistedState, blocker, logger);
-    }
-    return flushDerivedPlanNotifications(persistedState, statePath, logger, blocker);
+    return finalizeBlockedPlanReviewResponse(nextState, statePath, derivedPlanReview, blocker, logger);
   }
   return nextState;
 }
@@ -1893,23 +2018,13 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
   const derivedPlanReview = isDerivedPlanReviewState(state);
   const openFindings = state.findings.filter(isOpenNonBlockingFinding);
   if (openFindings.length === 0) {
-    let nextState = await saveState(statePath, {
-      ...state,
-      phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
-      status: derivedPlanReview ? 'running' : 'done',
-      derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
-    });
-    await writeExecutionArtifacts(nextState);
-    await logger?.event('phase.complete', {
-      phase: 'coder_plan_optional_response',
-      openFindings: 0,
-      nextPhase: nextState.phase,
-    });
-    nextState = await flushDerivedPlanNotifications(nextState, statePath, logger);
-    if (nextState.status === 'done') {
-      await notifyComplete(nextState, 'Plan review converged', logger);
-    }
-    return nextState;
+    return finalizePlanReviewResponseWithoutOpenFindings(
+      state,
+      statePath,
+      'coder_plan_optional_response',
+      derivedPlanReview,
+      logger,
+    );
   }
 
   let codex;
@@ -1993,11 +2108,7 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
         codex.payload.summary.trim() ||
         'The coder reported a blocker while considering non-blocking plan findings',
     );
-    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
-    if (!derivedPlanReview) {
-      await notifyBlocked(persistedState, blocker, logger);
-    }
-    return flushDerivedPlanNotifications(persistedState, statePath, logger, blocker);
+    return finalizeBlockedPlanReviewResponse(nextState, statePath, derivedPlanReview, blocker, logger);
   }
   if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
     return flushDerivedPlanNotifications(nextState, statePath, logger);
@@ -2074,90 +2185,16 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
     ...archivedReviewState,
     completedScopes,
   };
-  const continueScopes = derivedExecution
-    ? true
-    : state.lastScopeMarker !== 'AUTONOMY_DONE' && state.lastScopeMarker !== 'AUTONOMY_BLOCKED';
   const nextState = await saveState(
     statePath,
-    derivedExecution
-      ? derivedPlanCompleted
-        ? {
-            ...state,
-            baseCommit: finalCommit,
-            finalCommit: null,
-            coderSessionHandle: null,
-            currentScopeNumber: state.currentScopeNumber + 1,
-            lastScopeMarker: null,
-            derivedPlanPath: null,
-            derivedFromScopeNumber: null,
-            derivedPlanStatus: null,
-            derivedScopeIndex: null,
-            splitPlanStartedNotified: false,
-            derivedPlanAcceptedNotified: false,
-            splitPlanBlockedNotified: false,
-            splitPlanCountForCurrentScope: 0,
-            rounds: [],
-            consultRounds: [],
-            findings: [],
-            createdCommits: [],
-            completedScopes,
-            archivedReviewPath: null,
-            phase: 'coder_scope',
-            status: 'running',
-          }
-        : {
-            ...state,
-            baseCommit: finalCommit,
-            finalCommit: null,
-            coderSessionHandle: null,
-            lastScopeMarker: null,
-            derivedScopeIndex: (state.derivedScopeIndex ?? 1) + 1,
-            splitPlanStartedNotified: false,
-            derivedPlanAcceptedNotified: false,
-            splitPlanBlockedNotified: false,
-            rounds: [],
-            consultRounds: [],
-            findings: [],
-            createdCommits: [],
-            completedScopes,
-            archivedReviewPath: null,
-            phase: 'coder_scope',
-            status: 'running',
-          }
-      : continueScopes
-        ? {
-            ...state,
-            baseCommit: finalCommit,
-            finalCommit: null,
-            coderSessionHandle: null,
-            currentScopeNumber: state.currentScopeNumber + 1,
-            lastScopeMarker: null,
-            derivedPlanPath: null,
-            derivedFromScopeNumber: null,
-            derivedPlanStatus: null,
-            derivedScopeIndex: null,
-            splitPlanStartedNotified: false,
-            derivedPlanAcceptedNotified: false,
-            splitPlanBlockedNotified: false,
-            splitPlanCountForCurrentScope: 0,
-            rounds: [],
-            consultRounds: [],
-            findings: [],
-            createdCommits: [],
-            completedScopes,
-            archivedReviewPath: null,
-            phase: 'coder_scope',
-            status: 'running',
-          }
-        : {
-            ...state,
-            finalCommit,
-            archivedReviewPath,
-            completedScopes,
-            phase: 'done',
-            status: 'done',
-          },
+    computeNextScopeStateAfterSquash({
+      state,
+      finalCommit,
+      completedScopes,
+      archivedReviewPath,
+    }),
   );
+  const continueScopes = nextState.phase === 'coder_scope' && nextState.status === 'running';
 
   await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
   await writeCheckpointRetrospective(retrospectiveState, continueScopes ? 'scope_accepted' : 'done');

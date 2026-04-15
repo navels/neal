@@ -6,7 +6,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { adoptAcceptedDerivedPlan, flushDerivedPlanNotifications, loadOrInitialize, runFinalSquashPhase } from './orchestrator.js';
+import {
+  adoptAcceptedDerivedPlan,
+  computeNextScopeStateAfterSquash,
+  flushDerivedPlanNotifications,
+  loadOrInitialize,
+  runFinalSquashPhase,
+} from './orchestrator.js';
 import { renderPlanProgressMarkdown } from './progress.js';
 import { renderReviewMarkdown } from './review.js';
 import { createInitialState, getDefaultAgentConfig, saveState } from './state.js';
@@ -518,6 +524,55 @@ test('final squash advances to the next derived sub-scope without rolling up the
   }
 });
 
+test('computeNextScopeStateAfterSquash advances a non-terminal derived sub-scope', async () => {
+  const { state } = await createResumeFixture({
+    currentScopeNumber: 5,
+    phase: 'final_squash',
+    status: 'running',
+    baseCommit: 'base-1',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 5,
+    derivedScopeIndex: 1,
+    lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
+    splitPlanStartedNotified: true,
+    derivedPlanAcceptedNotified: true,
+    completedScopes: [
+      {
+        number: '5.1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-1',
+        finalCommit: 'final-1',
+        commitSubject: 'derived scope work',
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.1.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const nextState = computeNextScopeStateAfterSquash({
+    state,
+    finalCommit: 'final-1',
+    completedScopes: state.completedScopes,
+    archivedReviewPath: '/tmp/review-5.1.md',
+  });
+
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 5);
+  assert.equal(nextState.derivedScopeIndex, 2);
+  assert.equal(nextState.derivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_5.md');
+  assert.equal(nextState.derivedPlanStatus, 'accepted');
+  assert.equal(nextState.splitPlanStartedNotified, false);
+  assert.equal(nextState.derivedPlanAcceptedNotified, false);
+  assert.equal(nextState.splitPlanBlockedNotified, false);
+});
+
 test('final squash rolls the last derived sub-scope up into the parent scope and resumes parent execution', async () => {
   const { statePath, state, notifyLogPath, notifyScriptPath } = await createFinalSquashFixture({
     derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
@@ -559,6 +614,70 @@ test('final squash rolls the last derived sub-scope up into the parent scope and
       process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
     }
   }
+});
+
+test('computeNextScopeStateAfterSquash rolls up the last derived sub-scope into the parent scope', async () => {
+  const completedScopes: OrchestrationState['completedScopes'] = [
+    {
+      number: '5.2',
+      marker: 'AUTONOMY_DONE',
+      result: 'accepted',
+      baseCommit: 'base-1',
+      finalCommit: 'final-2',
+      commitSubject: 'derived scope work',
+      reviewRounds: 1,
+      findings: 0,
+      archivedReviewPath: '/tmp/review-5.2.md',
+      blocker: null,
+      derivedFromParentScope: '5',
+      replacedByDerivedPlanPath: null,
+    },
+    {
+      number: '5',
+      marker: 'AUTONOMY_SCOPE_DONE',
+      result: 'accepted',
+      baseCommit: 'base-1',
+      finalCommit: 'final-2',
+      commitSubject: 'derived scope work',
+      reviewRounds: 1,
+      findings: 0,
+      archivedReviewPath: '/tmp/review-5.md',
+      blocker: null,
+      derivedFromParentScope: null,
+      replacedByDerivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+    },
+  ];
+  const { state } = await createResumeFixture({
+    currentScopeNumber: 5,
+    phase: 'final_squash',
+    status: 'running',
+    baseCommit: 'base-1',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 5,
+    derivedScopeIndex: 2,
+    lastScopeMarker: 'AUTONOMY_DONE',
+    splitPlanStartedNotified: true,
+    derivedPlanAcceptedNotified: true,
+  });
+
+  const nextState = computeNextScopeStateAfterSquash({
+    state,
+    finalCommit: 'final-2',
+    completedScopes,
+    archivedReviewPath: '/tmp/review-5.2.md',
+  });
+
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 6);
+  assert.equal(nextState.baseCommit, 'final-2');
+  assert.equal(nextState.derivedPlanPath, null);
+  assert.equal(nextState.derivedFromScopeNumber, null);
+  assert.equal(nextState.derivedPlanStatus, null);
+  assert.equal(nextState.derivedScopeIndex, null);
+  assert.equal(nextState.splitPlanCountForCurrentScope, 0);
+  assert.deepEqual(nextState.completedScopes, completedScopes);
 });
 
 test('review and progress reports expose derived-plan audit linkage', async () => {
