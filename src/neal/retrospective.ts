@@ -127,7 +127,7 @@ function buildAssessment(state: OrchestrationState, scopeEvents: RunEvent[]) {
   if (findingCounts.blocking > 0 && dispositions.fixed > 0) {
     assessments.push(`- The reviewer added clear value: it surfaced ${findingCounts.blocking} blocking finding(s) and the coder fixed ${dispositions.fixed} before acceptance.`);
   } else if (findingCounts.total === 0) {
-    assessments.push('- The reviewer did not raise any findings. Review overhead was low, but the value added in this checkpoint is unclear.');
+    assessments.push('- The reviewer did not raise any findings.');
   } else if (findingCounts.non_blocking > 0 && findingCounts.blocking === 0) {
     assessments.push(`- The reviewer found only non-blocking issues (${findingCounts.non_blocking}). Review added polish more than risk reduction.`);
   }
