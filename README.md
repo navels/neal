@@ -58,6 +58,9 @@ Execution semantics:
 - `neal --plan PLAN.md` revises a draft plan in place without making commits
 - `neal --execute PLAN.md` executes the plan scope by scope until it completes or blocks
 - `neal --execute "..."` treats the argument as an inline ad hoc execution prompt when it is not an existing file path, writes a wrapper-owned prompt file under `.neal/adhoc/`, and runs the normal execute loop against that generated prompt
+- `neal --resume [state-file]` resumes the Neal orchestration loop from saved wrapper state
+- `neal --resume-coder [state-file]` opens the persisted coder session directly in the matching provider CLI
+- `neal --resume-reviewer [state-file]` opens the persisted reviewer session directly in the matching provider CLI
 - new runs also accept:
   - `--coder-provider <provider>`
   - `--coder-model <model>`
@@ -79,6 +82,11 @@ Current provider support in this slice is:
 Model overrides are supported for both roles. The config surface is symmetric: the same provider can be used for coder and reviewer with different models when that provider implements both capabilities. In this slice, the configured OpenAI and Anthropic providers both support both roles. Unsupported provider-role combinations fail fast.
 
 Fresh `neal --execute ...` runs require a clean worktree. If a scope was interrupted with in-progress local changes, use `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted coder session, `neal --resume` will automatically re-enter the last blocked coder phase when that phase is resumable.
+
+The direct session-resume commands dispatch by persisted provider:
+
+- `openai-codex` -> `codex resume <handle>`
+- `anthropic-claude` -> `claude --resume <handle>`
 
 `neal` treats `.neal/` as its wrapper-owned artifact root. Review notes now live under the current run directory at `.neal/runs/<timestamp>-<id>/REVIEW.md`, with finalized execution reviews archived alongside them as `.neal/runs/<timestamp>-<id>/REVIEW-<final-commit>.md`. Progress artifacts now live beside the review files in the same run directory.
 

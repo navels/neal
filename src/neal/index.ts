@@ -11,7 +11,7 @@ import readline from 'node:readline';
 import { loadOrInitialize, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
-import { getDefaultAgentConfig } from './state.js';
+import { getDefaultAgentConfig, loadState } from './state.js';
 import { showSummaries } from './summaries.js';
 import { CoderRoundError, ReviewerRoundError } from './agents.js';
 import type { AgentProvider } from './types.js';
@@ -20,6 +20,8 @@ function usage(): never {
   console.error('Usage: neal --execute <plan-doc|inline-prompt>');
   console.error('   or: neal --plan <plan-doc>');
   console.error('   or: neal --resume [state-file]');
+  console.error('   or: neal --resume-coder [state-file]');
+  console.error('   or: neal --resume-reviewer [state-file]');
   console.error('   or: neal --summaries [runs-dir]');
   console.error('Optional new-run flags: --coder-provider <provider> --coder-model <model> --reviewer-provider <provider> --reviewer-model <model>');
   process.exit(1);
@@ -118,25 +120,61 @@ async function createInlineExecutePlanDoc(cwd: string, prompt: string) {
 }
 
 async function resumeLastCoderSession(sessionHandle: string) {
+  await spawnResumeCommand('codex', ['resume', sessionHandle]);
+}
+
+async function spawnResumeCommand(command: string, args: string[]) {
   await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn('codex', ['resume', sessionHandle], {
+    const child = spawn(command, args, {
       stdio: 'inherit',
     });
 
     child.on('error', rejectPromise);
     child.on('exit', (code, signal) => {
       if (signal) {
-        rejectPromise(new Error(`codex resume terminated by signal ${signal}`));
+        rejectPromise(new Error(`${command} ${args.join(' ')} terminated by signal ${signal}`));
         return;
       }
 
       if (code === 0) {
         resolvePromise();
       } else {
-        rejectPromise(new Error(`codex resume exited with status ${code}`));
+        rejectPromise(new Error(`${command} ${args.join(' ')} exited with status ${code}`));
       }
     });
   });
+}
+
+function getResumeCommandForProvider(provider: AgentProvider, sessionHandle: string) {
+  switch (provider) {
+    case 'openai-codex':
+      return {
+        command: 'codex',
+        args: ['resume', sessionHandle],
+      };
+    case 'anthropic-claude':
+      return {
+        command: 'claude',
+        args: ['--resume', sessionHandle],
+      };
+  }
+}
+
+async function resumeAgentSession(
+  role: 'coder' | 'reviewer',
+  statePath: string,
+) {
+  const state = await loadState(statePath);
+  const roleConfig = role === 'coder' ? state.agentConfig.coder : state.agentConfig.reviewer;
+  const sessionHandle = role === 'coder' ? state.coderSessionHandle : state.reviewerSessionHandle;
+
+  if (!sessionHandle) {
+    throw new Error(`No persisted ${role} session handle found in ${statePath}`);
+  }
+
+  const { command, args } = getResumeCommandForProvider(roleConfig.provider, sessionHandle);
+  process.stderr.write(`[neal] opening ${role} session via ${command} ${args.join(' ')}\n`);
+  await spawnResumeCommand(command, args);
 }
 
 function createStopController() {
@@ -219,6 +257,16 @@ async function main() {
   const firstArg = args[index];
   if (!firstArg) {
     usage();
+  }
+
+  if (firstArg === '--resume-coder' || firstArg === '--resume-reviewer') {
+    if (args.length > index + 2) {
+      throw new Error(`${firstArg} accepts only an optional state-file path`);
+    }
+    const statePath = resolve(args[index + 1] ?? '.neal/session.json');
+    await access(statePath);
+    await resumeAgentSession(firstArg === '--resume-coder' ? 'coder' : 'reviewer', statePath);
+    return;
   }
 
   if (firstArg === '--resume') {
