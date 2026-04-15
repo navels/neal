@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import YAML from 'yaml';
 
 export type NealConfigFile = {
   neal?: {
@@ -64,11 +65,7 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
 };
 
 const warnedKeys = new Set<string>();
-
-type ParsedScalar = string | number | boolean | null;
-interface ParsedMap {
-  [key: string]: ParsedScalar | ParsedMap;
-}
+const cachedConfig = new Map<string, NealConfigFile>();
 
 function warnOnce(key: string, message: string) {
   if (warnedKeys.has(key)) {
@@ -93,98 +90,16 @@ function parseNumberValue(value: unknown): number | undefined {
   return undefined;
 }
 
-function parseYamlScalar(rawValue: string): ParsedScalar {
-  const value = rawValue.trim();
-  if (value === '' || value === 'null' || value === '~') {
-    return null;
-  }
-  if (value === 'true') {
-    return true;
-  }
-  if (value === 'false') {
-    return false;
-  }
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
-    return value.slice(1, -1);
-  }
-
-  const parsedNumber = Number(value);
-  if (Number.isFinite(parsedNumber) && /^-?\d+(?:\.\d+)?$/.test(value)) {
-    return parsedNumber;
-  }
-
-  return value;
-}
-
-function stripInlineComment(value: string): string {
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (char === '\'' && !inDoubleQuote) {
-      inSingleQuote = !inSingleQuote;
-      continue;
-    }
-    if (char === '"' && !inSingleQuote) {
-      inDoubleQuote = !inDoubleQuote;
-      continue;
-    }
-    if (char === '#' && !inSingleQuote && !inDoubleQuote) {
-      return value.slice(0, index).trimEnd();
-    }
-  }
-
-  return value.trimEnd();
-}
-
-function parseSimpleYaml(source: string): NealConfigFile {
-  const root: ParsedMap = {};
-  const stack: Array<{ indent: number; value: ParsedMap }> = [{ indent: -1, value: root }];
-
-  for (const rawLine of source.split(/\r?\n/)) {
-    if (!rawLine.trim() || rawLine.trimStart().startsWith('#')) {
-      continue;
-    }
-
-    const indent = rawLine.match(/^ */)?.[0].length ?? 0;
-    const line = rawLine.trimEnd();
-    const colonIndex = line.indexOf(':');
-    if (colonIndex === -1) {
-      continue;
-    }
-
-    const key = line.slice(0, colonIndex).trim();
-    const rawValue = stripInlineComment(line.slice(colonIndex + 1));
-
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
-      stack.pop();
-    }
-
-    const parent = stack[stack.length - 1]?.value;
-    if (!parent || !key) {
-      continue;
-    }
-
-    if (!rawValue.trim()) {
-      const child: ParsedMap = {};
-      parent[key] = child;
-      stack.push({ indent, value: child });
-      continue;
-    }
-
-    parent[key] = parseYamlScalar(rawValue);
-  }
-
-  return root as NealConfigFile;
-}
-
 function readYamlFileIfPresent(path: string): NealConfigFile | null {
   if (!existsSync(path)) {
     return null;
   }
 
-  return parseSimpleYaml(readFileSync(path, 'utf8'));
+  const parsed = YAML.parse(readFileSync(path, 'utf8'));
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+  return parsed as NealConfigFile;
 }
 
 function mergeConfig(base: NealConfigFile, override: NealConfigFile | null): NealConfigFile {
@@ -212,13 +127,21 @@ function mergeConfig(base: NealConfigFile, override: NealConfigFile | null): Nea
 }
 
 function loadConfigFile(cwd = process.cwd()): NealConfigFile {
-  const repoConfigPath = resolve(cwd, 'config.yml');
+  const cacheKey = resolve(cwd);
+  const cached = cachedConfig.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const repoConfigPath = resolve(cacheKey, 'config.yml');
   const homeConfigPath = join(homedir(), '.config', 'neal', 'config.yml');
 
-  return mergeConfig(
+  const resolved = mergeConfig(
     mergeConfig({}, readYamlFileIfPresent(repoConfigPath)),
     readYamlFileIfPresent(homeConfigPath),
   );
+  cachedConfig.set(cacheKey, resolved);
+  return resolved;
 }
 
 function getStandardizedEnvNumber(name: string): number | undefined {

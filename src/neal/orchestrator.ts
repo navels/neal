@@ -264,7 +264,7 @@ async function notifyBlocked(state: OrchestrationState, reason: string, logger?:
 async function notifyComplete(state: OrchestrationState, message: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
   await logger?.event('notify.complete', { message, planName });
-  await notify('complete', `[neal] ${planName}: ${message}`);
+  await notify('complete', `[neal] ${planName}: plan complete: ${message}`);
 }
 
 async function notifyScopeAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
