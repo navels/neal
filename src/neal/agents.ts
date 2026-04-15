@@ -495,11 +495,13 @@ export async function runCoderResponseRound(args: {
   progressMarkdownPath: string;
   verificationHint: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
+  mode?: 'blocking' | 'optional';
   sessionHandle?: string | null;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
+  const mode = args.mode ?? 'blocking';
 
   const schema = {
     type: 'object',
@@ -529,16 +531,22 @@ export async function runCoderResponseRound(args: {
     `Continue autonomously on the task described in ${args.planDoc}.`,
     '',
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
-    'Address the currently open review findings provided below.',
+    mode === 'blocking'
+      ? 'Address the currently open review findings provided below.'
+      : 'The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.',
     'You are still working on the same scope. Do not start a new scope.',
     'Stay on the current implementation scope described by the inlined progress state below.',
     args.verificationHint,
-    'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.',
+    mode === 'blocking'
+      ? 'Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.'
+      : 'If you choose to address any findings, make the smallest justified code changes, run the most relevant verification for those changes, and create a real git commit if you changed code.',
     'Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
     'Use `deferred` only when the finding is real but not safe to resolve inside this scope.',
     'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
-    'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.',
+    mode === 'blocking'
+      ? 'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.'
+      : 'Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.',
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),
@@ -647,10 +655,12 @@ export async function runCoderPlanResponseRound(args: {
   cwd: string;
   planDoc: string;
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
+  mode?: 'blocking' | 'optional';
   sessionHandle: string;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
+  const mode = args.mode ?? 'blocking';
 
   const schema = {
     type: 'object',
@@ -679,7 +689,9 @@ export async function runCoderPlanResponseRound(args: {
   const prompt = [
     `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
     '',
-    'Address the currently open review findings provided below.',
+    mode === 'blocking'
+      ? 'Address the currently open review findings provided below.'
+      : 'The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.',
     'Edit only the plan document and directly related planning artifacts.',
     'Do not edit runtime source code.',
     'Do not make git commits.',
@@ -690,7 +702,9 @@ export async function runCoderPlanResponseRound(args: {
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
     'Use `deferred` only when the finding is real but not safe to resolve without user input.',
     'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
-    'If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.',
+    mode === 'blocking'
+      ? 'If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.'
+      : 'Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.',
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),

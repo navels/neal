@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import { notify } from '../notifier.js';
+import { getMaxReviewRounds, getPhaseHeartbeatMs, getReviewStuckWindow } from './config.js';
 import {
   CoderRoundError,
   ReviewerRoundError,
@@ -25,9 +26,6 @@ import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type { AgentConfig, CoderConsultRequest, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding, ScopeMarker } from './types.js';
 
-const DEFAULT_PHASE_HEARTBEAT_MS = Number(process.env.NEAL_PHASE_HEARTBEAT_MS ?? 60_000);
-const DEFAULT_MAX_REVIEW_ROUNDS = Number(process.env.NEAL_MAX_REVIEW_ROUNDS ?? 20);
-const REVIEW_STUCK_NON_REDUCTION_WINDOW = Number(process.env.NEAL_REVIEW_STUCK_WINDOW ?? 3);
 const execFile = promisify(execFileCallback);
 
 function writeDiagnostic(message: string, logger?: RunLogger) {
@@ -85,7 +83,7 @@ function startPhaseHeartbeat(
   phase: OrchestrationState['phase'],
   getState: () => OrchestrationState,
   logger?: RunLogger,
-  intervalMs = DEFAULT_PHASE_HEARTBEAT_MS,
+  intervalMs = getPhaseHeartbeatMs(),
 ) {
   if (!logger || intervalMs <= 0) {
     return () => {};
@@ -118,7 +116,14 @@ function startPhaseHeartbeat(
 async function persistCoderFailureState(
   state: OrchestrationState,
   statePath: string,
-  phase: 'coder_scope' | 'coder_plan' | 'coder_response' | 'coder_plan_response' | 'coder_consult_response',
+  phase:
+    | 'coder_scope'
+    | 'coder_plan'
+    | 'coder_response'
+    | 'coder_optional_response'
+    | 'coder_plan_response'
+    | 'coder_plan_optional_response'
+    | 'coder_consult_response',
   error: CoderRoundError,
   logger?: RunLogger,
 ) {
@@ -223,7 +228,7 @@ export async function initializeOrchestration(
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
     reviewMarkdownPath: join(logger.runDir, 'REVIEW.md'),
     consultMarkdownPath: join(logger.runDir, 'CONSULT.md'),
-    maxRounds: DEFAULT_MAX_REVIEW_ROUNDS,
+    maxRounds: getMaxReviewRounds(cwd),
   };
 
   await mkdir(stateDir, { recursive: true });
@@ -302,8 +307,17 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   return nextState;
 }
 
-function isResumableBlockedPhase(phase: OrchestrationState['phase'] | null): phase is 'coder_scope' | 'coder_response' | 'coder_plan' | 'coder_plan_response' {
-  return phase === 'coder_scope' || phase === 'coder_response' || phase === 'coder_plan' || phase === 'coder_plan_response';
+function isResumableBlockedPhase(
+  phase: OrchestrationState['phase'] | null,
+): phase is 'coder_scope' | 'coder_response' | 'coder_optional_response' | 'coder_plan' | 'coder_plan_response' | 'coder_plan_optional_response' {
+  return (
+    phase === 'coder_scope' ||
+    phase === 'coder_response' ||
+    phase === 'coder_optional_response' ||
+    phase === 'coder_plan' ||
+    phase === 'coder_plan_response' ||
+    phase === 'coder_plan_optional_response'
+  );
 }
 
 function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
@@ -333,9 +347,36 @@ function isCoderTimeoutError(error: CoderRoundError) {
   return /\btimed out after\b/i.test(error.message);
 }
 
+function isTransientApiFailureMessage(message: string, subtype?: string | null) {
+  const text = `${subtype ?? ''}\n${message}`.toLowerCase();
+  return (
+    text.includes('api_error') ||
+    text.includes('api error') ||
+    text.includes('internal server error') ||
+    text.includes('overloaded') ||
+    text.includes('rate limit') ||
+    text.includes('temporar') ||
+    text.includes('try again')
+  );
+}
+
+function shouldNotifyFailure(error: CoderRoundError | ReviewerRoundError) {
+  if (error instanceof CoderRoundError) {
+    return isCoderTimeoutError(error) || isTransientApiFailureMessage(error.message);
+  }
+
+  return isTransientApiFailureMessage(error.message, error.subtype);
+}
+
 function shouldRetryCoderTimeout(
   state: OrchestrationState,
-  phase: 'coder_scope' | 'coder_plan' | 'coder_response' | 'coder_plan_response',
+  phase:
+    | 'coder_scope'
+    | 'coder_plan'
+    | 'coder_response'
+    | 'coder_optional_response'
+    | 'coder_plan_response'
+    | 'coder_plan_optional_response',
   error: CoderRoundError,
 ) {
   if (!isCoderTimeoutError(error) || state.coderRetryCount >= 1) {
@@ -343,10 +384,10 @@ function shouldRetryCoderTimeout(
   }
 
   if (state.topLevelMode === 'execute') {
-    return phase === 'coder_scope' || phase === 'coder_response';
+    return phase === 'coder_scope' || phase === 'coder_response' || phase === 'coder_optional_response';
   }
 
-  return phase === 'coder_plan' || phase === 'coder_plan_response';
+  return phase === 'coder_plan' || phase === 'coder_plan_response' || phase === 'coder_plan_optional_response';
 }
 
 function escapeForPkillPattern(text: string) {
@@ -380,7 +421,13 @@ async function bestEffortCleanupTimedOutCoderResume(sessionHandle: string | null
 async function scheduleCoderTimeoutRetry(
   state: OrchestrationState,
   statePath: string,
-  phase: 'coder_scope' | 'coder_plan' | 'coder_response' | 'coder_plan_response',
+  phase:
+    | 'coder_scope'
+    | 'coder_plan'
+    | 'coder_response'
+    | 'coder_optional_response'
+    | 'coder_plan_response'
+    | 'coder_plan_optional_response',
   error: CoderRoundError,
   logger?: RunLogger,
 ) {
@@ -439,7 +486,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
       }
       const failedState = await persistCoderFailureState(workingState, statePath, 'coder_scope', error, logger);
-      if (isCoderTimeoutError(error)) {
+      if (shouldNotifyFailure(error)) {
         await notifyBlocked(failedState, error.message, logger);
       }
     }
@@ -535,7 +582,10 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
       if (isCoderTimeoutError(error)) {
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
       }
-      await persistCoderFailureState(workingState, statePath, 'coder_plan', error, logger);
+      const failedState = await persistCoderFailureState(workingState, statePath, 'coder_plan', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
     }
     throw error;
   }
@@ -611,6 +661,9 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
         subtype: error.subtype,
         message: error.message,
       });
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
     }
     throw error;
   }
@@ -631,6 +684,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   });
   const mergedFindings = [...state.findings, ...findings];
   const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
+  const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
   const reachedMaxRounds = round >= state.maxRounds;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
   const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
@@ -639,7 +693,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   const blockReason = reopenedCanonical
     ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`
     : stalledBlockingCount
-      ? `review_stuck: blocking findings did not decrease across ${REVIEW_STUCK_NON_REDUCTION_WINDOW} consecutive reviewer rounds`
+      ? `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow()} consecutive reviewer rounds`
       : reachedMaxRounds && hasBlockingFindings
         ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
         : null;
@@ -653,7 +707,9 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
         ? reachedMaxRounds
           ? 'blocked'
           : 'coder_response'
-        : 'final_squash',
+        : hasOpenNonBlockingFindings
+          ? 'coder_optional_response'
+          : 'final_squash',
     status: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
@@ -723,6 +779,9 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
         subtype: error.subtype,
         message: error.message,
       });
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
     }
     throw error;
   }
@@ -743,6 +802,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   });
   const mergedFindings = [...state.findings, ...findings];
   const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
+  const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
   const reachedMaxRounds = round >= state.maxRounds;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
   const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
@@ -751,7 +811,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const blockReason = reopenedCanonical
     ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`
     : stalledBlockingCount
-      ? `review_stuck: blocking findings did not decrease across ${REVIEW_STUCK_NON_REDUCTION_WINDOW} consecutive reviewer rounds`
+      ? `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow()} consecutive reviewer rounds`
       : reachedMaxRounds && hasBlockingFindings
         ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
         : null;
@@ -765,7 +825,9 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
         ? reachedMaxRounds
           ? 'blocked'
           : 'coder_plan_response'
-        : 'done',
+        : hasOpenNonBlockingFindings
+          ? 'coder_plan_optional_response'
+          : 'done',
     status: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
@@ -842,6 +904,9 @@ async function runConsultPhase(state: OrchestrationState, statePath: string, log
         subtype: error.subtype,
         message: error.message,
       });
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
     }
     throw error;
   }
@@ -883,6 +948,10 @@ function isOpenBlockingFinding(finding: ReviewFinding) {
   return finding.status === 'open' && finding.severity === 'blocking';
 }
 
+function isOpenNonBlockingFinding(finding: ReviewFinding) {
+  return finding.status === 'open' && finding.severity === 'non_blocking';
+}
+
 function normalizeText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -916,11 +985,12 @@ function countOpenBlockingCanonicals(findings: ReviewFinding[]) {
 
 function hasRepeatedNonReduction(rounds: OrchestrationState['rounds'], currentCount: number) {
   const counts = [...rounds.map((round) => round.openBlockingCanonicalCount), currentCount];
-  if (counts.length < REVIEW_STUCK_NON_REDUCTION_WINDOW || currentCount <= 0) {
+  const reviewStuckWindow = getReviewStuckWindow();
+  if (counts.length < reviewStuckWindow || currentCount <= 0) {
     return false;
   }
 
-  const recentCounts = counts.slice(-REVIEW_STUCK_NON_REDUCTION_WINDOW);
+  const recentCounts = counts.slice(-reviewStuckWindow);
   for (let index = 1; index < recentCounts.length; index += 1) {
     if (recentCounts[index] < recentCounts[index - 1]) {
       return false;
@@ -1051,14 +1121,14 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
     });
   } catch (error) {
     if (error instanceof CoderRoundError) {
-      if (shouldRetryCoderTimeout(state, 'coder_response', error)) {
-        return scheduleCoderTimeoutRetry(state, statePath, 'coder_response', error, logger);
+      if (shouldRetryCoderTimeout(state, 'coder_optional_response', error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, 'coder_optional_response', error, logger);
       }
       if (isCoderTimeoutError(error)) {
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
-      const failedState = await persistCoderFailureState(state, statePath, 'coder_response', error, logger);
-      if (isCoderTimeoutError(error)) {
+      const failedState = await persistCoderFailureState(state, statePath, 'coder_optional_response', error, logger);
+      if (shouldNotifyFailure(error)) {
         await notifyBlocked(failedState, error.message, logger);
       }
     }
@@ -1138,6 +1208,110 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
   return nextState;
 }
 
+async function runCoderOptionalResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  await logger?.event('phase.start', { phase: 'coder_optional_response' });
+  const openFindings = state.findings.filter(isOpenNonBlockingFinding);
+  if (openFindings.length === 0) {
+    const nextState = await saveState(statePath, {
+      ...state,
+      phase: 'final_squash',
+      status: 'running',
+    });
+    await writeExecutionArtifacts(nextState);
+    await logger?.event('phase.complete', {
+      phase: 'coder_optional_response',
+      openFindings: 0,
+      nextPhase: nextState.phase,
+    });
+    return nextState;
+  }
+
+  const beforeHead = await getHeadCommit(state.cwd);
+  let codex;
+  try {
+    codex = await runCoderResponseRound({
+      coder: state.agentConfig.coder,
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      progressMarkdownPath: state.progressMarkdownPath,
+      verificationHint: buildVerificationHint(state),
+      openFindings: openFindings.map((finding) => ({
+        id: finding.id,
+        claim: finding.claim,
+        requiredAction: finding.requiredAction,
+        severity: finding.severity,
+        files: finding.files,
+        roundSummary: finding.roundSummary,
+      })),
+      mode: 'optional',
+      sessionHandle: state.coderSessionHandle,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CoderRoundError) {
+      if (shouldRetryCoderTimeout(state, 'coder_response', error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, 'coder_response', error, logger);
+      }
+      if (isCoderTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
+      }
+      const failedState = await persistCoderFailureState(state, statePath, 'coder_response', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+  const afterHead = await getHeadCommit(state.cwd);
+  const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
+  const latestCommit = createdCommits.at(-1) ?? null;
+  const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
+
+  const findings = state.findings.map((finding) => {
+    const response = responseById.get(finding.id);
+    if (!response) {
+      return finding;
+    }
+
+    return {
+      ...finding,
+      status: mapDecisionToStatus(response.decision),
+      coderDisposition: response.summary,
+      coderCommit: latestCommit,
+    };
+  });
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    coderSessionHandle: codex.sessionHandle,
+    findings,
+    createdCommits: [...state.createdCommits, ...createdCommits],
+    phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'final_squash',
+    status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
+    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_optional_response' : null,
+    coderRetryCount: 0,
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'coder_optional_response',
+    outcome: codex.payload.outcome,
+    respondedFindings: codex.payload.responses.length,
+    createdCommits,
+    nextPhase: nextState.phase,
+  });
+  if (nextState.status === 'blocked') {
+    const blocker =
+      codex.payload.blocker?.trim() ||
+      codex.payload.summary.trim() ||
+      'The coder reported a blocker while considering non-blocking review findings';
+    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    await notifyBlocked(persistedState, blocker, logger);
+    return persistedState;
+  }
+  return nextState;
+}
+
 async function runCoderConsultResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   const consultRound = state.consultRounds.at(-1);
   if (!consultRound || !consultRound.response || consultRound.disposition) {
@@ -1162,7 +1336,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
   } catch (error) {
     if (error instanceof CoderRoundError) {
       const failedState = await persistCoderFailureState(state, statePath, 'coder_consult_response', error, logger);
-      if (isCoderTimeoutError(error)) {
+      if (shouldNotifyFailure(error)) {
         await notifyBlocked(failedState, error.message, logger);
       }
     }
@@ -1254,13 +1428,16 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     });
   } catch (error) {
     if (error instanceof CoderRoundError) {
-      if (shouldRetryCoderTimeout(state, 'coder_plan_response', error)) {
-        return scheduleCoderTimeoutRetry(state, statePath, 'coder_plan_response', error, logger);
+      if (shouldRetryCoderTimeout(state, 'coder_plan_optional_response', error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, 'coder_plan_optional_response', error, logger);
       }
       if (isCoderTimeoutError(error)) {
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
-      await persistCoderFailureState(state, statePath, 'coder_plan_response', error, logger);
+      const failedState = await persistCoderFailureState(state, statePath, 'coder_plan_optional_response', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
     }
     throw error;
   }
@@ -1302,6 +1479,107 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
   }
+  return nextState;
+}
+
+async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.coderSessionHandle) {
+    throw new Error('Cannot run coder plan optional response phase without an existing coder session');
+  }
+
+  await logger?.event('phase.start', { phase: 'coder_plan_optional_response' });
+  const openFindings = state.findings.filter(isOpenNonBlockingFinding);
+  if (openFindings.length === 0) {
+    const nextState = await saveState(statePath, {
+      ...state,
+      phase: 'done',
+      status: 'done',
+    });
+    await writeExecutionArtifacts(nextState);
+    await logger?.event('phase.complete', {
+      phase: 'coder_plan_optional_response',
+      openFindings: 0,
+      nextPhase: nextState.phase,
+    });
+    await notifyComplete(nextState, 'Plan review converged', logger);
+    return nextState;
+  }
+
+  let codex;
+  try {
+    codex = await runCoderPlanResponseRound({
+      coder: state.agentConfig.coder,
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      openFindings: openFindings.map((finding) => ({
+        id: finding.id,
+        claim: finding.claim,
+        requiredAction: finding.requiredAction,
+        severity: finding.severity,
+        files: finding.files,
+        roundSummary: finding.roundSummary,
+      })),
+      mode: 'optional',
+      sessionHandle: state.coderSessionHandle,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CoderRoundError) {
+      if (shouldRetryCoderTimeout(state, 'coder_plan_response', error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, 'coder_plan_response', error, logger);
+      }
+      if (isCoderTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
+      }
+      const failedState = await persistCoderFailureState(state, statePath, 'coder_plan_response', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+  const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
+
+  const findings = state.findings.map((finding) => {
+    const response = responseById.get(finding.id);
+    if (!response) {
+      return finding;
+    }
+
+    return {
+      ...finding,
+      status: mapDecisionToStatus(response.decision),
+      coderDisposition: response.summary,
+      coderCommit: null,
+    };
+  });
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    coderSessionHandle: codex.sessionHandle,
+    findings,
+    phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'done',
+    status: codex.payload.outcome === 'blocked' ? 'blocked' : 'done',
+    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_plan_optional_response' : null,
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'coder_plan_optional_response',
+    outcome: codex.payload.outcome,
+    respondedFindings: codex.payload.responses.length,
+    nextPhase: nextState.phase,
+  });
+  if (nextState.status === 'blocked') {
+    const blocker =
+      codex.payload.blocker?.trim() ||
+      codex.payload.summary.trim() ||
+      'The coder reported a blocker while considering non-blocking plan findings';
+    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    await notifyBlocked(persistedState, blocker, logger);
+    return persistedState;
+  }
+  await notifyComplete(nextState, 'Plan review converged', logger);
   return nextState;
 }
 
@@ -1414,9 +1692,11 @@ export async function runOnePass(
     currentState.phase === 'coder_plan' ||
     currentState.phase === 'reviewer_plan' ||
     currentState.phase === 'coder_plan_response' ||
+    currentState.phase === 'coder_plan_optional_response' ||
     currentState.phase === 'coder_scope' ||
     currentState.phase === 'reviewer_scope' ||
     currentState.phase === 'coder_response' ||
+    currentState.phase === 'coder_optional_response' ||
     currentState.phase === 'reviewer_consult' ||
     currentState.phase === 'coder_consult_response' ||
     currentState.phase === 'final_squash'
@@ -1440,6 +1720,12 @@ export async function runOnePass(
       continue;
     }
 
+    if (currentState.phase === 'coder_plan_optional_response') {
+      currentState = await runCoderPlanOptionalResponsePhase(currentState, statePath, logger);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
+      continue;
+    }
+
     if (currentState.phase === 'coder_scope') {
       currentState = await runCoderScopePhase(currentState, statePath, logger);
       options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
@@ -1453,6 +1739,12 @@ export async function runOnePass(
 
     if (currentState.phase === 'coder_response') {
       currentState = await runCoderResponsePhase(currentState, statePath, logger);
+      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
+      continue;
+    }
+
+    if (currentState.phase === 'coder_optional_response') {
+      currentState = await runCoderOptionalResponsePhase(currentState, statePath, logger);
       options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
       continue;
     }
@@ -1533,6 +1825,48 @@ export async function loadOrInitialize(
         blockedFromPhase: state.blockedFromPhase,
         coderSessionHandle: state.coderSessionHandle,
       });
+    } else if (state.status !== 'done' && state.status !== 'running') {
+      const previousStatus = state.status;
+      state = await saveState(resumeStatePath, {
+        ...state,
+        status: 'running',
+      });
+      await logger.event('run.status_normalized_on_resume', {
+        statePath: resumeStatePath,
+        phase: state.phase,
+        previousStatus,
+        normalizedStatus: state.status,
+      });
+    }
+
+    if (
+      state.topLevelMode === 'execute' &&
+      state.phase === 'coder_scope' &&
+      state.baseCommit &&
+      state.finalCommit === null &&
+      state.createdCommits.length === 0
+    ) {
+      const headCommit = await getHeadCommit(state.cwd);
+      const worktreeStatus = await getWorktreeStatus(state.cwd);
+      const createdCommits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
+
+      if (headCommit !== state.baseCommit && createdCommits.length > 0 && worktreeStatus.trim() === '') {
+        state = await saveState(resumeStatePath, {
+          ...state,
+          createdCommits,
+          phase: 'reviewer_scope',
+          status: 'running',
+          coderRetryCount: 0,
+        });
+        await logger.event('run.recovered_pending_review_on_resume', {
+          statePath: resumeStatePath,
+          previousPhase: 'coder_scope',
+          recoveredPhase: state.phase,
+          baseCommit: state.baseCommit,
+          headCommit,
+          createdCommits,
+        });
+      }
     }
 
     return {
