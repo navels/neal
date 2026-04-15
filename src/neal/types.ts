@@ -3,6 +3,7 @@ export type OrchestrationPhase =
   | 'reviewer_plan'
   | 'coder_plan_response'
   | 'coder_plan_optional_response'
+  | 'awaiting_derived_plan_execution'
   | 'coder_scope'
   | 'reviewer_scope'
   | 'coder_response'

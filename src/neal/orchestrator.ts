@@ -367,6 +367,26 @@ function isSplitPlanMarker(marker: string | null): marker is 'AUTONOMY_SPLIT_PLA
   return marker === 'AUTONOMY_SPLIT_PLAN';
 }
 
+function isDerivedPlanReviewState(state: OrchestrationState) {
+  return state.topLevelMode === 'execute' && Boolean(state.derivedPlanPath) && state.derivedPlanStatus === 'pending_review';
+}
+
+function getPlanReviewTargetPath(state: OrchestrationState) {
+  return isDerivedPlanReviewState(state) && state.derivedPlanPath ? state.derivedPlanPath : state.planDoc;
+}
+
+function getPlanReviewRoundLimit(state: OrchestrationState) {
+  return isDerivedPlanReviewState(state) ? state.maxDerivedPlanReviewRounds : state.maxRounds;
+}
+
+function getDerivedPlanBlockedReason(state: OrchestrationState, reason: string) {
+  if (!isDerivedPlanReviewState(state)) {
+    return reason;
+  }
+
+  return `split-plan recovery failed to converge: ${reason}`;
+}
+
 function stripTrailingMarker(text: string, marker: string) {
   const lines = text.split(/\r?\n/);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -487,15 +507,19 @@ async function persistSplitPlanRecovery(
   const nextState = await saveState(statePath, {
     ...state,
     lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
-    phase: 'blocked',
-    status: 'blocked',
+    phase: 'reviewer_plan',
+    status: 'running',
     blockedFromPhase: null,
     derivedPlanPath,
     derivedFromScopeNumber: state.currentScopeNumber,
     derivedPlanStatus: 'pending_review',
     splitPlanCountForCurrentScope: state.splitPlanCountForCurrentScope + 1,
+    rounds: [],
+    consultRounds: [],
+    findings: [],
     createdCommits: [],
     coderRetryCount: 0,
+    reviewerSessionHandle: null,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -926,14 +950,19 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
 async function runPlanReviewPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'reviewer_plan', round: state.rounds.length + 1 });
   const round = state.rounds.length + 1;
+  const derivedPlanReview = isDerivedPlanReviewState(state);
+  const roundLimit = getPlanReviewRoundLimit(state);
   let claude;
   try {
     claude = await runPlanReviewerRound({
       reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getPlanReviewTargetPath(state),
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
+      mode: derivedPlanReview ? 'derived-plan' : 'plan',
+      parentPlanDoc: derivedPlanReview ? state.planDoc : undefined,
+      derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
       logger,
     });
   } catch (error) {
@@ -975,17 +1004,17 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const mergedFindings = [...state.findings, ...findings];
   const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
   const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
-  const reachedMaxRounds = round >= state.maxRounds;
+  const reachedMaxRounds = round >= roundLimit;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
   const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
   const reopenedCanonical = getReopenedCanonical(mergedFindings);
   const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
   const blockReason = reopenedCanonical
-    ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`
+    ? getDerivedPlanBlockedReason(state, `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`)
     : stalledBlockingCount
-      ? `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow()} consecutive reviewer rounds`
+      ? getDerivedPlanBlockedReason(state, `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow()} consecutive reviewer rounds`)
       : reachedMaxRounds && hasBlockingFindings
-        ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
+        ? getDerivedPlanBlockedReason(state, `reached max review rounds (${roundLimit}) with blocking findings still open`)
         : null;
 
   const nextState = await saveState(statePath, {
@@ -999,14 +1028,18 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
           : 'coder_plan_response'
         : hasOpenNonBlockingFindings
           ? 'coder_plan_optional_response'
-          : 'done',
+          : derivedPlanReview
+            ? 'awaiting_derived_plan_execution'
+            : 'done',
     status: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
         ? reachedMaxRounds
           ? 'blocked'
           : 'running'
-        : 'done',
+        : derivedPlanReview
+          ? 'running'
+          : 'done',
     rounds: [
       ...state.rounds,
       {
@@ -1021,6 +1054,12 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       },
     ],
     findings: mergedFindings,
+    derivedPlanStatus:
+      derivedPlanReview && !shouldBlockForConvergence && !hasBlockingFindings && !hasOpenNonBlockingFindings
+        ? 'accepted'
+        : derivedPlanReview && (shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds))
+          ? 'rejected'
+          : state.derivedPlanStatus,
     blockedFromPhase: shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds) ? 'reviewer_plan' : null,
   });
 
@@ -1582,12 +1621,14 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
   }
 
   await logger?.event('phase.start', { phase: 'coder_plan_response' });
+  const derivedPlanReview = isDerivedPlanReviewState(state);
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
     const nextState = await saveState(statePath, {
       ...state,
-      phase: 'done',
-      status: 'done',
+      phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
+      status: derivedPlanReview ? 'running' : 'done',
+      derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
     });
     await writeExecutionArtifacts(nextState);
     await logger?.event('phase.complete', {
@@ -1595,7 +1636,9 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       openFindings: 0,
       nextPhase: nextState.phase,
     });
-    await notifyComplete(nextState, 'Plan review converged', logger);
+    if (nextState.status === 'done') {
+      await notifyComplete(nextState, 'Plan review converged', logger);
+    }
     return nextState;
   }
 
@@ -1604,7 +1647,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     codex = await runCoderPlanResponseRound({
       coder: state.agentConfig.coder,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getPlanReviewTargetPath(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
         claim: finding.claim,
@@ -1614,6 +1657,9 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
         roundSummary: finding.roundSummary,
       })),
       sessionHandle: state.coderSessionHandle,
+      reviewMode: derivedPlanReview ? 'derived-plan' : 'plan',
+      parentPlanDoc: derivedPlanReview ? state.planDoc : undefined,
+      derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
       logger,
     });
   } catch (error) {
@@ -1653,6 +1699,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     findings,
     phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'reviewer_plan',
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
+    derivedPlanStatus: codex.payload.outcome === 'blocked' && derivedPlanReview ? 'rejected' : state.derivedPlanStatus,
     blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_plan_response' : null,
   });
 
@@ -1664,7 +1711,10 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked') {
-    const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during plan response';
+    const blocker = getDerivedPlanBlockedReason(
+      state,
+      codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during plan response',
+    );
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
@@ -1678,12 +1728,14 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
   }
 
   await logger?.event('phase.start', { phase: 'coder_plan_optional_response' });
+  const derivedPlanReview = isDerivedPlanReviewState(state);
   const openFindings = state.findings.filter(isOpenNonBlockingFinding);
   if (openFindings.length === 0) {
     const nextState = await saveState(statePath, {
       ...state,
-      phase: 'done',
-      status: 'done',
+      phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
+      status: derivedPlanReview ? 'running' : 'done',
+      derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
     });
     await writeExecutionArtifacts(nextState);
     await logger?.event('phase.complete', {
@@ -1691,7 +1743,9 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       openFindings: 0,
       nextPhase: nextState.phase,
     });
-    await notifyComplete(nextState, 'Plan review converged', logger);
+    if (nextState.status === 'done') {
+      await notifyComplete(nextState, 'Plan review converged', logger);
+    }
     return nextState;
   }
 
@@ -1700,7 +1754,7 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
     codex = await runCoderPlanResponseRound({
       coder: state.agentConfig.coder,
       cwd: state.cwd,
-      planDoc: state.planDoc,
+      planDoc: getPlanReviewTargetPath(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
         claim: finding.claim,
@@ -1711,6 +1765,9 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       })),
       mode: 'optional',
       sessionHandle: state.coderSessionHandle,
+      reviewMode: derivedPlanReview ? 'derived-plan' : 'plan',
+      parentPlanDoc: derivedPlanReview ? state.planDoc : undefined,
+      derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
       logger,
     });
   } catch (error) {
@@ -1748,8 +1805,14 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
     ...state,
     coderSessionHandle: codex.sessionHandle,
     findings,
-    phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'done',
-    status: codex.payload.outcome === 'blocked' ? 'blocked' : 'done',
+    phase: codex.payload.outcome === 'blocked' ? 'blocked' : derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
+    status: codex.payload.outcome === 'blocked' ? 'blocked' : derivedPlanReview ? 'running' : 'done',
+    derivedPlanStatus:
+      codex.payload.outcome === 'blocked' && derivedPlanReview
+        ? 'rejected'
+        : derivedPlanReview
+          ? 'accepted'
+          : state.derivedPlanStatus,
     blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_plan_optional_response' : null,
   });
 
@@ -1761,15 +1824,19 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked') {
-    const blocker =
+    const blocker = getDerivedPlanBlockedReason(
+      state,
       codex.payload.blocker?.trim() ||
-      codex.payload.summary.trim() ||
-      'The coder reported a blocker while considering non-blocking plan findings';
+        codex.payload.summary.trim() ||
+        'The coder reported a blocker while considering non-blocking plan findings',
+    );
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
   }
-  await notifyComplete(nextState, 'Plan review converged', logger);
+  if (nextState.status === 'done') {
+    await notifyComplete(nextState, 'Plan review converged', logger);
+  }
   return nextState;
 }
 

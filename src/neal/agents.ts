@@ -316,6 +316,9 @@ export async function runPlanReviewerRound(args: {
   planDoc: string;
   round: number;
   reviewMarkdownPath: string;
+  mode?: 'plan' | 'derived-plan';
+  parentPlanDoc?: string;
+  derivedFromScopeNumber?: number | null;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
   const schema = {
@@ -341,17 +344,30 @@ export async function runPlanReviewerRound(args: {
     additionalProperties: false,
   } as const;
 
+  const mode = args.mode ?? 'plan';
   const prompt = [
-    `Review the plan document at ${args.planDoc}.`,
+    mode === 'derived-plan'
+      ? `Review the derived implementation plan at ${args.planDoc} for scope ${args.derivedFromScopeNumber ?? 'unknown'} in parent plan ${args.parentPlanDoc ?? args.planDoc}.`
+      : `Review the plan document at ${args.planDoc}.`,
     `Review round: ${args.round}.`,
     '',
     'Produce only structured review findings.',
-    'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
-    'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
-    'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
+    mode === 'derived-plan'
+      ? 'Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.'
+      : 'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
+    mode === 'derived-plan'
+      ? 'Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence.'
+      : 'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
+    mode === 'derived-plan'
+      ? 'Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.'
+      : 'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
     'Use non_blocking severity for clarity improvements that do not block execution.',
-    'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
-    'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
+    mode === 'derived-plan'
+      ? 'Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.'
+      : 'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
+    mode === 'derived-plan'
+      ? 'The derived plan should preserve the same target while replacing only the invalid scope shape.'
+      : 'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
     `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
     '',
     'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
@@ -694,10 +710,14 @@ export async function runCoderPlanResponseRound(args: {
   openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   mode?: 'blocking' | 'optional';
   sessionHandle: string;
+  reviewMode?: 'plan' | 'derived-plan';
+  parentPlanDoc?: string;
+  derivedFromScopeNumber?: number | null;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);
   const mode = args.mode ?? 'blocking';
+  const reviewMode = args.reviewMode ?? 'plan';
 
   const schema = {
     type: 'object',
@@ -724,17 +744,27 @@ export async function runCoderPlanResponseRound(args: {
   } as const;
 
   const prompt = [
-    `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
+    reviewMode === 'derived-plan'
+      ? `Continue refining the derived implementation plan at ${args.planDoc} for scope ${args.derivedFromScopeNumber ?? 'unknown'} in parent plan ${args.parentPlanDoc ?? args.planDoc}.`
+      : `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
     '',
     mode === 'blocking'
       ? 'Address the currently open review findings provided below.'
       : 'The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.',
-    'Edit only the plan document and directly related planning artifacts.',
+    reviewMode === 'derived-plan'
+      ? 'Edit only the derived plan artifact and directly related planning notes for that derived plan.'
+      : 'Edit only the plan document and directly related planning artifacts.',
     'Do not edit runtime source code.',
     'Do not make git commits.',
-    'The final file must be a pure future execution plan for neal --execute.',
-    'Do not leave planning-task scaffolding behind after you respond to the findings.',
-    'Where the current repository already answers an implementation detail, revise the plan to use the concrete existing symbol names and exports instead of leaving generic or redundant instructions.',
+    reviewMode === 'derived-plan'
+      ? 'Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.'
+      : 'The final file must be a pure future execution plan for neal --execute.',
+    reviewMode === 'derived-plan'
+      ? 'Do not silently widen the target or convert a real blocker into a vague replan.'
+      : 'Do not leave planning-task scaffolding behind after you respond to the findings.',
+    reviewMode === 'derived-plan'
+      ? 'Revise the derived scopes, verification strategy, or adoption rule as needed so the replacement sequence is reviewable and bounded.'
+      : 'Where the current repository already answers an implementation detail, revise the plan to use the concrete existing symbol names and exports instead of leaving generic or redundant instructions.',
     'Use `fixed` only when you actually revised the plan to resolve the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
     'Use `deferred` only when the finding is real but not safe to resolve without user input.',
