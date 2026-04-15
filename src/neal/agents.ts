@@ -10,6 +10,7 @@ const AUTONOMY_SCOPE_DONE = 'AUTONOMY_SCOPE_DONE';
 const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
 const AUTONOMY_DONE = 'AUTONOMY_DONE';
 const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
+const AUTONOMY_SPLIT_PLAN = 'AUTONOMY_SPLIT_PLAN';
 
 function buildPlanningPrompt(planDoc: string) {
   return [
@@ -56,6 +57,9 @@ function buildScopePrompt(planDoc: string, progressText: string) {
     'Then execute exactly one implementation scope.',
     'Do not start a second scope in this turn.',
     'If this scope completes the entire plan, return AUTONOMY_DONE. If more scopes remain, return AUTONOMY_SCOPE_DONE.',
+    `If the target remains viable but the current scope has proven to be the wrong execution shape, return ${AUTONOMY_SPLIT_PLAN} instead of forcing the bad shape or using AUTONOMY_BLOCKED.`,
+    `Use ${AUTONOMY_SPLIT_PLAN} only when the current scope result should be discarded and replaced by a safer derived plan for the same target.`,
+    `When you return ${AUTONOMY_SPLIT_PLAN}, include a derived plan markdown artifact before the final marker with these sections: Scope Replacement Rationale, New Strategy, Ordered Derived Scopes, Verification Strategy, and Adoption Rule.`,
     'Verify the relevant work before you finish.',
     'Create real git commit(s) for completed work.',
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
@@ -68,13 +72,20 @@ function buildScopePrompt(planDoc: string, progressText: string) {
     `- ${AUTONOMY_SCOPE_DONE}`,
     `- ${AUTONOMY_DONE}`,
     `- ${AUTONOMY_BLOCKED}`,
+    `- ${AUTONOMY_SPLIT_PLAN}`,
   ].join('\n');
 }
 
 function extractMarker(message: string): ScopeMarker | null {
   for (const rawLine of message.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (line === AUTONOMY_SCOPE_DONE || line === AUTONOMY_CHUNK_DONE || line === AUTONOMY_DONE || line === AUTONOMY_BLOCKED) {
+    if (
+      line === AUTONOMY_SCOPE_DONE ||
+      line === AUTONOMY_CHUNK_DONE ||
+      line === AUTONOMY_DONE ||
+      line === AUTONOMY_BLOCKED ||
+      line === AUTONOMY_SPLIT_PLAN
+    ) {
       return line as ScopeMarker;
     }
   }
@@ -95,9 +106,10 @@ type ReviewerPayload = {
 };
 
 type CoderResponsePayload = {
-  outcome: 'responded' | 'blocked';
+  outcome: 'responded' | 'blocked' | 'split_plan';
   summary: string;
   blocker?: string;
+  derivedPlan?: string;
   responses: Array<{
     id: string;
     decision: 'fixed' | 'rejected' | 'deferred';
@@ -450,6 +462,16 @@ export async function runCoderScopeRound(args: {
     throw translateCoderProviderError(error);
   }
   const marker = extractMarker(finalResponse);
+  if (marker === AUTONOMY_SPLIT_PLAN) {
+    const derivedPlan = finalResponse
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== AUTONOMY_SPLIT_PLAN)
+      .join('\n')
+      .trim();
+    if (!derivedPlan) {
+      throw new Error('Coder scope round returned AUTONOMY_SPLIT_PLAN without a derived plan body.');
+    }
+  }
 
   return {
     sessionHandle,
@@ -509,9 +531,10 @@ export async function runCoderResponseRound(args: {
   const schema = {
     type: 'object',
     properties: {
-      outcome: { type: 'string', enum: ['responded', 'blocked'] },
+      outcome: { type: 'string', enum: ['responded', 'blocked', 'split_plan'] },
       summary: { type: 'string' },
       blocker: { type: 'string' },
+      derivedPlan: { type: 'string' },
       responses: {
         type: 'array',
         items: {
@@ -526,7 +549,7 @@ export async function runCoderResponseRound(args: {
         },
       },
     },
-    required: ['outcome', 'summary', 'blocker', 'responses'],
+    required: ['outcome', 'summary', 'blocker', 'derivedPlan', 'responses'],
     additionalProperties: false,
   } as const;
 
@@ -547,9 +570,12 @@ export async function runCoderResponseRound(args: {
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
     'Use `deferred` only when the finding is real but not safe to resolve inside this scope.',
     'Always include a `blocker` string. Use an empty string when outcome=`responded`.',
+    'Always include a `derivedPlan` string. Use an empty string unless outcome=`split_plan`.',
     mode === 'blocking'
       ? 'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.'
       : 'Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.',
+    `If the target remains viable but the current scope has proven to be the wrong execution shape, return outcome=\`split_plan\` with a concrete derived plan in \`derivedPlan\`.`,
+    'A derived plan must include these sections: Scope Replacement Rationale, New Strategy, Ordered Derived Scopes, Verification Strategy, and Adoption Rule.',
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),
@@ -574,6 +600,14 @@ export async function runCoderResponseRound(args: {
     throw translateCoderProviderError(error);
   }
   const payload = parseCoderResponsePayload(finalResponse);
+  const derivedPlan = payload.derivedPlan?.trim() ?? '';
+  if (payload.outcome === 'split_plan' && !derivedPlan) {
+    throw new Error('Coder response round returned outcome=split_plan without a derivedPlan payload.');
+  }
+
+  if (payload.outcome !== 'split_plan' && derivedPlan) {
+    throw new Error('Coder response round returned a derivedPlan payload without outcome=split_plan.');
+  }
 
   return {
     sessionHandle,

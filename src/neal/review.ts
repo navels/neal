@@ -13,6 +13,9 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     `- Coder session: ${state.coderSessionHandle ?? 'pending'}`,
     `- Base commit: ${state.baseCommit ?? 'unknown'}`,
     `- Final commit: ${state.finalCommit ?? 'pending'}`,
+    `- Last marker: ${state.lastScopeMarker ?? 'pending'}`,
+    `- Derived plan: ${state.derivedPlanPath ?? 'none'}`,
+    `- Derived plan status: ${state.derivedPlanStatus ?? 'none'}`,
     '',
     '## Findings',
   ];

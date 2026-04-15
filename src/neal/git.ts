@@ -107,6 +107,32 @@ export async function getWorktreeStatus(cwd: string) {
   return runGit(['status', '--short'], cwd);
 }
 
+export async function getStagedDiff(cwd: string) {
+  return runGit(['diff', '--cached', '--binary'], cwd);
+}
+
+export async function getUnstagedDiff(cwd: string) {
+  return runGit(['diff', '--binary'], cwd);
+}
+
+export async function getUntrackedFiles(cwd: string) {
+  const output = await runGit(['ls-files', '--others', '--exclude-standard'], cwd);
+  return output ? output.split('\n').filter(Boolean) : [];
+}
+
+export async function resetHard(cwd: string, target: string) {
+  await runGit(['reset', '--hard', target], cwd);
+}
+
+export async function cleanUntracked(cwd: string, excludedPaths: string[] = []) {
+  const args = ['clean', '-fd'];
+  for (const path of excludedPaths) {
+    args.push('-e', path);
+  }
+
+  await runGit(args, cwd);
+}
+
 export async function squashCommits(cwd: string, baseCommit: string, message: string) {
   await runGit(['reset', '--soft', baseCommit], cwd);
   await runGitWithInput(['commit', '-F', '-'], cwd, message.endsWith('\n') ? message : `${message}\n`);

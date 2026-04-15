@@ -13,7 +13,7 @@ export type OrchestrationPhase =
   | 'done'
   | 'blocked';
 
-export type ScopeMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED';
+export type ScopeMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED' | 'AUTONOMY_SPLIT_PLAN';
 export type AgentProvider = 'openai-codex' | 'anthropic-claude';
 
 export type AgentRoleConfig = {
@@ -126,6 +126,12 @@ export type OrchestrationState = {
   currentScopeNumber: number;
   coderRetryCount: number;
   lastScopeMarker: ScopeMarker | null;
+  derivedPlanPath: string | null;
+  derivedFromScopeNumber: number | null;
+  derivedPlanStatus: 'pending_review' | 'accepted' | 'rejected' | null;
+  splitPlanCountForCurrentScope: number;
+  derivedPlanDepth: number;
+  maxDerivedPlanReviewRounds: number;
   rounds: ReviewRound[];
   consultRounds: ConsultRound[];
   findings: ReviewFinding[];

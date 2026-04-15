@@ -80,6 +80,12 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     currentScopeNumber: 1,
     coderRetryCount: 0,
     lastScopeMarker: null,
+    derivedPlanPath: null,
+    derivedFromScopeNumber: null,
+    derivedPlanStatus: null,
+    splitPlanCountForCurrentScope: 0,
+    derivedPlanDepth: 0,
+    maxDerivedPlanReviewRounds: 5,
     rounds: [],
     consultRounds: [],
     findings: [],
@@ -263,7 +269,8 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
       scope.marker === 'AUTONOMY_SCOPE_DONE' ||
       scope.marker === 'AUTONOMY_CHUNK_DONE' ||
       scope.marker === 'AUTONOMY_DONE' ||
-      scope.marker === 'AUTONOMY_BLOCKED'
+      scope.marker === 'AUTONOMY_BLOCKED' ||
+      scope.marker === 'AUTONOMY_SPLIT_PLAN'
         ? scope.marker
         : 'AUTONOMY_BLOCKED',
     result: scope.result === 'accepted' ? 'accepted' : 'blocked',
@@ -315,9 +322,36 @@ export async function loadState(path: string): Promise<OrchestrationState> {
       (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_SCOPE_DONE' ||
       (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_CHUNK_DONE' ||
       (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_DONE' ||
-      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_BLOCKED'
+      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_BLOCKED' ||
+      (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_SPLIT_PLAN'
         ? (parsed as { lastScopeMarker: OrchestrationState['lastScopeMarker'] }).lastScopeMarker
         : null,
+    derivedPlanPath:
+      typeof (parsed as { derivedPlanPath?: unknown }).derivedPlanPath === 'string'
+        ? (parsed as { derivedPlanPath: string }).derivedPlanPath
+        : null,
+    derivedFromScopeNumber:
+      typeof (parsed as { derivedFromScopeNumber?: unknown }).derivedFromScopeNumber === 'number'
+        ? (parsed as { derivedFromScopeNumber: number }).derivedFromScopeNumber
+        : null,
+    derivedPlanStatus:
+      (parsed as { derivedPlanStatus?: unknown }).derivedPlanStatus === 'pending_review' ||
+      (parsed as { derivedPlanStatus?: unknown }).derivedPlanStatus === 'accepted' ||
+      (parsed as { derivedPlanStatus?: unknown }).derivedPlanStatus === 'rejected'
+        ? (parsed as { derivedPlanStatus: OrchestrationState['derivedPlanStatus'] }).derivedPlanStatus
+        : null,
+    splitPlanCountForCurrentScope:
+      typeof (parsed as { splitPlanCountForCurrentScope?: unknown }).splitPlanCountForCurrentScope === 'number'
+        ? (parsed as { splitPlanCountForCurrentScope: number }).splitPlanCountForCurrentScope
+        : 0,
+    derivedPlanDepth:
+      typeof (parsed as { derivedPlanDepth?: unknown }).derivedPlanDepth === 'number'
+        ? (parsed as { derivedPlanDepth: number }).derivedPlanDepth
+        : 0,
+    maxDerivedPlanReviewRounds:
+      typeof (parsed as { maxDerivedPlanReviewRounds?: unknown }).maxDerivedPlanReviewRounds === 'number'
+        ? (parsed as { maxDerivedPlanReviewRounds: number }).maxDerivedPlanReviewRounds
+        : 5,
     rounds: parsed.rounds.map(hydrateRound),
     findings: parsed.findings.map(hydrateFinding),
     completedScopes: Array.isArray(parsed.completedScopes) ? parsed.completedScopes.map(hydrateCompletedScope) : [],

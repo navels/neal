@@ -15,6 +15,10 @@ type PlanProgressState = {
     phase: OrchestrationState['phase'];
     marker: OrchestrationState['lastScopeMarker'];
     baseCommit: string | null;
+    derivedPlanPath: string | null;
+    derivedPlanStatus: OrchestrationState['derivedPlanStatus'];
+    splitPlanCount: number;
+    derivedPlanDepth: number;
   } | null;
   completedScopes: OrchestrationState['completedScopes'];
 };
@@ -35,6 +39,10 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
             phase: state.phase,
             marker: state.lastScopeMarker,
             baseCommit: state.baseCommit,
+            derivedPlanPath: state.derivedPlanPath,
+            derivedPlanStatus: state.derivedPlanStatus,
+            splitPlanCount: state.splitPlanCountForCurrentScope,
+            derivedPlanDepth: state.derivedPlanDepth,
           },
     completedScopes: state.completedScopes,
   };
@@ -59,6 +67,10 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Phase: ${progress.currentScope.phase}`,
       `- Marker: ${progress.currentScope.marker ?? 'pending'}`,
       `- Base commit: ${progress.currentScope.baseCommit ?? 'unknown'}`,
+      `- Derived plan: ${progress.currentScope.derivedPlanPath ?? 'none'}`,
+      `- Derived plan status: ${progress.currentScope.derivedPlanStatus ?? 'none'}`,
+      `- Split plan count: ${progress.currentScope.splitPlanCount}`,
+      `- Derived plan depth: ${progress.currentScope.derivedPlanDepth}`,
     );
   }
 
