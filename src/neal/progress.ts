@@ -92,6 +92,8 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
         `- Findings: ${scope.findings}`,
         `- Archived review: ${scope.archivedReviewPath ?? 'pending'}`,
         `- Blocker: ${scope.blocker ?? 'none'}`,
+        `- Parent scope: ${scope.derivedFromParentScope ?? 'none'}`,
+        `- Replaced by derived plan: ${scope.replacedByDerivedPlanPath ?? 'none'}`,
       );
     }
   }

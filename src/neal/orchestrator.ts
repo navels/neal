@@ -307,11 +307,51 @@ async function notifyRetry(state: OrchestrationState, message: string, logger?: 
   await notify('retry', `[neal] ${planName}: ${message}`);
 }
 
+async function notifySplitPlanStarted(state: OrchestrationState, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  const scopeLabel = getCurrentScopeLabel(state);
+  await logger?.event('notify.split_plan_started', {
+    planName,
+    scopeNumber: scopeLabel,
+    derivedPlanPath: state.derivedPlanPath,
+  });
+  await notify('retry', `[neal] ${planName}: scope ${scopeLabel} split into derived plan; reviewing`);
+}
+
+async function notifyDerivedPlanAccepted(state: OrchestrationState, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  const scopeLabel = getParentScopeLabel(state);
+  await logger?.event('notify.derived_plan_accepted', {
+    planName,
+    scopeNumber: scopeLabel,
+    derivedPlanPath: state.derivedPlanPath,
+  });
+  await notify('complete', `[neal] ${planName}: derived plan accepted for scope ${scopeLabel}`);
+}
+
+async function notifyDerivedPlanFailed(state: OrchestrationState, reason: string, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  const scopeLabel = getParentScopeLabel(state);
+  await logger?.event('notify.derived_plan_failed', {
+    planName,
+    scopeNumber: scopeLabel,
+    derivedPlanPath: state.derivedPlanPath,
+    reason,
+  });
+  await notify('blocked', `[neal] ${planName}: blocked: derived plan review did not converge`);
+}
+
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
   const scopeLabel = getCurrentScopeLabel(state);
   if (state.completedScopes.some((scope) => scope.number === scopeLabel)) {
     return state;
   }
+
+  const blockedDuringDerivedPlanReview =
+    state.topLevelMode === 'execute' &&
+    !isExecutingDerivedPlan(state) &&
+    Boolean(state.derivedPlanPath) &&
+    state.derivedFromScopeNumber === state.currentScopeNumber;
 
   const nextState = await saveState(statePath, {
     ...state,
@@ -323,6 +363,7 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
       archivedReviewPath: state.archivedReviewPath,
       blocker: reason,
       derivedFromParentScope: isExecutingDerivedPlan(state) ? getParentScopeLabel(state) : null,
+      replacedByDerivedPlanPath: blockedDuringDerivedPlanReview ? state.derivedPlanPath : null,
     }),
   });
   await writeExecutionArtifacts(nextState);
@@ -535,7 +576,17 @@ async function persistSplitPlanRecovery(
     discardedDiffPath,
     createdCommits: args.createdCommits,
   });
+  await notifySplitPlanStarted(nextState, args.logger);
   return nextState;
+}
+
+function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationState, nextState: OrchestrationState) {
+  return (
+    previousState.topLevelMode === 'execute' &&
+    previousState.derivedPlanStatus !== 'accepted' &&
+    nextState.derivedPlanStatus === 'accepted' &&
+    nextState.phase === 'awaiting_derived_plan_execution'
+  );
 }
 
 function isTransientApiFailureMessage(message: string, subtype?: string | null) {
@@ -1079,8 +1130,15 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   });
   if (nextState.status === 'blocked' && blockReason) {
     const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
-    await notifyBlocked(persistedState, blockReason, logger);
+    if (derivedPlanReview) {
+      await notifyDerivedPlanFailed(persistedState, blockReason, logger);
+    } else {
+      await notifyBlocked(persistedState, blockReason, logger);
+    }
     return persistedState;
+  }
+  if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
+    await notifyDerivedPlanAccepted(nextState, logger);
   }
   if (nextState.status === 'done') {
     await notifyComplete(nextState, 'Plan review converged', logger);
@@ -1284,9 +1342,18 @@ function appendCompletedScope(
   ];
 }
 
-function adoptAcceptedDerivedPlan(state: OrchestrationState) {
+export function adoptAcceptedDerivedPlan(state: OrchestrationState) {
   if (!hasAcceptedDerivedPlan(state) || !state.derivedPlanPath) {
     return state;
+  }
+  if (state.phase !== 'awaiting_derived_plan_execution') {
+    throw new Error(`Cannot adopt derived plan from phase ${state.phase}`);
+  }
+  if (state.createdCommits.length > 0) {
+    throw new Error('Cannot adopt derived plan after derived execution has already created commits');
+  }
+  if (state.derivedScopeIndex !== null) {
+    throw new Error('Cannot adopt derived plan after derived scope execution has already started');
   }
 
   return {
@@ -1668,6 +1735,9 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       openFindings: 0,
       nextPhase: nextState.phase,
     });
+    if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
+      await notifyDerivedPlanAccepted(nextState, logger);
+    }
     if (nextState.status === 'done') {
       await notifyComplete(nextState, 'Plan review converged', logger);
     }
@@ -1748,7 +1818,11 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during plan response',
     );
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
-    await notifyBlocked(persistedState, blocker, logger);
+    if (derivedPlanReview) {
+      await notifyDerivedPlanFailed(persistedState, blocker, logger);
+    } else {
+      await notifyBlocked(persistedState, blocker, logger);
+    }
     return persistedState;
   }
   return nextState;
@@ -1775,6 +1849,9 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       openFindings: 0,
       nextPhase: nextState.phase,
     });
+    if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
+      await notifyDerivedPlanAccepted(nextState, logger);
+    }
     if (nextState.status === 'done') {
       await notifyComplete(nextState, 'Plan review converged', logger);
     }
@@ -1863,8 +1940,15 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
         'The coder reported a blocker while considering non-blocking plan findings',
     );
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
-    await notifyBlocked(persistedState, blocker, logger);
+    if (derivedPlanReview) {
+      await notifyDerivedPlanFailed(persistedState, blocker, logger);
+    } else {
+      await notifyBlocked(persistedState, blocker, logger);
+    }
     return persistedState;
+  }
+  if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
+    await notifyDerivedPlanAccepted(nextState, logger);
   }
   if (nextState.status === 'done') {
     await notifyComplete(nextState, 'Plan review converged', logger);
@@ -2160,6 +2244,16 @@ export async function runOnePass(
   return currentState;
 }
 
+function shouldResumeAcceptedDerivedPlan(state: OrchestrationState) {
+  return (
+    state.topLevelMode === 'execute' &&
+    hasAcceptedDerivedPlan(state) &&
+    state.derivedScopeIndex === null &&
+    state.createdCommits.length === 0 &&
+    state.phase !== 'awaiting_derived_plan_execution'
+  );
+}
+
 export async function loadOrInitialize(
   planDoc: string | null,
   cwd: string,
@@ -2209,6 +2303,25 @@ export async function loadOrInitialize(
         phase: state.phase,
         previousStatus,
         normalizedStatus: state.status,
+      });
+    }
+
+    if (shouldResumeAcceptedDerivedPlan(state)) {
+      const previousPhase = state.phase;
+      const previousStatus = state.status;
+      state = await saveState(resumeStatePath, {
+        ...state,
+        phase: 'awaiting_derived_plan_execution',
+        status: 'running',
+        blockedFromPhase: null,
+      });
+      await logger.event('run.promoted_accepted_derived_plan_on_resume', {
+        statePath: resumeStatePath,
+        previousPhase,
+        previousStatus,
+        promotedPhase: state.phase,
+        derivedPlanPath: state.derivedPlanPath,
+        derivedFromScopeNumber: state.derivedFromScopeNumber,
       });
     }
 

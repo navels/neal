@@ -1,15 +1,25 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import { getCurrentScopeLabel } from './scopes.js';
+import { getCurrentScopeLabel, getExecutionPlanPath } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
+function getDiscardedDiffPath(state: OrchestrationState) {
+  if (!state.derivedPlanPath) {
+    return null;
+  }
+
+  return join(state.runDir, `SCOPE_${state.currentScopeNumber}_DISCARDED.diff`);
+}
+
 export function renderReviewMarkdown(state: OrchestrationState) {
+  const reviewTarget = state.derivedPlanPath ?? getExecutionPlanPath(state);
   const lines = [
     '# Review Session',
     '',
     '## Metadata',
     `- Plan: ${state.planDoc}`,
+    `- Review target: ${reviewTarget}`,
     `- Scope: ${getCurrentScopeLabel(state)}`,
     `- Phase: ${state.phase}`,
     `- Coder session: ${state.coderSessionHandle ?? 'pending'}`,
@@ -18,6 +28,8 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     `- Last marker: ${state.lastScopeMarker ?? 'pending'}`,
     `- Derived plan: ${state.derivedPlanPath ?? 'none'}`,
     `- Derived plan status: ${state.derivedPlanStatus ?? 'none'}`,
+    `- Derived from scope: ${state.derivedFromScopeNumber ?? 'none'}`,
+    `- Discarded WIP artifact: ${getDiscardedDiffPath(state) ?? 'none'}`,
     '',
     '## Findings',
   ];
