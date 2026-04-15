@@ -1,0 +1,8 @@
+neal:
+  inactivity_timeout_ms: 600000
+  api_retry_limit: 10
+
+providers:
+  anthropic-claude:
+    max_turns: 100
+    continuation_limit: 2

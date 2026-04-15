@@ -1,5 +1,6 @@
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
+import { getApiRetryLimit, getClaudeContinuationLimit, getClaudeMaxTurns, getInactivityTimeoutMs } from '../config.js';
 import type { RunLogger } from '../logger.js';
 import type {
   CoderAdapter,
@@ -9,11 +10,6 @@ import type {
   StructuredAdvisorRoundArgs,
   StructuredAdvisorRoundResult,
 } from './types.js';
-
-const DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS = Number(process.env.CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS ?? 600_000);
-const DEFAULT_CLAUDE_MAX_TURNS = Number(process.env.CLAUDE_REVIEW_MAX_TURNS ?? 100);
-const DEFAULT_CLAUDE_CONTINUATION_LIMIT = Number(process.env.CLAUDE_REVIEW_CONTINUATION_LIMIT ?? 2);
-const DEFAULT_CLAUDE_API_RETRY_LIMIT = Number(process.env.CLAUDE_REVIEW_API_RETRY_LIMIT ?? 2);
 
 type ClaudeLogState = {
   textBuffer: string;
@@ -168,7 +164,7 @@ async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label:
   });
 }
 
-async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, label: string, logger?: RunLogger) {
+async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, cwd: string, label: string, logger?: RunLogger) {
   let sessionHandle: string | null = null;
   let lastResult: SDKResultMessage | null = null;
   const logState: ClaudeLogState = { textBuffer: '', sawTextDelta: false };
@@ -176,7 +172,7 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, lab
   const iterator = stream[Symbol.asyncIterator]();
 
   while (true) {
-    const next = await nextWithTimeout(iterator.next(), DEFAULT_CLAUDE_INACTIVITY_TIMEOUT_MS, label);
+    const next = await nextWithTimeout(iterator.next(), getInactivityTimeoutMs(cwd), label);
     if (next.done) {
       break;
     }
@@ -203,6 +199,7 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, lab
 }
 
 function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?: string | null) {
+  const maxTurns = getClaudeMaxTurns(args.cwd);
   return query({
     prompt: args.prompt,
     options: {
@@ -211,7 +208,7 @@ function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?:
       tools: ['Read', 'Grep', 'Glob'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      maxTurns: DEFAULT_CLAUDE_MAX_TURNS,
+      maxTurns,
       ...(args.resumeHandle ? { resume: args.resumeHandle } : {}),
       stderr: (data) => {
         writeDiagnostic(`[claude:${args.label}:stderr] ${data}`, args.logger);
@@ -265,8 +262,10 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
     let attempt = 0;
     let apiRetryCount = 0;
     let lastResult: SDKResultMessage | null = null;
+    const continuationLimit = getClaudeContinuationLimit(args.cwd);
+    const apiRetryLimit = getApiRetryLimit(args.cwd);
 
-    while (attempt <= DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
+    while (attempt <= continuationLimit) {
       const prompt =
         attempt === 0
           ? args.prompt
@@ -279,20 +278,20 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
       const stream = buildClaudeQueryStream({ ...args, prompt, resumeHandle: sessionHandle }, this.options.model);
       let result;
       try {
-        result = await collectClaudeResult(stream, args.label, args.logger);
+        result = await collectClaudeResult(stream, args.cwd, args.label, args.logger);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (isTransientClaudeFailure(null, message) && apiRetryCount < DEFAULT_CLAUDE_API_RETRY_LIMIT) {
+        if (isTransientClaudeFailure(null, message) && apiRetryCount < apiRetryLimit) {
           apiRetryCount += 1;
           writeDiagnostic(
-            `[claude:${args.label}] transient API failure; retrying review (${apiRetryCount}/${DEFAULT_CLAUDE_API_RETRY_LIMIT})\n`,
+            `[claude:${args.label}] transient API failure; retrying review (${apiRetryCount}/${apiRetryLimit})\n`,
             args.logger,
           );
           void args.logger?.event('advisor.api_retry', {
             label: args.label,
             sessionHandle,
             retryCount: apiRetryCount,
-            retryLimit: DEFAULT_CLAUDE_API_RETRY_LIMIT,
+            retryLimit: apiRetryLimit,
             message,
             provider: 'anthropic-claude',
           });
@@ -313,24 +312,24 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
 
       const subtype = lastResult?.subtype ?? null;
       const resultErrorMessage = getClaudeResultErrorMessage(lastResult);
-      if (isTransientClaudeFailure(subtype, resultErrorMessage) && apiRetryCount < DEFAULT_CLAUDE_API_RETRY_LIMIT) {
+      if (isTransientClaudeFailure(subtype, resultErrorMessage) && apiRetryCount < apiRetryLimit) {
         apiRetryCount += 1;
         writeDiagnostic(
-          `[claude:${args.label}] transient Claude error result; retrying review (${apiRetryCount}/${DEFAULT_CLAUDE_API_RETRY_LIMIT})\n`,
+          `[claude:${args.label}] transient Claude error result; retrying review (${apiRetryCount}/${apiRetryLimit})\n`,
           args.logger,
         );
         void args.logger?.event('advisor.api_retry', {
           label: args.label,
           sessionHandle,
           retryCount: apiRetryCount,
-          retryLimit: DEFAULT_CLAUDE_API_RETRY_LIMIT,
+          retryLimit: apiRetryLimit,
           subtype,
           message: resultErrorMessage,
           provider: 'anthropic-claude',
         });
         continue;
       }
-      if (subtype !== 'error_max_turns' || !sessionHandle || attempt === DEFAULT_CLAUDE_CONTINUATION_LIMIT) {
+      if (subtype !== 'error_max_turns' || !sessionHandle || attempt === continuationLimit) {
         throw new AnthropicClaudeProviderError(
           resultErrorMessage
             ? `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}: ${resultErrorMessage}`
@@ -341,14 +340,14 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
       }
 
       writeDiagnostic(
-        `[claude:${args.label}] max turns reached without structured findings; continuing same session (${attempt + 1}/${DEFAULT_CLAUDE_CONTINUATION_LIMIT})\n`,
+        `[claude:${args.label}] max turns reached without structured findings; continuing same session (${attempt + 1}/${continuationLimit})\n`,
         args.logger,
       );
       void args.logger?.event('advisor.round_continuation', {
         label: args.label,
         sessionHandle,
         attempt: attempt + 1,
-        continuationLimit: DEFAULT_CLAUDE_CONTINUATION_LIMIT,
+        continuationLimit,
         provider: 'anthropic-claude',
       });
       attempt += 1;
@@ -388,7 +387,7 @@ class AnthropicClaudeCoderAdapter implements CoderAdapter {
 
   async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
     const stream = buildClaudeCoderQueryStream(args, this.options.model);
-    const result = await collectClaudeResult(stream, 'coder', args.logger);
+    const result = await collectClaudeResult(stream, args.cwd, 'coder', args.logger);
     const sessionHandle = result.sessionHandle ?? args.resumeHandle ?? null;
 
     if (sessionHandle && sessionHandle !== args.resumeHandle) {

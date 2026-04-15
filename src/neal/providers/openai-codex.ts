@@ -1,5 +1,6 @@
 import { Codex, type Thread } from '@openai/codex-sdk';
 
+import { getInactivityTimeoutMs } from '../config.js';
 import type { RunLogger } from '../logger.js';
 import type {
   CoderAdapter,
@@ -9,8 +10,6 @@ import type {
   StructuredAdvisorRoundArgs,
   StructuredAdvisorRoundResult,
 } from './types.js';
-
-const DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS = Number(process.env.CODEX_INACTIVITY_TIMEOUT_MS ?? 600_000);
 
 export class OpenAICodexProviderError extends Error {
   readonly sessionHandle: string | null;
@@ -61,6 +60,7 @@ function createCodexThread(cwd: string, sessionHandle?: string | null, model?: s
 
 async function consumeCodexTurn(
   turn: Awaited<ReturnType<Thread['runStreamed']>>,
+  cwd: string,
   logger?: RunLogger,
   onSessionStarted?: (sessionHandle: string) => void | Promise<void>,
 ) {
@@ -72,7 +72,7 @@ async function consumeCodexTurn(
   while (true) {
     let next;
     try {
-      next = await nextWithTimeout(iterator.next(), DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS);
+      next = await nextWithTimeout(iterator.next(), getInactivityTimeoutMs(cwd));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new OpenAICodexProviderError(message, sessionHandle);
@@ -129,6 +129,7 @@ async function consumeCodexTurn(
 
 async function consumeCodexAdvisorTurn(
   turn: Awaited<ReturnType<Thread['runStreamed']>>,
+  cwd: string,
   label: StructuredAdvisorRoundArgs['label'],
   logger?: RunLogger,
 ) {
@@ -140,7 +141,7 @@ async function consumeCodexAdvisorTurn(
   while (true) {
     let next;
     try {
-      next = await nextWithTimeout(iterator.next(), DEFAULT_CODEX_INACTIVITY_TIMEOUT_MS);
+      next = await nextWithTimeout(iterator.next(), getInactivityTimeoutMs(cwd));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new OpenAICodexProviderError(message, sessionHandle);
@@ -203,7 +204,7 @@ class OpenAICodexCoderAdapter implements CoderAdapter {
   async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
     const thread = createCodexThread(args.cwd, args.resumeHandle, this.options.model ?? undefined);
     const streamedTurn = await thread.runStreamed(args.prompt, args.outputSchema ? { outputSchema: args.outputSchema } : undefined);
-    const result = await consumeCodexTurn(streamedTurn, args.logger, args.onSessionStarted);
+    const result = await consumeCodexTurn(streamedTurn, args.cwd, args.logger, args.onSessionStarted);
 
     return {
       sessionHandle: thread.id,
@@ -218,7 +219,7 @@ class OpenAICodexStructuredAdvisorAdapter implements StructuredAdvisorAdapter {
   async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs): Promise<StructuredAdvisorRoundResult<TStructured>> {
     const thread = createCodexThread(args.cwd, args.resumeHandle, this.options.model ?? undefined);
     const streamedTurn = await thread.runStreamed(args.prompt, { outputSchema: args.schema });
-    const result = await consumeCodexAdvisorTurn(streamedTurn, args.label, args.logger);
+    const result = await consumeCodexAdvisorTurn(streamedTurn, args.cwd, args.label, args.logger);
 
     let structured: TStructured;
     try {
