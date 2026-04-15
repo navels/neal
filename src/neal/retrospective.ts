@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { getChangedFilesForRange } from './git.js';
-import { getCurrentScopeLabel } from './scopes.js';
+import { getCurrentScopeLabel, getParentScopeLabel, isExecutingDerivedPlan } from './scopes.js';
 import type { FindingSeverity, OrchestrationState } from './types.js';
 
 type RunEvent = {
@@ -290,6 +290,8 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
   const completedScopesSummary = kind === 'done' ? summarizeCompletedScopes(state) : null;
   const latestReviewerSessionHandle = getLatestReviewerSessionHandle(state);
   const blockerSummary = kind === 'blocked' || kind === 'failed' ? summarizeBlocker(state) : null;
+  const showDerivedPlanContext = isExecutingDerivedPlan(state) || state.derivedPlanPath !== null;
+  const parentScopeLabel = isExecutingDerivedPlan(state) ? getParentScopeLabel(state) : null;
 
   return [
     `# Neal Retrospective`,
@@ -306,6 +308,13 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     `- Reviewer rounds: ${state.rounds.length}`,
     `- Findings: ${findings.total} total (${findings.blocking} blocking, ${findings.non_blocking} non-blocking)`,
     `- Coder dispositions: ${dispositions.fixed} fixed, ${dispositions.rejected} rejected, ${dispositions.deferred} deferred`,
+    ...(showDerivedPlanContext
+      ? [
+          `- Parent scope: ${parentScopeLabel ?? 'none'}`,
+          `- Derived plan: ${state.derivedPlanPath ?? 'none'}`,
+          `- Derived plan status: ${state.derivedPlanStatus ?? 'none'}`,
+        ]
+      : []),
     '',
     `## Work Summary`,
     changedFiles,

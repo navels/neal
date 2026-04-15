@@ -593,5 +593,6 @@ test('review and progress reports expose derived-plan audit linkage', async () =
   assert.match(reviewMarkdown, /Review target: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
   assert.match(reviewMarkdown, /Derived from scope: 3/);
   assert.match(reviewMarkdown, /Discarded WIP artifact: .*SCOPE_3_DISCARDED\.diff/);
+  assert.match(progressMarkdown, /Parent scope: none/);
   assert.match(progressMarkdown, /Replaced by derived plan: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
 });

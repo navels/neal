@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { getCurrentScopeLabel } from './scopes.js';
+import { getCurrentScopeLabel, getParentScopeLabel, isExecutingDerivedPlan } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 type PlanProgressState = {
@@ -13,6 +13,7 @@ type PlanProgressState = {
   finalCommit: string | null;
   currentScope: {
     number: string;
+    parentScope: string | null;
     phase: OrchestrationState['phase'];
     marker: OrchestrationState['lastScopeMarker'];
     baseCommit: string | null;
@@ -37,6 +38,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
         ? null
         : {
             number: getCurrentScopeLabel(state),
+            parentScope: isExecutingDerivedPlan(state) ? getParentScopeLabel(state) : null,
             phase: state.phase,
             marker: state.lastScopeMarker,
             baseCommit: state.baseCommit,
@@ -65,6 +67,7 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       '',
       '## Current Scope',
       `- Number: ${progress.currentScope.number}`,
+      `- Parent scope: ${progress.currentScope.parentScope ?? 'none'}`,
       `- Phase: ${progress.currentScope.phase}`,
       `- Marker: ${progress.currentScope.marker ?? 'pending'}`,
       `- Base commit: ${progress.currentScope.baseCommit ?? 'unknown'}`,
