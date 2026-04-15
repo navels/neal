@@ -121,6 +121,12 @@ During execution, `neal` also maintains in that same run directory:
 
 Planning mode reuses the same review loop but does not create commits or run final squash. It revises the target plan in place, records review state under the active `.neal/runs/...` directory, and exits once reviewer feedback converges or blocks.
 
+Plan authors should describe execution in terms of scopes:
+
+- single-scope plans should tell the coder to finish the full plan in one scope and normally end with `AUTONOMY_DONE`
+- multi-scope plans should make scope selection explicit and normally end each non-final scope with `AUTONOMY_SCOPE_DONE`
+- `AUTONOMY_CHUNK_DONE` remains accepted as a legacy compatibility marker, but new plans should use `AUTONOMY_SCOPE_DONE`
+
 ## Notifications
 
 The tool no longer depends on the `work-autonomously` skill. By default it:
