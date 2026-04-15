@@ -341,6 +341,17 @@ async function notifyDerivedPlanFailed(state: OrchestrationState, reason: string
   await notify('blocked', `[neal] ${planName}: blocked: derived plan review did not converge`);
 }
 
+async function notifySplitPlanRejected(state: OrchestrationState, reason: string, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  const scopeLabel = getCurrentScopeLabel(state);
+  await logger?.event('notify.split_plan_rejected', {
+    planName,
+    scopeNumber: scopeLabel,
+    reason,
+  });
+  await notify('blocked', `[neal] ${planName}: blocked: split-plan recovery rejected for scope ${scopeLabel}`);
+}
+
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
   const scopeLabel = getCurrentScopeLabel(state);
   if (state.completedScopes.some((scope) => scope.number === scopeLabel)) {
@@ -368,6 +379,11 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   });
   await writeExecutionArtifacts(nextState);
   return nextState;
+}
+
+function getCurrentScopeBlockedReason(state: OrchestrationState) {
+  const currentScope = state.completedScopes.find((scope) => scope.number === getCurrentScopeLabel(state));
+  return currentScope?.blocker ?? null;
 }
 
 function isResumableBlockedPhase(
@@ -559,6 +575,9 @@ async function persistSplitPlanRecovery(
     derivedPlanPath,
     derivedFromScopeNumber: state.currentScopeNumber,
     derivedPlanStatus: 'pending_review',
+    splitPlanStartedNotified: false,
+    derivedPlanAcceptedNotified: false,
+    splitPlanBlockedNotified: false,
     splitPlanCountForCurrentScope: state.splitPlanCountForCurrentScope + 1,
     rounds: [],
     consultRounds: [],
@@ -576,8 +595,7 @@ async function persistSplitPlanRecovery(
     discardedDiffPath,
     createdCommits: args.createdCommits,
   });
-  await notifySplitPlanStarted(nextState, args.logger);
-  return nextState;
+  return flushDerivedPlanNotifications(nextState, statePath, args.logger);
 }
 
 function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationState, nextState: OrchestrationState) {
@@ -587,6 +605,50 @@ function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationState, ne
     nextState.derivedPlanStatus === 'accepted' &&
     nextState.phase === 'awaiting_derived_plan_execution'
   );
+}
+
+export async function flushDerivedPlanNotifications(
+  state: OrchestrationState,
+  statePath: string,
+  logger?: RunLogger,
+  explicitBlockReason?: string,
+) {
+  let nextState = state;
+
+  if (nextState.topLevelMode !== 'execute') {
+    return nextState;
+  }
+
+  if (nextState.derivedPlanPath && nextState.derivedPlanStatus === 'pending_review' && !nextState.splitPlanStartedNotified) {
+    await notifySplitPlanStarted(nextState, logger);
+    nextState = await saveState(statePath, {
+      ...nextState,
+      splitPlanStartedNotified: true,
+    });
+  }
+
+  if (nextState.derivedPlanStatus === 'accepted' && !nextState.derivedPlanAcceptedNotified) {
+    await notifyDerivedPlanAccepted(nextState, logger);
+    nextState = await saveState(statePath, {
+      ...nextState,
+      derivedPlanAcceptedNotified: true,
+    });
+  }
+
+  const blockReason = explicitBlockReason ?? getCurrentScopeBlockedReason(nextState);
+  if (nextState.status === 'blocked' && nextState.lastScopeMarker === 'AUTONOMY_SPLIT_PLAN' && !nextState.splitPlanBlockedNotified) {
+    if (nextState.derivedPlanPath) {
+      await notifyDerivedPlanFailed(nextState, blockReason ?? 'split-plan recovery failed');
+    } else {
+      await notifySplitPlanRejected(nextState, blockReason ?? 'split-plan recovery rejected');
+    }
+    nextState = await saveState(statePath, {
+      ...nextState,
+      splitPlanBlockedNotified: true,
+    });
+  }
+
+  return nextState;
 }
 
 function isTransientApiFailureMessage(message: string, subtype?: string | null) {
@@ -1130,15 +1192,13 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   });
   if (nextState.status === 'blocked' && blockReason) {
     const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
-    if (derivedPlanReview) {
-      await notifyDerivedPlanFailed(persistedState, blockReason, logger);
-    } else {
+    if (!derivedPlanReview) {
       await notifyBlocked(persistedState, blockReason, logger);
     }
-    return persistedState;
+    return flushDerivedPlanNotifications(persistedState, statePath, logger, blockReason);
   }
   if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
-    await notifyDerivedPlanAccepted(nextState, logger);
+    return flushDerivedPlanNotifications(nextState, statePath, logger);
   }
   if (nextState.status === 'done') {
     await notifyComplete(nextState, 'Plan review converged', logger);
@@ -1395,7 +1455,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
   await logger?.event('phase.start', { phase: 'coder_response' });
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
-    const nextState = await saveState(statePath, {
+    let nextState = await saveState(statePath, {
       ...state,
       phase: 'done',
       status: 'done',
@@ -1531,7 +1591,7 @@ async function runCoderOptionalResponsePhase(state: OrchestrationState, statePat
   await logger?.event('phase.start', { phase: 'coder_optional_response' });
   const openFindings = state.findings.filter(isOpenNonBlockingFinding);
   if (openFindings.length === 0) {
-    const nextState = await saveState(statePath, {
+    let nextState = await saveState(statePath, {
       ...state,
       phase: 'final_squash',
       status: 'running',
@@ -1723,7 +1783,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
   const derivedPlanReview = isDerivedPlanReviewState(state);
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
-    const nextState = await saveState(statePath, {
+    let nextState = await saveState(statePath, {
       ...state,
       phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
       status: derivedPlanReview ? 'running' : 'done',
@@ -1735,9 +1795,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       openFindings: 0,
       nextPhase: nextState.phase,
     });
-    if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
-      await notifyDerivedPlanAccepted(nextState, logger);
-    }
+    nextState = await flushDerivedPlanNotifications(nextState, statePath, logger);
     if (nextState.status === 'done') {
       await notifyComplete(nextState, 'Plan review converged', logger);
     }
@@ -1818,12 +1876,10 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during plan response',
     );
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
-    if (derivedPlanReview) {
-      await notifyDerivedPlanFailed(persistedState, blocker, logger);
-    } else {
+    if (!derivedPlanReview) {
       await notifyBlocked(persistedState, blocker, logger);
     }
-    return persistedState;
+    return flushDerivedPlanNotifications(persistedState, statePath, logger, blocker);
   }
   return nextState;
 }
@@ -1837,7 +1893,7 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
   const derivedPlanReview = isDerivedPlanReviewState(state);
   const openFindings = state.findings.filter(isOpenNonBlockingFinding);
   if (openFindings.length === 0) {
-    const nextState = await saveState(statePath, {
+    let nextState = await saveState(statePath, {
       ...state,
       phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
       status: derivedPlanReview ? 'running' : 'done',
@@ -1849,9 +1905,7 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       openFindings: 0,
       nextPhase: nextState.phase,
     });
-    if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
-      await notifyDerivedPlanAccepted(nextState, logger);
-    }
+    nextState = await flushDerivedPlanNotifications(nextState, statePath, logger);
     if (nextState.status === 'done') {
       await notifyComplete(nextState, 'Plan review converged', logger);
     }
@@ -1940,15 +1994,13 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
         'The coder reported a blocker while considering non-blocking plan findings',
     );
     const persistedState = await persistBlockedScope(nextState, statePath, blocker);
-    if (derivedPlanReview) {
-      await notifyDerivedPlanFailed(persistedState, blocker, logger);
-    } else {
+    if (!derivedPlanReview) {
       await notifyBlocked(persistedState, blocker, logger);
     }
-    return persistedState;
+    return flushDerivedPlanNotifications(persistedState, statePath, logger, blocker);
   }
   if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
-    await notifyDerivedPlanAccepted(nextState, logger);
+    return flushDerivedPlanNotifications(nextState, statePath, logger);
   }
   if (nextState.status === 'done') {
     await notifyComplete(nextState, 'Plan review converged', logger);
@@ -2037,6 +2089,9 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
             derivedFromScopeNumber: null,
             derivedPlanStatus: null,
             derivedScopeIndex: null,
+            splitPlanStartedNotified: false,
+            derivedPlanAcceptedNotified: false,
+            splitPlanBlockedNotified: false,
             splitPlanCountForCurrentScope: 0,
             rounds: [],
             consultRounds: [],
@@ -2054,6 +2109,9 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
             coderSessionHandle: null,
             lastScopeMarker: null,
             derivedScopeIndex: (state.derivedScopeIndex ?? 1) + 1,
+            splitPlanStartedNotified: false,
+            derivedPlanAcceptedNotified: false,
+            splitPlanBlockedNotified: false,
             rounds: [],
             consultRounds: [],
             findings: [],
@@ -2075,6 +2133,9 @@ async function runFinalSquashPhase(state: OrchestrationState, statePath: string,
             derivedFromScopeNumber: null,
             derivedPlanStatus: null,
             derivedScopeIndex: null,
+            splitPlanStartedNotified: false,
+            derivedPlanAcceptedNotified: false,
+            splitPlanBlockedNotified: false,
             splitPlanCountForCurrentScope: 0,
             rounds: [],
             consultRounds: [],
@@ -2324,6 +2385,8 @@ export async function loadOrInitialize(
         derivedFromScopeNumber: state.derivedFromScopeNumber,
       });
     }
+
+    state = await flushDerivedPlanNotifications(state, resumeStatePath, logger);
 
     if (
       state.topLevelMode === 'execute' &&

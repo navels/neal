@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { adoptAcceptedDerivedPlan, loadOrInitialize } from './orchestrator.js';
+import { adoptAcceptedDerivedPlan, flushDerivedPlanNotifications, loadOrInitialize } from './orchestrator.js';
 import { renderPlanProgressMarkdown } from './progress.js';
 import { renderReviewMarkdown } from './review.js';
 import { createInitialState, getDefaultAgentConfig, saveState } from './state.js';
@@ -43,6 +43,18 @@ async function createResumeFixture(overrides: Partial<OrchestrationState>) {
   });
 
   return { cwd, statePath, state };
+}
+
+async function createNotifyCapture(root: string) {
+  const notifyLogPath = join(root, 'notify.log');
+  const notifyScriptPath = join(root, 'notify.sh');
+  await writeFile(
+    notifyScriptPath,
+    `#!/bin/sh\nprintf '%s\n' "$1" >> "${notifyLogPath}"\n`,
+    'utf8',
+  );
+  await chmod(notifyScriptPath, 0o755);
+  return { notifyLogPath, notifyScriptPath };
 }
 
 test('resume restores blocked derived-plan coder response sessions', async () => {
@@ -237,6 +249,126 @@ test('resume promotes accepted derived plans into the adoption phase', async () 
   assert.equal(state.derivedPlanStatus, 'accepted');
   assert.equal(state.derivedFromScopeNumber, 8);
   assert.equal(state.blockedFromPhase, null);
+});
+
+test('resume backfills accepted derived plan notification once', async () => {
+  const { cwd, statePath } = await createResumeFixture({
+    currentScopeNumber: 9,
+    phase: 'reviewer_plan',
+    status: 'running',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_9.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 9,
+    derivedScopeIndex: null,
+    createdCommits: [],
+    derivedPlanAcceptedNotified: false,
+  });
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
+  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
+  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+
+  try {
+    const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+    assert.equal(state.phase, 'awaiting_derived_plan_execution');
+    assert.equal(state.derivedPlanAcceptedNotified, true);
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /derived plan accepted for scope 9/);
+  } finally {
+    if (previousNotifyBin === undefined) {
+      delete process.env.AUTONOMY_NOTIFY_BIN;
+    } else {
+      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
+    }
+  }
+});
+
+test('flush sends split-plan rejection notification for guardrail blocks', async () => {
+  const { cwd, statePath, state } = await createResumeFixture({
+    currentScopeNumber: 10,
+    phase: 'blocked',
+    status: 'blocked',
+    lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
+    derivedPlanPath: null,
+    derivedPlanStatus: null,
+    splitPlanBlockedNotified: false,
+    completedScopes: [
+      {
+        number: '10',
+        marker: 'AUTONOMY_SPLIT_PLAN',
+        result: 'blocked',
+        baseCommit: 'abc123',
+        finalCommit: null,
+        commitSubject: null,
+        reviewRounds: 0,
+        findings: 0,
+        archivedReviewPath: null,
+        blocker: 'split-plan recovery rejected: scope 10 already emitted a derived plan once',
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
+  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
+  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+
+  try {
+    const nextState = await flushDerivedPlanNotifications(state, statePath);
+    assert.equal(nextState.splitPlanBlockedNotified, true);
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /split-plan recovery rejected for scope 10/);
+  } finally {
+    if (previousNotifyBin === undefined) {
+      delete process.env.AUTONOMY_NOTIFY_BIN;
+    } else {
+      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
+    }
+  }
+});
+
+test('flush sends derived-plan failure notification for blocked derived-plan review', async () => {
+  const { cwd, statePath, state } = await createResumeFixture({
+    currentScopeNumber: 11,
+    phase: 'blocked',
+    status: 'blocked',
+    lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_11.md',
+    derivedPlanStatus: 'rejected',
+    derivedFromScopeNumber: 11,
+    splitPlanBlockedNotified: false,
+    completedScopes: [
+      {
+        number: '11',
+        marker: 'AUTONOMY_SPLIT_PLAN',
+        result: 'blocked',
+        baseCommit: 'abc123',
+        finalCommit: null,
+        commitSubject: null,
+        reviewRounds: 1,
+        findings: 1,
+        archivedReviewPath: null,
+        blocker: 'split-plan recovery failed to converge',
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_11.md',
+      },
+    ],
+  });
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
+  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
+  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+
+  try {
+    const nextState = await flushDerivedPlanNotifications(state, statePath);
+    assert.equal(nextState.splitPlanBlockedNotified, true);
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /derived plan review did not converge/);
+  } finally {
+    if (previousNotifyBin === undefined) {
+      delete process.env.AUTONOMY_NOTIFY_BIN;
+    } else {
+      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
+    }
+  }
 });
 
 test('review and progress reports expose derived-plan audit linkage', async () => {

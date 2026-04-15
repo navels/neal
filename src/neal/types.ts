@@ -133,6 +133,9 @@ export type OrchestrationState = {
   derivedFromScopeNumber: number | null;
   derivedPlanStatus: 'pending_review' | 'accepted' | 'rejected' | null;
   derivedScopeIndex: number | null;
+  splitPlanStartedNotified: boolean;
+  derivedPlanAcceptedNotified: boolean;
+  splitPlanBlockedNotified: boolean;
   splitPlanCountForCurrentScope: number;
   derivedPlanDepth: number;
   maxDerivedPlanReviewRounds: number;

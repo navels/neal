@@ -84,6 +84,9 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     derivedFromScopeNumber: null,
     derivedPlanStatus: null,
     derivedScopeIndex: null,
+    splitPlanStartedNotified: false,
+    derivedPlanAcceptedNotified: false,
+    splitPlanBlockedNotified: false,
     splitPlanCountForCurrentScope: 0,
     derivedPlanDepth: 0,
     maxDerivedPlanReviewRounds: 5,
@@ -352,6 +355,18 @@ export async function loadState(path: string): Promise<OrchestrationState> {
       typeof (parsed as { derivedScopeIndex?: unknown }).derivedScopeIndex === 'number'
         ? (parsed as { derivedScopeIndex: number }).derivedScopeIndex
         : null,
+    splitPlanStartedNotified:
+      typeof (parsed as { splitPlanStartedNotified?: unknown }).splitPlanStartedNotified === 'boolean'
+        ? (parsed as { splitPlanStartedNotified: boolean }).splitPlanStartedNotified
+        : false,
+    derivedPlanAcceptedNotified:
+      typeof (parsed as { derivedPlanAcceptedNotified?: unknown }).derivedPlanAcceptedNotified === 'boolean'
+        ? (parsed as { derivedPlanAcceptedNotified: boolean }).derivedPlanAcceptedNotified
+        : false,
+    splitPlanBlockedNotified:
+      typeof (parsed as { splitPlanBlockedNotified?: unknown }).splitPlanBlockedNotified === 'boolean'
+        ? (parsed as { splitPlanBlockedNotified: boolean }).splitPlanBlockedNotified
+        : false,
     splitPlanCountForCurrentScope:
       typeof (parsed as { splitPlanCountForCurrentScope?: unknown }).splitPlanCountForCurrentScope === 'number'
         ? (parsed as { splitPlanCountForCurrentScope: number }).splitPlanCountForCurrentScope
