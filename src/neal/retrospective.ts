@@ -271,6 +271,14 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
         : state.topLevelMode === 'plan'
           ? 'Planning run complete'
           : 'Plan implementation complete';
+  const outcomeStatus =
+    kind === 'scope_accepted'
+      ? 'accepted'
+      : kind === 'blocked'
+        ? 'blocked'
+        : kind === 'failed'
+          ? 'failed'
+          : 'done';
 
   const changedFiles = await summarizeChangedFiles(state);
   const verificationSummary = summarizeVerification(commands);
@@ -287,7 +295,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
     `- Mode: ${state.topLevelMode}`,
     `- Summary: ${outcomeTitle}`,
     `- Scope: ${state.currentScopeNumber}`,
-    `- Status: ${state.status}`,
+    `- Status: ${outcomeStatus}`,
     `- Final commit: ${state.finalCommit ?? 'n/a'}`,
     `- Coder session: ${state.coderSessionHandle ?? 'n/a'}`,
     `- Reviewer session: ${latestReviewerSessionHandle ?? 'n/a'}`,
