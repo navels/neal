@@ -205,7 +205,7 @@ function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?:
     options: {
       cwd: args.cwd,
       ...((args.model ?? defaultModel) ? { model: args.model ?? defaultModel ?? undefined } : {}),
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       maxTurns,
