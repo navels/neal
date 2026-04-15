@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -13,6 +13,17 @@ import { createInitialState, getDefaultAgentConfig, saveState } from './state.js
 import type { OrchestrationState } from './types.js';
 
 const execFileAsync = promisify(execFile);
+const originalNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
+
+process.env.AUTONOMY_NOTIFY_BIN = '/usr/bin/true';
+
+after(() => {
+  if (originalNotifyBin === undefined) {
+    delete process.env.AUTONOMY_NOTIFY_BIN;
+  } else {
+    process.env.AUTONOMY_NOTIFY_BIN = originalNotifyBin;
+  }
+});
 
 async function createResumeFixture(overrides: Partial<OrchestrationState>) {
   const root = await mkdtemp(join(tmpdir(), 'neal-scope4-'));
@@ -107,6 +118,7 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
   await runGit(cwd, 'add', 'scope.txt');
   await runGit(cwd, 'commit', '-m', 'derived scope work');
   const createdCommit = await runGit(cwd, 'rev-parse', 'HEAD');
+  const createdCommitsOverride = overrides.createdCommits;
 
   const statePath = join(stateDir, 'session.json');
   const state = await saveState(statePath, {
@@ -115,11 +127,11 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
     phase: 'final_squash',
     status: 'running',
     baseCommit,
-    createdCommits: [createdCommit],
     splitPlanStartedNotified: true,
     derivedPlanAcceptedNotified: true,
     splitPlanBlockedNotified: false,
     ...overrides,
+    createdCommits: createdCommitsOverride ?? [createdCommit],
   });
 
   const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
@@ -350,6 +362,31 @@ test('resume backfills accepted derived plan notification once', async () => {
       process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
     }
   }
+});
+
+test('resume keeps active derived execution on the same derived sub-scope', async () => {
+  const { cwd, statePath } = await createFinalSquashFixture({
+    currentScopeNumber: 12,
+    phase: 'coder_scope',
+    status: 'failed',
+    coderSessionHandle: 'coder-session-12',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_12.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 12,
+    derivedScopeIndex: 2,
+    splitPlanStartedNotified: true,
+    derivedPlanAcceptedNotified: true,
+  });
+
+  const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(state.phase, 'coder_scope');
+  assert.equal(state.status, 'running');
+  assert.equal(state.currentScopeNumber, 12);
+  assert.equal(state.derivedScopeIndex, 2);
+  assert.equal(state.derivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_12.md');
+  assert.equal(state.derivedPlanStatus, 'accepted');
+  assert.equal(state.derivedFromScopeNumber, 12);
+  assert.equal(state.derivedPlanAcceptedNotified, true);
 });
 
 test('flush sends split-plan rejection notification for guardrail blocks', async () => {
