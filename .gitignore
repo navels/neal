@@ -7,3 +7,4 @@ PROGRESS.md
 tmp/
 *.log
 .env
+plans/
