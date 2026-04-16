@@ -159,6 +159,7 @@ export async function persistSplitPlanRecovery(
     splitPlanStartedNotified: false,
     derivedPlanAcceptedNotified: false,
     splitPlanBlockedNotified: false,
+    derivedScopeIndex: null,
     splitPlanCountForCurrentScope: state.splitPlanCountForCurrentScope + 1,
     rounds: [],
     consultRounds: [],

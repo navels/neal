@@ -555,6 +555,41 @@ test('persistSplitPlanRecovery allows split-plan attempts up to the configured c
   );
 });
 
+test('persistSplitPlanRecovery clears stale derivedScopeIndex when replacing an active derived scope', async () => {
+  const { statePath, state } = await createFinalSquashFixture({
+    currentScopeNumber: 6,
+    phase: 'coder_scope',
+    status: 'running',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_6.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 6,
+    derivedScopeIndex: 5,
+    splitPlanCountForCurrentScope: 2,
+    createdCommits: [],
+  });
+
+  const nextState = await persistSplitPlanRecovery(
+    state,
+    statePath,
+    {
+      sourcePhase: 'coder_scope',
+      derivedPlanMarkdown: '## Execution Shape\n\nexecutionShape: multi_scope\n\n## Execution Queue\n\n### Scope 1: Replacement\n- Goal: Replace the stale derived scope.\n- Verification: `pnpm typecheck`\n- Success Condition: Replacement plan is ready for review.\n',
+      createdCommits: [],
+    },
+    {
+      persistBlockedScope: async (blockedState) => blockedState,
+      writeExecutionArtifacts: async () => {},
+    },
+  );
+
+  assert.equal(nextState.phase, 'reviewer_plan');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.derivedPlanStatus, 'pending_review');
+  assert.equal(nextState.derivedFromScopeNumber, 6);
+  assert.equal(nextState.derivedScopeIndex, null);
+  assert.equal(nextState.createdCommits.length, 0);
+});
+
 test('flush sends derived-plan failure notification for blocked derived-plan review', async () => {
   const { cwd, statePath, state } = await createResumeFixture({
     currentScopeNumber: 11,
