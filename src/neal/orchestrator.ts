@@ -1827,6 +1827,41 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
   return nextState;
 }
 
+type RunnablePhase = Extract<
+  OrchestrationState['phase'],
+  | 'coder_plan'
+  | 'reviewer_plan'
+  | 'coder_plan_response'
+  | 'coder_plan_optional_response'
+  | 'awaiting_derived_plan_execution'
+  | 'coder_scope'
+  | 'reviewer_scope'
+  | 'coder_response'
+  | 'coder_optional_response'
+  | 'reviewer_consult'
+  | 'coder_consult_response'
+  | 'final_squash'
+>;
+
+const RUNNABLE_PHASES = new Set<RunnablePhase>([
+  'coder_plan',
+  'reviewer_plan',
+  'coder_plan_response',
+  'coder_plan_optional_response',
+  'awaiting_derived_plan_execution',
+  'coder_scope',
+  'reviewer_scope',
+  'coder_response',
+  'coder_optional_response',
+  'reviewer_consult',
+  'coder_consult_response',
+  'final_squash',
+]);
+
+function isRunnablePhase(phase: OrchestrationState['phase']): phase is RunnablePhase {
+  return RUNNABLE_PHASES.has(phase as RunnablePhase);
+}
+
 export async function runOnePass(
   state: OrchestrationState,
   statePath: string,
@@ -1838,104 +1873,78 @@ export async function runOnePass(
 ) {
   let currentState = state;
 
-  while (
-    currentState.phase === 'coder_plan' ||
-    currentState.phase === 'reviewer_plan' ||
-    currentState.phase === 'coder_plan_response' ||
-    currentState.phase === 'coder_plan_optional_response' ||
-    currentState.phase === 'awaiting_derived_plan_execution' ||
-    currentState.phase === 'coder_scope' ||
-    currentState.phase === 'reviewer_scope' ||
-    currentState.phase === 'coder_response' ||
-    currentState.phase === 'coder_optional_response' ||
-    currentState.phase === 'reviewer_consult' ||
-    currentState.phase === 'coder_consult_response' ||
-    currentState.phase === 'final_squash'
-  ) {
+  while (isRunnablePhase(currentState.phase)) {
     const stopHeartbeat = startPhaseHeartbeat(currentState.phase, () => currentState, logger);
     try {
-    if (currentState.phase === 'coder_plan') {
-      currentState = await runCoderPlanPhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'reviewer_plan') {
-      currentState = await runPlanReviewPhase(currentState, statePath, logger);
-      continue;
-    }
-
-    if (currentState.phase === 'coder_plan_response') {
-      currentState = await runCoderPlanResponsePhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'coder_plan_optional_response') {
-      currentState = await runCoderPlanOptionalResponsePhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'awaiting_derived_plan_execution') {
-      currentState = await saveState(statePath, adoptAcceptedDerivedPlan(currentState));
-      await writeExecutionArtifacts(currentState);
-      await logger?.event('phase.complete', {
-        phase: 'awaiting_derived_plan_execution',
-        nextPhase: currentState.phase,
-        scopeNumber: getCurrentScopeLabel(currentState),
-        planDoc: getExecutionPlanPath(currentState),
-      });
-      continue;
-    }
-
-    if (currentState.phase === 'coder_scope') {
-      currentState = await runCoderScopePhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'reviewer_scope') {
-      currentState = await runReviewPhase(currentState, statePath, logger);
-      continue;
-    }
-
-    if (currentState.phase === 'coder_response') {
-      currentState = await runCoderResponsePhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'coder_optional_response') {
-      currentState = await runCoderOptionalResponsePhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'reviewer_consult') {
-      currentState = await runConsultPhase(currentState, statePath, logger);
-      continue;
-    }
-
-    if (currentState.phase === 'coder_consult_response') {
-      currentState = await runCoderConsultResponsePhase(currentState, statePath, logger);
-      options?.onCoderSessionHandle?.(currentState.coderSessionHandle);
-      continue;
-    }
-
-    if (currentState.phase === 'final_squash') {
-      currentState = await runFinalSquashPhase(currentState, statePath, logger);
-      if (currentState.phase === 'coder_scope' && currentState.status === 'running') {
-        if (options?.shouldStopAfterCurrentScope?.()) {
-          await logger?.event('run.paused_after_scope', {
-            currentScopeNumber: currentState.currentScopeNumber,
-            phase: currentState.phase,
-            status: currentState.status,
+      const currentPhase = currentState.phase;
+      const phaseHandlers: Record<RunnablePhase, () => Promise<OrchestrationState>> = {
+        coder_plan: async () => {
+          const nextState = await runCoderPlanPhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        reviewer_plan: async () => runPlanReviewPhase(currentState, statePath, logger),
+        coder_plan_response: async () => {
+          const nextState = await runCoderPlanResponsePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        coder_plan_optional_response: async () => {
+          const nextState = await runCoderPlanOptionalResponsePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        awaiting_derived_plan_execution: async () => {
+          const nextState = await saveState(statePath, adoptAcceptedDerivedPlan(currentState));
+          await writeExecutionArtifacts(nextState);
+          await logger?.event('phase.complete', {
+            phase: 'awaiting_derived_plan_execution',
+            nextPhase: nextState.phase,
+            scopeNumber: getCurrentScopeLabel(nextState),
+            planDoc: getExecutionPlanPath(nextState),
           });
-          return currentState;
-        }
+          return nextState;
+        },
+        coder_scope: async () => {
+          const nextState = await runCoderScopePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        reviewer_scope: async () => runReviewPhase(currentState, statePath, logger),
+        coder_response: async () => {
+          const nextState = await runCoderResponsePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        coder_optional_response: async () => {
+          const nextState = await runCoderOptionalResponsePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        reviewer_consult: async () => runConsultPhase(currentState, statePath, logger),
+        coder_consult_response: async () => {
+          const nextState = await runCoderConsultResponsePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        final_squash: async () => runFinalSquashPhase(currentState, statePath, logger),
+      };
+
+      currentState = await phaseHandlers[currentPhase]();
+
+      if (
+        currentPhase === 'final_squash' &&
+        currentState.phase === 'coder_scope' &&
+        currentState.status === 'running' &&
+        options?.shouldStopAfterCurrentScope?.()
+      ) {
+        await logger?.event('run.paused_after_scope', {
+          currentScopeNumber: currentState.currentScopeNumber,
+          phase: currentState.phase,
+          status: currentState.status,
+        });
+        return currentState;
       }
-    }
     } finally {
       stopHeartbeat();
     }
