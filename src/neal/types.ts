@@ -51,6 +51,12 @@ export type ReviewRound = {
   round: number;
   reviewerSessionHandle: string | null;
   reviewedPlanPath: string | null;
+  normalizationApplied: boolean;
+  normalizationOperations: string[];
+  normalizationScopeLabelMappings: {
+    normalizedScopeNumber: number;
+    originalScopeLabel: string;
+  }[];
   commitRange: {
     base: string;
     head: string;

@@ -41,10 +41,23 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     lines.push('', 'No review rounds yet.');
   } else {
     for (const round of state.rounds) {
+      const normalizationStatus = round.normalizationApplied
+        ? round.normalizationOperations.length > 0
+          ? round.normalizationOperations.join(' | ')
+          : 'applied'
+        : 'none';
+      const scopeMappings =
+        round.normalizationScopeLabelMappings.length > 0
+          ? round.normalizationScopeLabelMappings
+              .map((mapping) => `${mapping.originalScopeLabel} -> ${mapping.normalizedScopeNumber}`)
+              .join(', ')
+          : 'none';
       lines.push(
         '',
         `### Round ${round.round}`,
         `- Reviewed artifact: ${round.reviewedPlanPath ?? 'unknown'}`,
+        `- Normalization: ${normalizationStatus}`,
+        `- Scope label mappings: ${scopeMappings}`,
         `- Reviewer session: ${round.reviewerSessionHandle ?? 'pending'}`,
         `- Open blocking canonicals: ${round.openBlockingCanonicalCount}`,
         `- Findings: ${round.findings.join(', ') || 'none'}`,

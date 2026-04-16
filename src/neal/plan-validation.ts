@@ -146,7 +146,7 @@ function normalizeExecutionQueueLines(
       operations.push(`Normalized scope heading \`${originalHeading}\` to \`${canonicalHeading}\`.`);
     }
 
-    if (sawAliasScopeHeading && scope.originalLabel !== String(normalizedScopeNumber)) {
+    if (sawAliasScopeHeading) {
       scopeLabelMappings.push({
         normalizedScopeNumber,
         originalScopeLabel: scope.originalLabel,
@@ -155,32 +155,18 @@ function normalizeExecutionQueueLines(
 
     normalizedLines.push(canonicalHeading);
 
-    let goalAugmented = false;
     for (const line of scope.body) {
       const normalizedLine = normalizeScopeBodyLine(
         line,
         scope.originalLabel,
         normalizedScopeNumber,
         sawAliasScopeHeading,
-        () => {
-          goalAugmented = true;
-        },
       );
 
       if (normalizedLine !== line) {
         applied = true;
       }
       normalizedLines.push(normalizedLine);
-    }
-
-    if (sawAliasScopeHeading && scope.originalLabel !== String(normalizedScopeNumber) && !goalAugmented) {
-      applied = true;
-      normalizedLines.push(
-        `- Goal: (Former derived scope ${scope.originalLabel}) Complete scope ${normalizedScopeNumber} work.`,
-      );
-      operations.push(
-        `Inserted goal label mapping for normalized Scope ${normalizedScopeNumber} from original label \`${scope.originalLabel}\`.`,
-      );
     }
   });
 
@@ -288,7 +274,6 @@ function normalizeScopeBodyLine(
   originalLabel: string,
   normalizedScopeNumber: number,
   preserveOriginalScopeLabel: boolean,
-  onGoalAugmented: () => void,
 ) {
   const bulletMatch = line.match(/^(\s*-\s+)([^:]+):(.*)$/);
   if (bulletMatch === null) {
@@ -308,7 +293,6 @@ function normalizeScopeBodyLine(
     !rest.includes(`Former derived scope ${originalLabel}`)
   ) {
     normalizedRest = ` (Former derived scope ${originalLabel})${rest}`;
-    onGoalAugmented();
   }
 
   return `${prefix}${normalizedLabel}:${normalizedRest}`;

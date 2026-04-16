@@ -263,6 +263,9 @@ test('accepted derived plans reject adoption after derived execution has already
         round: 1,
         reviewerSessionHandle: 'reviewer-session-2',
         reviewedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
         commitRange: { base: 'abc123', head: 'abc123' },
         openBlockingCanonicalCount: 0,
         findings: [],
@@ -345,6 +348,9 @@ test('accepted derived plans adopt only from the pre-execution adoption phase', 
         round: 1,
         reviewerSessionHandle: 'reviewer-session-2',
         reviewedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
         commitRange: { base: 'abc123', head: 'abc123' },
         openBlockingCanonicalCount: 0,
         findings: [],
@@ -884,6 +890,9 @@ test('review and progress reports expose derived-plan audit linkage', async () =
         round: 1,
         reviewerSessionHandle: 'reviewer-session-1',
         reviewedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_3.md',
+        normalizationApplied: true,
+        normalizationOperations: ['Normalized execution queue header `## Ordered Derived Scopes` to `## Execution Queue`.'],
+        normalizationScopeLabelMappings: [{ normalizedScopeNumber: 1, originalScopeLabel: '6.6A' }],
         commitRange: {
           base: 'abc123',
           head: 'abc123',
@@ -917,6 +926,8 @@ test('review and progress reports expose derived-plan audit linkage', async () =
   assert.match(reviewMarkdown, /Last reviewed artifact: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
   assert.match(reviewMarkdown, /### Round 1/);
   assert.match(reviewMarkdown, /Reviewed artifact: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
+  assert.match(reviewMarkdown, /Normalization: Normalized execution queue header/);
+  assert.match(reviewMarkdown, /Scope label mappings: 6\.6A -> 1/);
   assert.match(reviewMarkdown, /Derived from scope: 3/);
   assert.match(reviewMarkdown, /Discarded WIP artifact: .*SCOPE_3_DISCARDED\.diff/);
   assert.match(progressMarkdown, /Parent scope: none/);

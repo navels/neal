@@ -257,6 +257,23 @@ function hydrateRound(value: unknown): ReviewRound {
       typeof (round as { reviewedPlanPath?: unknown }).reviewedPlanPath === 'string'
         ? (round as { reviewedPlanPath: string }).reviewedPlanPath
         : null,
+    normalizationApplied:
+      typeof (round as { normalizationApplied?: unknown }).normalizationApplied === 'boolean'
+        ? (round as { normalizationApplied: boolean }).normalizationApplied
+        : false,
+    normalizationOperations:
+      isStringArray((round as { normalizationOperations?: unknown }).normalizationOperations)
+        ? ((round as { normalizationOperations: string[] }).normalizationOperations)
+        : [],
+    normalizationScopeLabelMappings: Array.isArray((round as { normalizationScopeLabelMappings?: unknown }).normalizationScopeLabelMappings)
+      ? ((round as { normalizationScopeLabelMappings: ReviewRound['normalizationScopeLabelMappings'] }).normalizationScopeLabelMappings).filter(
+          (mapping) =>
+            Boolean(mapping) &&
+            typeof mapping === 'object' &&
+            typeof mapping.normalizedScopeNumber === 'number' &&
+            typeof mapping.originalScopeLabel === 'string',
+        )
+      : [],
     commitRange: {
       base: typeof round.commitRange?.base === 'string' ? round.commitRange.base : '',
       head: typeof round.commitRange?.head === 'string' ? round.commitRange.head : '',

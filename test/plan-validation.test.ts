@@ -184,6 +184,31 @@ executionShape: multi_scope
   ]);
 });
 
+test('does not fabricate a missing goal bullet while retaining derived-scope label mappings', () => {
+  const result = validatePlanDocument(`
+# Derived Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Ordered Derived Scopes
+
+1. Scope 6.6A: Do thing
+- Verification strategy: \`pnpm typecheck\`
+- Exit criteria: Done.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'multi_scope');
+  assert.equal(result.normalization.applied, true);
+  assert.match(result.errors.join('\n'), /Scope 1 is missing required bullet `- Goal:`/);
+  assert.doesNotMatch(result.normalization.normalizedDocument, /Complete scope 1 work/);
+  assert.deepEqual(result.normalization.scopeLabelMappings, [
+    { normalizedScopeNumber: 1, originalScopeLabel: '6.6A' },
+  ]);
+});
+
 test('normalizes alias bullet labels inside canonical scope headings', () => {
   const result = validatePlanDocument(`
 # Example Plan
@@ -254,4 +279,32 @@ executionShape: multi_scope
     result.errors.join('\n'),
     /`## Execution Queue` must contain at least one `### Scope N:` entry.|contains content before the first scope entry/,
   );
+});
+
+test('scope label mappings include identity mappings when alias normalization is active', () => {
+  const result = validatePlanDocument(`
+# Derived Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Ordered Derived Scopes
+
+1. Scope 1: Keep numbering stable
+- Goal: Keep scope one as-is.
+- Verification strategy: \`pnpm typecheck\`
+- Exit criteria: Scope one remains auditable.
+
+2. Scope 6.6B: Renumber the later scope
+- Goal: Keep the original label mapping explicit.
+- Verification strategy: \`pnpm test\`
+- Exit criteria: Scope mappings include both scopes.
+`);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.normalization.scopeLabelMappings, [
+    { normalizedScopeNumber: 1, originalScopeLabel: '1' },
+    { normalizedScopeNumber: 2, originalScopeLabel: '6.6B' },
+  ]);
 });
