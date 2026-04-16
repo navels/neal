@@ -8,6 +8,7 @@ type PlanProgressState = {
   version: 1;
   planDoc: string;
   status: OrchestrationState['status'];
+  executionShape: OrchestrationState['executionShape'];
   createdAt: string;
   updatedAt: string;
   finalCommit: string | null;
@@ -30,6 +31,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
     version: 1,
     planDoc: state.planDoc,
     status: state.status,
+    executionShape: state.executionShape,
     createdAt: state.createdAt,
     updatedAt: state.updatedAt,
     finalCommit: state.finalCommit,
@@ -59,6 +61,7 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
     '## Metadata',
     `- Plan: ${progress.planDoc}`,
     `- Status: ${progress.status}`,
+    `- Execution shape: ${progress.executionShape ?? 'pending'}`,
     `- Final commit: ${progress.finalCommit ?? 'pending'}`,
   ];
 

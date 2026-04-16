@@ -77,6 +77,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     finalCommit: null,
     coderSessionHandle: null,
     reviewerSessionHandle: null,
+    executionShape: null,
     currentScopeNumber: 1,
     coderRetryCount: 0,
     lastScopeMarker: null,
@@ -322,6 +323,11 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     reviewerSessionHandle:
       typeof (parsed as { reviewerSessionHandle?: unknown }).reviewerSessionHandle === 'string'
         ? (parsed as { reviewerSessionHandle: string }).reviewerSessionHandle
+        : null,
+    executionShape:
+      (parsed as { executionShape?: unknown }).executionShape === 'one_shot' ||
+      (parsed as { executionShape?: unknown }).executionShape === 'multi_scope'
+        ? (parsed as { executionShape: OrchestrationState['executionShape'] }).executionShape
         : null,
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,
     coderRetryCount:

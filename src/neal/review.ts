@@ -22,6 +22,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     `- Review target: ${reviewTarget}`,
     `- Scope: ${getCurrentScopeLabel(state)}`,
     `- Phase: ${state.phase}`,
+    `- Execution shape: ${state.executionShape ?? 'pending'}`,
     `- Coder session: ${state.coderSessionHandle ?? 'pending'}`,
     `- Base commit: ${state.baseCommit ?? 'unknown'}`,
     `- Final commit: ${state.finalCommit ?? 'pending'}`,

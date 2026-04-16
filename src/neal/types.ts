@@ -16,6 +16,7 @@ export type OrchestrationPhase =
 
 export type ScopeMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED' | 'AUTONOMY_SPLIT_PLAN';
 export type AgentProvider = 'openai-codex' | 'anthropic-claude';
+export type ExecutionShape = 'one_shot' | 'multi_scope';
 
 export type AgentRoleConfig = {
   provider: AgentProvider;
@@ -126,6 +127,7 @@ export type OrchestrationState = {
   finalCommit: string | null;
   coderSessionHandle: string | null;
   reviewerSessionHandle: string | null;
+  executionShape: ExecutionShape | null;
   currentScopeNumber: number;
   coderRetryCount: number;
   lastScopeMarker: ScopeMarker | null;

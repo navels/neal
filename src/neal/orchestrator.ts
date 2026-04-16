@@ -1178,6 +1178,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const nextState = await saveState(statePath, {
     ...state,
     reviewerSessionHandle: claude.sessionHandle,
+    executionShape: claude.executionShape,
     phase: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings
