@@ -37,6 +37,14 @@ import {
   notifyScopeAccepted,
 } from './orchestrator/notifications.js';
 import { filterWrapperOwnedWorktreeStatus, persistSplitPlanRecovery } from './orchestrator/split-plan.js';
+import {
+  adoptAcceptedDerivedPlan,
+  appendCompletedScope,
+  appendDerivedSubScopeAndParentCompletion,
+  computeNextScopeStateAfterSquash,
+  shouldNotifyDerivedPlanAcceptance,
+  transitionPlanReviewWithoutOpenFindings,
+} from './orchestrator/transitions.js';
 import { validatePlanDocument } from './plan-validation.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
@@ -56,6 +64,7 @@ import type {
 
 const execFile = promisify(execFileCallback);
 export { flushDerivedPlanNotifications };
+export { adoptAcceptedDerivedPlan, computeNextScopeStateAfterSquash };
 
 function writeDiagnostic(message: string, logger?: RunLogger) {
   process.stderr.write(message);
@@ -410,15 +419,6 @@ function stripTrailingMarker(text: string, marker: string) {
   return lines.join('\n').trim();
 }
 
-function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationState, nextState: OrchestrationState) {
-  return (
-    previousState.topLevelMode === 'execute' &&
-    previousState.derivedPlanStatus !== 'accepted' &&
-    nextState.derivedPlanStatus === 'accepted' &&
-    nextState.phase === 'awaiting_derived_plan_execution'
-  );
-}
-
 async function finalizePlanReviewResponseWithoutOpenFindings(
   state: OrchestrationState,
   statePath: string,
@@ -426,12 +426,7 @@ async function finalizePlanReviewResponseWithoutOpenFindings(
   derivedPlanReview: boolean,
   logger?: RunLogger,
 ) {
-  let nextState = await saveState(statePath, {
-    ...state,
-    phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
-    status: derivedPlanReview ? 'running' : 'done',
-    derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
-  });
+  let nextState = await saveState(statePath, transitionPlanReviewWithoutOpenFindings(state, derivedPlanReview));
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase,
@@ -1195,175 +1190,6 @@ function mapDecisionToStatus(decision: 'fixed' | 'rejected' | 'deferred'): Findi
   }
 }
 
-function appendCompletedScope(
-  state: OrchestrationState,
-  result: 'accepted' | 'blocked',
-  details: {
-    scopeLabel?: string;
-    finalCommit: string | null;
-    commitSubject: string | null;
-    archivedReviewPath: string | null;
-    blocker: string | null;
-    marker?: ScopeMarker;
-    derivedFromParentScope?: string | null;
-    replacedByDerivedPlanPath?: string | null;
-  },
-) {
-  const scopeLabel = details.scopeLabel ?? getCurrentScopeLabel(state);
-  const marker = details.marker ?? ((state.lastScopeMarker ?? 'AUTONOMY_BLOCKED') as ScopeMarker);
-  return [
-    ...state.completedScopes.filter((scope) => scope.number !== scopeLabel),
-    {
-      number: scopeLabel,
-      marker,
-      result,
-      baseCommit: state.baseCommit,
-      finalCommit: details.finalCommit,
-      commitSubject: details.commitSubject,
-      reviewRounds: state.rounds.length,
-      findings: state.findings.length,
-      archivedReviewPath: details.archivedReviewPath,
-      blocker: details.blocker,
-      derivedFromParentScope: details.derivedFromParentScope ?? null,
-      replacedByDerivedPlanPath: details.replacedByDerivedPlanPath ?? null,
-    },
-  ];
-}
-
-export function adoptAcceptedDerivedPlan(state: OrchestrationState) {
-  if (!hasAcceptedDerivedPlan(state) || !state.derivedPlanPath) {
-    return state;
-  }
-  if (state.phase !== 'awaiting_derived_plan_execution') {
-    throw new Error(`Cannot adopt derived plan from phase ${state.phase}`);
-  }
-  if (state.createdCommits.length > 0) {
-    throw new Error('Cannot adopt derived plan after derived execution has already created commits');
-  }
-  if (state.derivedScopeIndex !== null) {
-    throw new Error('Cannot adopt derived plan after derived scope execution has already started');
-  }
-
-  return {
-    ...state,
-    phase: 'coder_scope' as const,
-    status: 'running' as const,
-    derivedScopeIndex: state.derivedScopeIndex ?? 1,
-    coderSessionHandle: null,
-    coderRetryCount: 0,
-    rounds: [],
-    consultRounds: [],
-    findings: [],
-    createdCommits: [],
-    blockedFromPhase: null,
-  };
-}
-
-type FinalSquashNextStateArgs = {
-  state: OrchestrationState;
-  finalCommit: string;
-  completedScopes: OrchestrationState['completedScopes'];
-  archivedReviewPath: string | null;
-};
-
-export function computeNextScopeStateAfterSquash({
-  state,
-  finalCommit,
-  completedScopes,
-  archivedReviewPath,
-}: FinalSquashNextStateArgs): OrchestrationState {
-  const derivedExecution = isExecutingDerivedPlan(state);
-  const derivedPlanCompleted = derivedExecution && state.lastScopeMarker === 'AUTONOMY_DONE';
-  const continueScopes = derivedExecution
-    ? true
-    : state.lastScopeMarker !== 'AUTONOMY_DONE' && state.lastScopeMarker !== 'AUTONOMY_BLOCKED';
-
-  if (derivedExecution && derivedPlanCompleted) {
-    return {
-      ...state,
-      baseCommit: finalCommit,
-      finalCommit: null,
-      coderSessionHandle: null,
-      currentScopeNumber: state.currentScopeNumber + 1,
-      lastScopeMarker: null,
-      derivedPlanPath: null,
-      derivedFromScopeNumber: null,
-      derivedPlanStatus: null,
-      derivedScopeIndex: null,
-      splitPlanStartedNotified: false,
-      derivedPlanAcceptedNotified: false,
-      splitPlanBlockedNotified: false,
-      splitPlanCountForCurrentScope: 0,
-      rounds: [],
-      consultRounds: [],
-      findings: [],
-      createdCommits: [],
-      completedScopes,
-      archivedReviewPath: null,
-      phase: 'coder_scope',
-      status: 'running',
-    };
-  }
-
-  if (derivedExecution) {
-    return {
-      ...state,
-      baseCommit: finalCommit,
-      finalCommit: null,
-      coderSessionHandle: null,
-      lastScopeMarker: null,
-      derivedScopeIndex: (state.derivedScopeIndex ?? 1) + 1,
-      splitPlanStartedNotified: false,
-      derivedPlanAcceptedNotified: false,
-      splitPlanBlockedNotified: false,
-      rounds: [],
-      consultRounds: [],
-      findings: [],
-      createdCommits: [],
-      completedScopes,
-      archivedReviewPath: null,
-      phase: 'coder_scope',
-      status: 'running',
-    };
-  }
-
-  if (continueScopes) {
-    return {
-      ...state,
-      baseCommit: finalCommit,
-      finalCommit: null,
-      coderSessionHandle: null,
-      currentScopeNumber: state.currentScopeNumber + 1,
-      lastScopeMarker: null,
-      derivedPlanPath: null,
-      derivedFromScopeNumber: null,
-      derivedPlanStatus: null,
-      derivedScopeIndex: null,
-      splitPlanStartedNotified: false,
-      derivedPlanAcceptedNotified: false,
-      splitPlanBlockedNotified: false,
-      splitPlanCountForCurrentScope: 0,
-      rounds: [],
-      consultRounds: [],
-      findings: [],
-      createdCommits: [],
-      completedScopes,
-      archivedReviewPath: null,
-      phase: 'coder_scope',
-      status: 'running',
-    };
-  }
-
-  return {
-    ...state,
-    finalCommit,
-    archivedReviewPath,
-    completedScopes,
-    phase: 'done',
-    status: 'done',
-  };
-}
-
 function buildVerificationHint(state: OrchestrationState) {
   const latestRound = state.rounds.at(-1);
   if (!latestRound) {
@@ -1957,38 +1783,12 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
     finalCommit,
     archivedReviewPath,
   };
-  const derivedExecution = isExecutingDerivedPlan(state);
-  const currentScopeLabel = getCurrentScopeLabel(state);
-  const subScopeCompletedScopes = appendCompletedScope(state, 'accepted', {
-    scopeLabel: currentScopeLabel,
+  const completedScopes = appendDerivedSubScopeAndParentCompletion({
+    state,
     finalCommit,
-    commitSubject: finalSubject,
+    finalSubject,
     archivedReviewPath,
-    blocker: null,
-    derivedFromParentScope: derivedExecution ? getParentScopeLabel(state) : null,
   });
-  // Inside derived execution, AUTONOMY_DONE means "the derived replacement plan is complete",
-  // not "the top-level execute plan is complete". In that case final squash rolls the last
-  // derived sub-scope up into the parent scope and resumes parent-plan execution.
-  const derivedPlanCompleted = derivedExecution && state.lastScopeMarker === 'AUTONOMY_DONE';
-  const completedScopes = derivedPlanCompleted
-    ? appendCompletedScope(
-        {
-          ...state,
-          completedScopes: subScopeCompletedScopes,
-        },
-        'accepted',
-        {
-          scopeLabel: getParentScopeLabel(state),
-          finalCommit,
-          commitSubject: finalSubject,
-          archivedReviewPath,
-          blocker: null,
-          marker: 'AUTONOMY_SCOPE_DONE',
-          replacedByDerivedPlanPath: state.derivedPlanPath,
-        },
-      )
-    : subScopeCompletedScopes;
   const retrospectiveState = {
     ...archivedReviewState,
     completedScopes,
