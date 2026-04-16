@@ -4,21 +4,39 @@ const EXECUTION_SHAPE_HEADER = '## Execution Shape';
 const EXECUTION_QUEUE_HEADER = '## Execution Queue';
 const SCOPE_HEADING_PATTERN = /^### Scope (\d+):(.*)$/;
 const REQUIRED_SCOPE_BULLETS = ['goal', 'verification', 'success condition'] as const;
+const EXECUTION_QUEUE_HEADER_ALIASES = new Set(['## Ordered Derived Scopes', '## Derived Execution Queue']);
+const VERIFICATION_LABEL_ALIASES = new Set(['verification', 'verification strategy']);
+const SUCCESS_CONDITION_LABEL_ALIASES = new Set(['success condition', 'exit criteria']);
+
+export type PlanNormalizationScopeMapping = {
+  normalizedScopeNumber: number;
+  originalScopeLabel: string;
+};
+
+export type PlanNormalizationMetadata = {
+  applied: boolean;
+  normalizedDocument: string;
+  operations: string[];
+  scopeLabelMappings: PlanNormalizationScopeMapping[];
+};
 
 export type PlanValidationResult =
   | {
       ok: true;
       executionShape: ExecutionShape;
       errors: [];
+      normalization: PlanNormalizationMetadata;
     }
   | {
       ok: false;
       executionShape: ExecutionShape | null;
       errors: string[];
+      normalization: PlanNormalizationMetadata;
     };
 
 export function validatePlanDocument(planDocument: string): PlanValidationResult {
-  const lines = planDocument.split(/\r?\n/);
+  const normalization = normalizePlanDocument(planDocument);
+  const lines = normalization.normalizedDocument.split(/\r?\n/);
   const errors: string[] = [];
 
   const executionShapeSection = findSection(lines, EXECUTION_SHAPE_HEADER);
@@ -37,6 +55,7 @@ export function validatePlanDocument(planDocument: string): PlanValidationResult
       ok: false,
       executionShape,
       errors,
+      normalization,
     };
   }
 
@@ -45,6 +64,7 @@ export function validatePlanDocument(planDocument: string): PlanValidationResult
       ok: false,
       executionShape: null,
       errors: ['Internal validation error: execution shape resolved to null after successful validation.'],
+      normalization,
     };
   }
 
@@ -52,7 +72,261 @@ export function validatePlanDocument(planDocument: string): PlanValidationResult
     ok: true,
     executionShape,
     errors: [],
+    normalization,
   };
+}
+
+function normalizePlanDocument(planDocument: string): PlanNormalizationMetadata {
+  const lines = planDocument.split(/\r?\n/);
+  const operations: string[] = [];
+  const scopeLabelMappings: PlanNormalizationScopeMapping[] = [];
+  const normalizedLines = [...lines];
+
+  const queueSection = findSectionByHeaders(lines, [EXECUTION_QUEUE_HEADER, ...EXECUTION_QUEUE_HEADER_ALIASES]);
+  if (queueSection === null) {
+    return {
+      applied: false,
+      normalizedDocument: planDocument,
+      operations,
+      scopeLabelMappings,
+    };
+  }
+
+  const queueHeader = lines[queueSection.start]?.trim();
+  if (queueHeader !== EXECUTION_QUEUE_HEADER && queueHeader !== undefined) {
+    normalizedLines[queueSection.start] = EXECUTION_QUEUE_HEADER;
+    operations.push(`Normalized execution queue header \`${queueHeader}\` to \`${EXECUTION_QUEUE_HEADER}\`.`);
+  }
+
+  const normalizedQueueLines = normalizeExecutionQueueLines(
+    getSectionContentLines(lines, queueSection),
+    operations,
+    scopeLabelMappings,
+  );
+
+  if (normalizedQueueLines !== null) {
+    normalizedLines.splice(
+      queueSection.start + 1,
+      queueSection.end - queueSection.start - 1,
+      ...normalizedQueueLines,
+    );
+  }
+
+  const normalizedDocument = normalizedLines.join('\n');
+  return {
+    applied: normalizedDocument !== planDocument,
+    normalizedDocument,
+    operations,
+    scopeLabelMappings,
+  };
+}
+
+function normalizeExecutionQueueLines(
+  lines: string[],
+  operations: string[],
+  scopeLabelMappings: PlanNormalizationScopeMapping[],
+): string[] | null {
+  const queueDraft = collectNormalizedScopes(lines);
+  if (queueDraft === null) {
+    return null;
+  }
+  const { scopes, sawAliasScopeHeading } = queueDraft;
+
+  let applied = false;
+  const normalizedLines: string[] = [];
+
+  scopes.forEach((scope, index) => {
+    const normalizedScopeNumber = index + 1;
+    const canonicalHeading = sawAliasScopeHeading
+      ? `### Scope ${normalizedScopeNumber}: ${scope.title}`
+      : scope.heading.trim();
+    const originalHeading = scope.heading.trim();
+    if (originalHeading !== canonicalHeading) {
+      applied = true;
+      operations.push(`Normalized scope heading \`${originalHeading}\` to \`${canonicalHeading}\`.`);
+    }
+
+    if (sawAliasScopeHeading && scope.originalLabel !== String(normalizedScopeNumber)) {
+      scopeLabelMappings.push({
+        normalizedScopeNumber,
+        originalScopeLabel: scope.originalLabel,
+      });
+    }
+
+    normalizedLines.push(canonicalHeading);
+
+    let goalAugmented = false;
+    for (const line of scope.body) {
+      const normalizedLine = normalizeScopeBodyLine(
+        line,
+        scope.originalLabel,
+        normalizedScopeNumber,
+        sawAliasScopeHeading,
+        () => {
+          goalAugmented = true;
+        },
+      );
+
+      if (normalizedLine !== line) {
+        applied = true;
+      }
+      normalizedLines.push(normalizedLine);
+    }
+
+    if (sawAliasScopeHeading && scope.originalLabel !== String(normalizedScopeNumber) && !goalAugmented) {
+      applied = true;
+      normalizedLines.push(
+        `- Goal: (Former derived scope ${scope.originalLabel}) Complete scope ${normalizedScopeNumber} work.`,
+      );
+      operations.push(
+        `Inserted goal label mapping for normalized Scope ${normalizedScopeNumber} from original label \`${scope.originalLabel}\`.`,
+      );
+    }
+  });
+
+  if (!applied) {
+    return lines;
+  }
+
+  return normalizedLines;
+}
+
+type NormalizedScopeDraft = {
+  heading: string;
+  originalLabel: string;
+  title: string;
+  body: string[];
+};
+
+function collectNormalizedScopes(lines: string[]): { scopes: NormalizedScopeDraft[]; sawAliasScopeHeading: boolean } | null {
+  const scopes: NormalizedScopeDraft[] = [];
+  let currentScope: NormalizedScopeDraft | null = null;
+  let sawScope = false;
+  let sawAliasScopeHeading = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      if (currentScope !== null) {
+        currentScope.body.push(line);
+      }
+      continue;
+    }
+
+    const canonicalHeadingMatch = trimmed.match(SCOPE_HEADING_PATTERN);
+    if (canonicalHeadingMatch !== null) {
+      sawScope = true;
+      if (currentScope !== null) {
+        scopes.push(currentScope);
+      }
+
+      currentScope = {
+        heading: trimmed,
+        originalLabel: canonicalHeadingMatch[1] ?? '',
+        title: canonicalHeadingMatch[2]?.trim() ?? '',
+        body: [],
+      };
+      continue;
+    }
+
+    const aliasHeading = parseAliasScopeHeading(trimmed);
+    if (aliasHeading !== null) {
+      sawScope = true;
+      sawAliasScopeHeading = true;
+      if (currentScope !== null) {
+        scopes.push(currentScope);
+      }
+
+      currentScope = {
+        heading: trimmed,
+        originalLabel: aliasHeading.originalLabel,
+        title: aliasHeading.title,
+        body: [],
+      };
+      continue;
+    }
+
+    if (currentScope !== null) {
+      currentScope.body.push(line);
+      continue;
+    }
+
+    return null;
+  }
+
+  if (currentScope !== null) {
+    scopes.push(currentScope);
+  }
+
+  return sawScope ? { scopes, sawAliasScopeHeading } : null;
+}
+
+function parseAliasScopeHeading(trimmed: string): { originalLabel: string; title: string } | null {
+  const headingAliasMatch = trimmed.match(/^### Scope ([^:]+):(.*)$/);
+  if (headingAliasMatch !== null) {
+    const originalLabel = headingAliasMatch[1]?.trim() ?? '';
+    const title = headingAliasMatch[2]?.trim() ?? '';
+    if (originalLabel !== '' && !/^\d+$/.test(originalLabel) && title !== '') {
+      return { originalLabel, title };
+    }
+  }
+
+  const numberedAliasMatch = trimmed.match(/^\d+\.\s+Scope\s+([^:]+):\s*(.+)$/);
+  if (numberedAliasMatch !== null) {
+    const originalLabel = numberedAliasMatch[1]?.trim() ?? '';
+    const title = numberedAliasMatch[2]?.trim() ?? '';
+    if (originalLabel !== '' && title !== '') {
+      return { originalLabel, title };
+    }
+  }
+
+  return null;
+}
+
+function normalizeScopeBodyLine(
+  line: string,
+  originalLabel: string,
+  normalizedScopeNumber: number,
+  preserveOriginalScopeLabel: boolean,
+  onGoalAugmented: () => void,
+) {
+  const bulletMatch = line.match(/^(\s*-\s+)([^:]+):(.*)$/);
+  if (bulletMatch === null) {
+    return line;
+  }
+
+  const prefix = bulletMatch[1] ?? '- ';
+  const label = bulletMatch[2]?.trim() ?? '';
+  const rest = bulletMatch[3] ?? '';
+  const normalizedLabel = normalizeBulletLabel(label);
+  let normalizedRest = rest;
+
+  if (
+    preserveOriginalScopeLabel &&
+    normalizedLabel === 'Goal' &&
+    originalLabel !== String(normalizedScopeNumber) &&
+    !rest.includes(`Former derived scope ${originalLabel}`)
+  ) {
+    normalizedRest = ` (Former derived scope ${originalLabel})${rest}`;
+    onGoalAugmented();
+  }
+
+  return `${prefix}${normalizedLabel}:${normalizedRest}`;
+}
+
+function normalizeBulletLabel(label: string) {
+  const normalized = label.trim().toLowerCase();
+  if (normalized === 'goal') {
+    return 'Goal';
+  }
+  if (VERIFICATION_LABEL_ALIASES.has(normalized)) {
+    return 'Verification';
+  }
+  if (SUCCESS_CONDITION_LABEL_ALIASES.has(normalized)) {
+    return 'Success Condition';
+  }
+
+  return label.trim();
 }
 
 function validateExecutionShapeSection(
@@ -131,7 +405,11 @@ type ScopeSection = {
 };
 
 function findSection(lines: string[], header: string): SectionBounds | null {
-  const start = lines.findIndex((line) => line.trim() === header);
+  return findSectionByHeaders(lines, [header]);
+}
+
+function findSectionByHeaders(lines: string[], headers: string[]): SectionBounds | null {
+  const start = lines.findIndex((line) => headers.includes(line.trim()));
   if (start === -1) {
     return null;
   }

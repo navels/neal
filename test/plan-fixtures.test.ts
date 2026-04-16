@@ -32,15 +32,9 @@ test('fixture plans validate with their expected execution shape', async () => {
     const planDocument = await readFixture(fixture.fileName);
     const result = validatePlanDocument(planDocument);
 
-    assert.deepEqual(
-      result,
-      {
-        ok: true,
-        executionShape: fixture.expectedShape,
-        errors: [],
-      },
-      `fixture ${fixture.fileName} should validate as ${fixture.expectedShape}`,
-    );
+    assert.equal(result.ok, true, `fixture ${fixture.fileName} should validate successfully`);
+    assert.equal(result.executionShape, fixture.expectedShape);
+    assert.deepEqual(result.errors, []);
   }
 });
 

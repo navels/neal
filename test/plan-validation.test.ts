@@ -16,11 +16,10 @@ executionShape: one_shot
 Ship a focused change.
 `);
 
-  assert.deepEqual(result, {
-    ok: true,
-    executionShape: 'one_shot',
-    errors: [],
-  });
+  assert.equal(result.ok, true);
+  assert.equal(result.executionShape, 'one_shot');
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.normalization.applied, false);
 });
 
 test('accepts a valid multi-scope execution queue with case-insensitive bullets', () => {
@@ -45,11 +44,10 @@ executionShape: multi_scope
 - Success Condition: Missing headers and bullets fail deterministically.
 `);
 
-  assert.deepEqual(result, {
-    ok: true,
-    executionShape: 'multi_scope',
-    errors: [],
-  });
+  assert.equal(result.ok, true);
+  assert.equal(result.executionShape, 'multi_scope');
+  assert.deepEqual(result.errors, []);
+  assert.match(result.normalization.normalizedDocument, /- Goal: Cover failure cases\./);
 });
 
 test('rejects plans that omit the execution shape header', () => {
@@ -143,4 +141,117 @@ executionShape: multi_scope
   assert.equal(result.ok, false);
   assert.equal(result.executionShape, 'multi_scope');
   assert.match(result.errors.join('\n'), /Scope 1 is missing required bullet `- Verification:`/);
+});
+
+test('normalizes derived-plan queue aliases into the canonical execution queue shape', () => {
+  const result = validatePlanDocument(`
+# Derived Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Ordered Derived Scopes
+
+1. Scope 6.6A: Migrate cartridge-data-inputs to the native base
+- Goal: Move the implementation into the native base layer.
+- Verification strategy: \`pnpm typecheck\`
+- Exit criteria: The native base owns the migrated logic.
+
+2. Scope 6.6B: Remove the compatibility shim
+- Goal: Delete the temporary compatibility wrapper.
+- Verification strategy: \`pnpm exec tsx --test test/plan-validation.test.ts\`
+- Exit criteria: No compatibility wrapper remains.
+`);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.executionShape, 'multi_scope');
+  assert.equal(result.normalization.applied, true);
+  assert.match(result.normalization.normalizedDocument, /## Execution Queue/);
+  assert.match(
+    result.normalization.normalizedDocument,
+    /### Scope 1: Migrate cartridge-data-inputs to the native base/,
+  );
+  assert.match(
+    result.normalization.normalizedDocument,
+    /- Goal: \(Former derived scope 6\.6A\) Move the implementation into the native base layer\./,
+  );
+  assert.match(result.normalization.normalizedDocument, /- Verification: `pnpm typecheck`/);
+  assert.match(result.normalization.normalizedDocument, /- Success Condition: The native base owns the migrated logic\./);
+  assert.deepEqual(result.normalization.scopeLabelMappings, [
+    { normalizedScopeNumber: 1, originalScopeLabel: '6.6A' },
+    { normalizedScopeNumber: 2, originalScopeLabel: '6.6B' },
+  ]);
+});
+
+test('normalizes alias bullet labels inside canonical scope headings', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Normalize bullet aliases
+- Goal: Rewrite only the validator output shape.
+- Verification strategy: \`pnpm typecheck\`
+- Exit criteria: Review churn does not depend on bullet-label spelling.
+`);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.normalization.applied, true);
+  assert.match(result.normalization.normalizedDocument, /- Verification: `pnpm typecheck`/);
+  assert.match(
+    result.normalization.normalizedDocument,
+    /- Success Condition: Review churn does not depend on bullet-label spelling\./,
+  );
+});
+
+test('rejects one-shot plans even when an aliased execution queue header normalizes successfully', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: one_shot
+
+## Derived Execution Queue
+
+### Scope 1: Invalid
+- Goal: This should still fail.
+- Verification: \`pnpm typecheck\`
+- Success Condition: Validation rejects the queue.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'one_shot');
+  assert.equal(result.normalization.applied, true);
+  assert.match(result.errors.join('\n'), /must not include a `## Execution Queue` section/);
+});
+
+test('rejects ambiguous alias scopes that do not provide an unambiguous title', () => {
+  const result = validatePlanDocument(`
+# Derived Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Ordered Derived Scopes
+
+1. Scope 6.6A
+- Goal: This line is not enough to infer the canonical heading.
+- Verification strategy: \`pnpm typecheck\`
+- Exit criteria: Validation refuses to guess.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'multi_scope');
+  assert.equal(result.normalization.applied, true);
+  assert.match(
+    result.errors.join('\n'),
+    /`## Execution Queue` must contain at least one `### Scope N:` entry.|contains content before the first scope entry/,
+  );
 });
