@@ -48,6 +48,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
           '',
           `### ${finding.id}`,
           `- Canonical ID: ${finding.canonicalId}`,
+          `- Source: ${finding.source}`,
           `- Severity: ${finding.severity}`,
           `- Status: ${finding.status}`,
           `- Files: ${finding.files.join(', ') || 'n/a'}`,

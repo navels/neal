@@ -30,11 +30,13 @@ export type AgentConfig = {
 
 export type FindingSeverity = 'blocking' | 'non_blocking';
 export type FindingStatus = 'open' | 'fixed' | 'rejected' | 'deferred';
+export type ReviewFindingSource = 'reviewer' | 'plan_structure';
 
 export type ReviewFinding = {
   id: string;
   canonicalId: string;
   round: number;
+  source: ReviewFindingSource;
   severity: FindingSeverity;
   files: string[];
   claim: string;

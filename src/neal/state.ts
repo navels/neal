@@ -221,6 +221,7 @@ function hydrateFinding(value: unknown): ReviewFinding {
     id: typeof finding.id === 'string' ? finding.id : 'UNKNOWN',
     canonicalId: typeof finding.canonicalId === 'string' ? finding.canonicalId : typeof finding.id === 'string' ? finding.id : 'UNKNOWN',
     round: typeof finding.round === 'number' ? finding.round : 0,
+    source: finding.source === 'plan_structure' ? 'plan_structure' : 'reviewer',
     severity: finding.severity === 'non_blocking' ? 'non_blocking' : 'blocking',
     files: isStringArray(finding.files) ? finding.files : [],
     claim: typeof finding.claim === 'string' ? finding.claim : '',

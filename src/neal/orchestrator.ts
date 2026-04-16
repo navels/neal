@@ -35,12 +35,22 @@ import {
   squashCommits,
 } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
+import { validatePlanDocument } from './plan-validation.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
 import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, hasAcceptedDerivedPlan, isExecutingDerivedPlan } from './scopes.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
-import type { AgentConfig, CoderConsultRequest, FindingStatus, OrchestrationState, OrchestratorInit, ReviewFinding, ScopeMarker } from './types.js';
+import type {
+  AgentConfig,
+  CoderConsultRequest,
+  FindingStatus,
+  OrchestrationState,
+  OrchestratorInit,
+  ReviewFinding,
+  ReviewFindingSource,
+  ScopeMarker,
+} from './types.js';
 
 const execFile = promisify(execFileCallback);
 const WRAPPER_OWNED_PREFIXES = ['.neal/', '.forge/'];
@@ -53,6 +63,7 @@ function writeDiagnostic(message: string, logger?: RunLogger) {
 
 function formatReviewFindings(
   findings: Array<{
+    source?: ReviewFindingSource;
     severity: 'blocking' | 'non_blocking';
     files: string[];
     claim: string;
@@ -66,8 +77,9 @@ function formatReviewFindings(
   return findings
     .map((finding, index) => {
       const files = finding.files.length > 0 ? finding.files.join(', ') : 'n/a';
+      const source = finding.source ? ` [${finding.source}]` : '';
       return [
-        `  ${index + 1}. [${finding.severity}] ${finding.claim}`,
+        `  ${index + 1}. [${finding.severity}]${source} ${finding.claim}`,
         `     Files: ${files}`,
         `     Action: ${finding.requiredAction}`,
       ].join('\n');
@@ -79,6 +91,7 @@ function printReviewResult(
   kind: 'review' | 'plan-review',
   summary: string,
   findings: Array<{
+    source?: ReviewFindingSource;
     severity: 'blocking' | 'non_blocking';
     files: string[];
     claim: string;
@@ -95,6 +108,35 @@ function printReviewResult(
     formatReviewFindings(findings),
   ].join('\n');
   writeDiagnostic(`${message}\n`, logger);
+}
+
+type ReviewFindingInput = Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>;
+
+export async function synthesizePlanReviewFindings(args: {
+  planPath: string;
+  round: number;
+  roundSummary: string;
+  findings: ReviewFindingInput[];
+}): Promise<ReviewFindingInput[]> {
+  const planDocument = await readFile(args.planPath, 'utf8');
+  const validation = validatePlanDocument(planDocument);
+
+  if (validation.ok) {
+    return args.findings;
+  }
+
+  return [
+    ...args.findings,
+    ...validation.errors.map((error) => ({
+      round: args.round,
+      source: 'plan_structure' as const,
+      severity: 'blocking' as const,
+      files: [args.planPath],
+      claim: `Plan document structure is invalid: ${error}`,
+      requiredAction: 'Revise the plan document so it satisfies the required execution-shape and execution-queue contract.',
+      roundSummary: args.roundSummary,
+    })),
+  ];
 }
 
 function startPhaseHeartbeat(
@@ -1145,10 +1187,20 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
     throw error;
   }
 
-  printReviewResult('plan-review', claude.summary, claude.findings, logger);
+  const normalizedFindingInputs = await synthesizePlanReviewFindings({
+    planPath: getPlanReviewTargetPath(state),
+    round,
+    roundSummary: claude.summary,
+    findings: claude.findings.map((finding) => ({
+      ...finding,
+      source: finding.source,
+    })),
+  });
+
+  printReviewResult('plan-review', claude.summary, normalizedFindingInputs, logger);
 
   let nextCanonicalIndex = getNextCanonicalIndex(state.findings);
-  const findings = claude.findings.map((finding, index) => {
+  const findings = normalizedFindingInputs.map((finding, index) => {
     const canonicalId = findCanonicalId(state.findings, finding) ?? `C${nextCanonicalIndex++}`;
     return {
       ...finding,
@@ -1626,6 +1678,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
       verificationHint: buildVerificationHint(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
+        source: finding.source,
         claim: finding.claim,
         requiredAction: finding.requiredAction,
         severity: finding.severity,
@@ -1762,6 +1815,7 @@ async function runCoderOptionalResponsePhase(state: OrchestrationState, statePat
       verificationHint: buildVerificationHint(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
+        source: finding.source,
         claim: finding.claim,
         requiredAction: finding.requiredAction,
         severity: finding.severity,
@@ -1940,6 +1994,7 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
       planDoc: getPlanReviewTargetPath(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
+        source: finding.source,
         claim: finding.claim,
         requiredAction: finding.requiredAction,
         severity: finding.severity,
@@ -2036,6 +2091,7 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       planDoc: getPlanReviewTargetPath(state),
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
+        source: finding.source,
         claim: finding.claim,
         requiredAction: finding.requiredAction,
         severity: finding.severity,

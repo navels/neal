@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildPlanReviewerPrompt, buildPlanReviewerSchema, buildPlanningPrompt } from './agents.js';
+import { synthesizePlanReviewFindings } from './orchestrator.js';
 import { renderPlanProgressMarkdown } from './progress.js';
 import { renderReviewMarkdown } from './review.js';
 import { createInitialState, getDefaultAgentConfig, getSessionStatePath, loadState, saveState } from './state.js';
@@ -77,4 +78,80 @@ test('executionShape persists through state round-trip and wrapper artifacts', a
   assert.equal(loaded.executionShape, 'multi_scope');
   assert.match(renderPlanProgressMarkdown(loaded), /- Execution shape: multi_scope/);
   assert.match(renderReviewMarkdown(loaded), /- Execution shape: multi_scope/);
+});
+
+test('plan-review synthesis appends structural failures as blocking findings with a distinct source', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-plan-review-'));
+  const planDoc = join(root, 'PLAN.md');
+
+  await writeFile(
+    planDoc,
+    `# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+`,
+    'utf8',
+  );
+
+  const findings = await synthesizePlanReviewFindings({
+    planPath: planDoc,
+    round: 2,
+    roundSummary: 'Reviewer found one clarity issue.',
+    findings: [
+      {
+        round: 2,
+        source: 'reviewer',
+        severity: 'non_blocking',
+        files: ['src/neal/agents.ts'],
+        claim: 'Clarify one reviewer prompt sentence.',
+        requiredAction: 'Tighten the prompt wording.',
+        roundSummary: 'Reviewer found one clarity issue.',
+      },
+    ],
+  });
+
+  assert.equal(findings.length, 2);
+  assert.deepEqual(findings[0], {
+    round: 2,
+    source: 'reviewer',
+    severity: 'non_blocking',
+    files: ['src/neal/agents.ts'],
+    claim: 'Clarify one reviewer prompt sentence.',
+    requiredAction: 'Tighten the prompt wording.',
+    roundSummary: 'Reviewer found one clarity issue.',
+  });
+  assert.equal(findings[1]?.round, 2);
+  assert.equal(findings[1]?.source, 'plan_structure');
+  assert.equal(findings[1]?.severity, 'blocking');
+  assert.deepEqual(findings[1]?.files, [planDoc]);
+  assert.match(findings[1]?.claim ?? '', /Plan document structure is invalid/);
+  assert.match(findings[1]?.claim ?? '', /requires a `## Execution Queue` section/);
+  assert.equal(findings[1]?.roundSummary, 'Reviewer found one clarity issue.');
+});
+
+test('plan-review synthesis leaves valid plans without synthetic findings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-plan-review-'));
+  const planDoc = join(root, 'PLAN.md');
+
+  await writeFile(
+    planDoc,
+    `# Example Plan
+
+## Execution Shape
+
+executionShape: one_shot
+`,
+    'utf8',
+  );
+
+  const findings = await synthesizePlanReviewFindings({
+    planPath: planDoc,
+    round: 1,
+    roundSummary: 'Looks good.',
+    findings: [],
+  });
+
+  assert.deepEqual(findings, []);
 });

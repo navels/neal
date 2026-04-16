@@ -315,6 +315,7 @@ export async function runReviewerRound(args: {
     summary: structured.summary,
     findings: structured.findings.map((finding) => ({
       round: args.round,
+      source: 'reviewer' as const,
       severity: finding.severity,
       files: finding.files,
       claim: finding.claim,
@@ -422,6 +423,7 @@ export async function runPlanReviewerRound(args: {
     executionShape: structured.executionShape,
     findings: structured.findings.map((finding) => ({
       round: args.round,
+      source: 'reviewer' as const,
       severity: finding.severity,
       files: finding.files,
       claim: finding.claim,
@@ -742,7 +744,7 @@ export async function runCoderPlanResponseRound(args: {
   coder: AgentRoleConfig;
   cwd: string;
   planDoc: string;
-  openFindings: Pick<ReviewFinding, 'id' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
+  openFindings: Pick<ReviewFinding, 'id' | 'source' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   mode?: 'blocking' | 'optional';
   sessionHandle: string;
   reviewMode?: 'plan' | 'derived-plan';
