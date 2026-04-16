@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { validatePlanDocument } from './plan-validation.js';
+import { validatePlanDocument } from '../src/neal/plan-validation.js';
 
 test('accepts a valid one-shot plan document', () => {
   const result = validatePlanDocument(`
@@ -41,7 +41,7 @@ executionShape: multi_scope
 
 ### Scope 2: Add tests
 - GOAL: Cover failure cases.
-- Verification: \`tsx --test src/neal/plan-validation.test.ts\`
+- Verification: \`tsx --test test/plan-validation.test.ts\`
 - Success Condition: Missing headers and bullets fail deterministically.
 `);
 

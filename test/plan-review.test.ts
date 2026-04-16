@@ -4,11 +4,11 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildPlanReviewerPrompt, buildPlanReviewerSchema, buildPlanningPrompt } from './agents.js';
-import { synthesizePlanReviewFindings } from './orchestrator.js';
-import { renderPlanProgressMarkdown } from './progress.js';
-import { renderReviewMarkdown } from './review.js';
-import { createInitialState, getDefaultAgentConfig, getSessionStatePath, loadState, saveState } from './state.js';
+import { buildPlanReviewerPrompt, buildPlanReviewerSchema, buildPlanningPrompt } from '../src/neal/agents.js';
+import { synthesizePlanReviewFindings } from '../src/neal/orchestrator.js';
+import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
+import { renderReviewMarkdown } from '../src/neal/review.js';
+import { createInitialState, getDefaultAgentConfig, getSessionStatePath, loadState, saveState } from '../src/neal/state.js';
 
 function hasTopLevelRequiredProperty(schema: ReturnType<typeof buildPlanReviewerSchema>, key: string) {
   return Array.isArray(schema.required) && schema.required.includes(key);

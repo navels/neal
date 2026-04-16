@@ -88,7 +88,7 @@ neal --execute notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md
 neal --summaries
 ```
 
-The sandbox scope is intentionally limited to `src/testing-fixture/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the scope queue.
+The sandbox scope is intentionally limited to `src/sandbox-helpers/**` and `notes/testing/**`. See [`notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md) for the rules and [`notes/testing/SANDBOX_BACKLOG.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/SANDBOX_BACKLOG.md) for the scope queue.
 
 Use [`notes/testing/NEAL_ONE_SHOT_PLAN.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/NEAL_ONE_SHOT_PLAN.md) when you want a small single-scope validation plan instead of the backlog-style fixture.
 Use [`notes/testing/NEAL_PLAN_DRAFT.md`](/Users/lee.nave/code/personal/codex-chunked/notes/testing/NEAL_PLAN_DRAFT.md) when you want to exercise the non-interactive planning loop.

@@ -2,4 +2,4 @@
 
 This directory exists only for local end-to-end testing of `neal`.
 
-The exported helpers in `src/testing-fixture/` should stay small, deterministic, and easy for Claude to review. Keep examples short and focused on edge cases that are plausible for review comments.
+The exported helpers in `src/sandbox-helpers/` should stay small, deterministic, and easy for Claude to review. Keep examples short and focused on edge cases that are plausible for review comments.

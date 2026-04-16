@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { synthesizePlanReviewFindings } from './orchestrator.js';
-import { validatePlanDocument } from './plan-validation.js';
-import type { ExecutionShape } from './types.js';
+import { synthesizePlanReviewFindings } from '../src/neal/orchestrator.js';
+import { validatePlanDocument } from '../src/neal/plan-validation.js';
+import type { ExecutionShape } from '../src/neal/types.js';
 
 type FixtureExpectation = {
   fileName: string;
@@ -20,7 +20,7 @@ const PLAN_FIXTURES: FixtureExpectation[] = [
 ];
 
 function getFixturePath(fileName: string) {
-  return fileURLToPath(new URL(`./test-fixtures/execution-shape/${fileName}`, import.meta.url));
+  return fileURLToPath(new URL(`./fixtures/plans/execution-shape/${fileName}`, import.meta.url));
 }
 
 async function readFixture(fileName: string) {
@@ -65,7 +65,7 @@ test('already-good fixture keeps reviewer findings intact without structural chu
     round: 2,
     source: 'reviewer' as const,
     severity: 'non_blocking' as const,
-    files: ['src/neal/plan-fixtures.test.ts'],
+    files: ['test/plan-fixtures.test.ts'],
     claim: 'Consider tightening one verification description.',
     requiredAction: 'Shorten one fixture verification sentence.',
     roundSummary: 'Minor wording suggestion only.',

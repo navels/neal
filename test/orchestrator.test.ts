@@ -12,11 +12,11 @@ import {
   flushDerivedPlanNotifications,
   loadOrInitialize,
   runFinalSquashPhase,
-} from './orchestrator.js';
-import { renderPlanProgressMarkdown } from './progress.js';
-import { renderReviewMarkdown } from './review.js';
-import { createInitialState, getDefaultAgentConfig, saveState } from './state.js';
-import type { OrchestrationState } from './types.js';
+} from '../src/neal/orchestrator.js';
+import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
+import { renderReviewMarkdown } from '../src/neal/review.js';
+import { createInitialState, getDefaultAgentConfig, saveState } from '../src/neal/state.js';
+import type { OrchestrationState } from '../src/neal/types.js';
 
 const execFileAsync = promisify(execFile);
 const originalNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;

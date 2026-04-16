@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && pnpm link --global",
     "start": "tsx src/neal/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.101",
