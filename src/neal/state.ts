@@ -253,6 +253,10 @@ function hydrateRound(value: unknown): ReviewRound {
       typeof (round as { reviewerSessionHandle?: unknown }).reviewerSessionHandle === 'string'
         ? (round as { reviewerSessionHandle: string }).reviewerSessionHandle
         : null,
+    reviewedPlanPath:
+      typeof (round as { reviewedPlanPath?: unknown }).reviewedPlanPath === 'string'
+        ? (round as { reviewedPlanPath: string }).reviewedPlanPath
+        : null,
     commitRange: {
       base: typeof round.commitRange?.base === 'string' ? round.commitRange.base : '',
       head: typeof round.commitRange?.head === 'string' ? round.commitRange.head : '',

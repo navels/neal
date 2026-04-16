@@ -127,19 +127,25 @@ export async function synthesizePlanReviewFindings(args: {
   round: number;
   roundSummary: string;
   findings: ReviewFindingInput[];
-}): Promise<{ executionShape: OrchestrationState['executionShape']; findings: ReviewFindingInput[] }> {
+}): Promise<{
+  executionShape: OrchestrationState['executionShape'];
+  reviewedPlanPath: string;
+  findings: ReviewFindingInput[];
+}> {
   const planDocument = await readFile(args.planPath, 'utf8');
   const validation = validatePlanDocument(planDocument);
 
   if (validation.ok) {
     return {
       executionShape: validation.executionShape,
+      reviewedPlanPath: args.planPath,
       findings: args.findings,
     };
   }
 
   return {
     executionShape: validation.executionShape,
+    reviewedPlanPath: args.planPath,
     findings: [
       ...args.findings,
       ...validation.errors.map((error) => ({
@@ -847,6 +853,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
       {
         round,
         reviewerSessionHandle: claude.sessionHandle,
+        reviewedPlanPath: getExecutionPlanPath(state),
         commitRange: {
           base: state.baseCommit,
           head: headCommit,
@@ -881,12 +888,13 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const round = state.rounds.length + 1;
   const derivedPlanReview = isDerivedPlanReviewState(state);
   const roundLimit = getPlanReviewRoundLimit(state);
+  const reviewTargetPath = getPlanReviewTargetPath(state);
   let claude;
   try {
     claude = await runPlanReviewerRound({
       reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
-      planDoc: getPlanReviewTargetPath(state),
+      planDoc: reviewTargetPath,
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
       mode: derivedPlanReview ? 'derived-plan' : 'plan',
@@ -917,7 +925,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   }
 
   const synthesizedReview = await synthesizePlanReviewFindings({
-    planPath: getPlanReviewTargetPath(state),
+    planPath: reviewTargetPath,
     round,
     roundSummary: claude.summary,
     findings: claude.findings.map((finding) => ({
@@ -986,6 +994,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       {
         round,
         reviewerSessionHandle: claude.sessionHandle,
+        reviewedPlanPath: synthesizedReview.reviewedPlanPath,
         commitRange: {
           base: state.baseCommit ?? '',
           head: state.finalCommit ?? state.baseCommit ?? '',

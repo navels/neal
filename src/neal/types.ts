@@ -50,6 +50,7 @@ export type ReviewFinding = {
 export type ReviewRound = {
   round: number;
   reviewerSessionHandle: string | null;
+  reviewedPlanPath: string | null;
   commitRange: {
     base: string;
     head: string;

@@ -157,6 +157,7 @@ executionShape: multi_scope
   });
 
   assert.equal(synthesis.executionShape, 'multi_scope');
+  assert.equal(synthesis.reviewedPlanPath, planDoc);
   assert.equal(synthesis.findings.length, 2);
   assert.deepEqual(synthesis.findings[0], {
     round: 2,
@@ -199,6 +200,7 @@ executionShape: one_shot
   });
 
   assert.equal(synthesis.executionShape, 'one_shot');
+  assert.equal(synthesis.reviewedPlanPath, planDoc);
   assert.deepEqual(synthesis.findings, []);
 });
 
@@ -232,5 +234,6 @@ executionShape: multi_scope
   });
 
   assert.equal(synthesis.executionShape, 'multi_scope');
+  assert.equal(synthesis.reviewedPlanPath, planDoc);
   assert.deepEqual(synthesis.findings, []);
 });

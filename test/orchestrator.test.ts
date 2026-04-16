@@ -262,6 +262,7 @@ test('accepted derived plans reject adoption after derived execution has already
       {
         round: 1,
         reviewerSessionHandle: 'reviewer-session-2',
+        reviewedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
         commitRange: { base: 'abc123', head: 'abc123' },
         openBlockingCanonicalCount: 0,
         findings: [],
@@ -343,6 +344,7 @@ test('accepted derived plans adopt only from the pre-execution adoption phase', 
       {
         round: 1,
         reviewerSessionHandle: 'reviewer-session-2',
+        reviewedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
         commitRange: { base: 'abc123', head: 'abc123' },
         openBlockingCanonicalCount: 0,
         findings: [],
@@ -877,6 +879,19 @@ test('review and progress reports expose derived-plan audit linkage', async () =
     derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_3.md',
     derivedPlanStatus: 'pending_review',
     derivedFromScopeNumber: 3,
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-1',
+        reviewedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_3.md',
+        commitRange: {
+          base: 'abc123',
+          head: 'abc123',
+        },
+        openBlockingCanonicalCount: 1,
+        findings: ['R1-F1'],
+      },
+    ],
     completedScopes: [
       {
         number: '3',
@@ -899,6 +914,9 @@ test('review and progress reports expose derived-plan audit linkage', async () =
   const progressMarkdown = renderPlanProgressMarkdown(state);
 
   assert.match(reviewMarkdown, /Review target: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
+  assert.match(reviewMarkdown, /Last reviewed artifact: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
+  assert.match(reviewMarkdown, /### Round 1/);
+  assert.match(reviewMarkdown, /Reviewed artifact: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
   assert.match(reviewMarkdown, /Derived from scope: 3/);
   assert.match(reviewMarkdown, /Discarded WIP artifact: .*SCOPE_3_DISCARDED\.diff/);
   assert.match(progressMarkdown, /Parent scope: none/);

@@ -14,12 +14,14 @@ function getDiscardedDiffPath(state: OrchestrationState) {
 
 export function renderReviewMarkdown(state: OrchestrationState) {
   const reviewTarget = state.derivedPlanPath ?? getExecutionPlanPath(state);
+  const lastReviewedPlanPath = state.rounds.at(-1)?.reviewedPlanPath ?? null;
   const lines = [
     '# Review Session',
     '',
     '## Metadata',
     `- Plan: ${state.planDoc}`,
     `- Review target: ${reviewTarget}`,
+    `- Last reviewed artifact: ${lastReviewedPlanPath ?? 'pending'}`,
     `- Scope: ${getCurrentScopeLabel(state)}`,
     `- Phase: ${state.phase}`,
     `- Execution shape: ${state.executionShape ?? 'pending'}`,
@@ -32,8 +34,28 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     `- Derived from scope: ${state.derivedFromScopeNumber ?? 'none'}`,
     `- Discarded WIP artifact: ${getDiscardedDiffPath(state) ?? 'none'}`,
     '',
-    '## Findings',
+    '## Review Rounds',
   ];
+
+  if (state.rounds.length === 0) {
+    lines.push('', 'No review rounds yet.');
+  } else {
+    for (const round of state.rounds) {
+      lines.push(
+        '',
+        `### Round ${round.round}`,
+        `- Reviewed artifact: ${round.reviewedPlanPath ?? 'unknown'}`,
+        `- Reviewer session: ${round.reviewerSessionHandle ?? 'pending'}`,
+        `- Open blocking canonicals: ${round.openBlockingCanonicalCount}`,
+        `- Findings: ${round.findings.join(', ') || 'none'}`,
+      );
+    }
+  }
+
+  lines.push(
+    '',
+    '## Findings',
+  );
 
   if (state.findings.length === 0) {
     lines.push('', 'No findings yet.');
