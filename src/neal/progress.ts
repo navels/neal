@@ -8,7 +8,14 @@ type InteractiveBlockedRecoverySummary = {
   sourcePhase: NonNullable<OrchestrationState['interactiveBlockedRecovery']>['sourcePhase'];
   blockedReason: string;
   turns: number;
+  handledTurns: number;
   remainingTurns: number;
+};
+
+type InteractiveBlockedRecoveryHistorySummary = {
+  sessions: number;
+  lastAction: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resolvedByAction'] | null;
+  lastResultPhase: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resultPhase'] | null;
 };
 
 type PlanProgressState = {
@@ -31,6 +38,7 @@ type PlanProgressState = {
     derivedPlanDepth: number;
   } | null;
   interactiveBlockedRecovery: InteractiveBlockedRecoverySummary | null;
+  interactiveBlockedRecoveryHistory: InteractiveBlockedRecoveryHistorySummary | null;
   completedScopes: OrchestrationState['completedScopes'];
 };
 
@@ -62,12 +70,21 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
           sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
           blockedReason: state.interactiveBlockedRecovery.blockedReason,
           turns: state.interactiveBlockedRecovery.turns.length,
+          handledTurns: state.interactiveBlockedRecovery.lastHandledTurn,
           remainingTurns: Math.max(
             state.interactiveBlockedRecovery.maxTurns - state.interactiveBlockedRecovery.turns.length,
             0,
           ),
         }
       : null,
+    interactiveBlockedRecoveryHistory:
+      state.interactiveBlockedRecoveryHistory.length > 0
+        ? {
+            sessions: state.interactiveBlockedRecoveryHistory.length,
+            lastAction: state.interactiveBlockedRecoveryHistory.at(-1)?.resolvedByAction ?? null,
+            lastResultPhase: state.interactiveBlockedRecoveryHistory.at(-1)?.resultPhase ?? null,
+          }
+        : null,
     completedScopes: state.completedScopes,
   };
 }
@@ -107,7 +124,18 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Source phase: ${progress.interactiveBlockedRecovery.sourcePhase}`,
       `- Blocked reason: ${progress.interactiveBlockedRecovery.blockedReason}`,
       `- Recorded turns: ${progress.interactiveBlockedRecovery.turns}`,
+      `- Handled turns: ${progress.interactiveBlockedRecovery.handledTurns}`,
       `- Remaining turns: ${progress.interactiveBlockedRecovery.remainingTurns}`,
+    );
+  }
+
+  if (progress.interactiveBlockedRecoveryHistory) {
+    lines.push(
+      '',
+      '## Interactive Blocked Recovery History',
+      `- Sessions: ${progress.interactiveBlockedRecoveryHistory.sessions}`,
+      `- Latest action: ${progress.interactiveBlockedRecoveryHistory.lastAction ?? 'none'}`,
+      `- Latest result phase: ${progress.interactiveBlockedRecoveryHistory.lastResultPhase ?? 'none'}`,
     );
   }
 

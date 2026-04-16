@@ -3,6 +3,56 @@ import { dirname } from 'node:path';
 
 import type { OrchestrationState } from './types.js';
 
+function appendInteractiveBlockedRecoverySection(
+  lines: string[],
+  title: string,
+  recovery: NonNullable<OrchestrationState['interactiveBlockedRecovery']> | OrchestrationState['interactiveBlockedRecoveryHistory'][number],
+  options?: {
+    resolvedAt?: string;
+    resolvedByAction?: string;
+    resultPhase?: string;
+  },
+) {
+  lines.push(
+    '',
+    title,
+    `- Source phase: ${recovery.sourcePhase}`,
+    `- Blocked reason: ${recovery.blockedReason}`,
+    `- Max turns: ${recovery.maxTurns}`,
+  );
+
+  if (options?.resolvedAt && options.resolvedByAction && options.resultPhase) {
+    lines.push(
+      `- Resolved at: ${options.resolvedAt}`,
+      `- Resolution: ${options.resolvedByAction}`,
+      `- Result phase: ${options.resultPhase}`,
+    );
+  }
+
+  if (recovery.turns.length === 0) {
+    lines.push('- Operator guidance: pending');
+    return;
+  }
+
+  for (const turn of recovery.turns) {
+    lines.push(
+      `- Recovery turn ${turn.number} at ${turn.recordedAt}: ${turn.operatorGuidance}`,
+    );
+
+    if (turn.disposition) {
+      lines.push(
+        `- Recovery turn ${turn.number} coder action: ${turn.disposition.action}`,
+        `- Recovery turn ${turn.number} coder summary: ${turn.disposition.summary}`,
+        `- Recovery turn ${turn.number} coder blocker: ${turn.disposition.blocker || 'n/a'}`,
+        `- Recovery turn ${turn.number} coder rationale: ${turn.disposition.rationale}`,
+        `- Recovery turn ${turn.number} resulting phase: ${turn.disposition.resultingPhase}`,
+      );
+    } else {
+      lines.push(`- Recovery turn ${turn.number} coder response: pending`);
+    }
+  }
+}
+
 export function renderConsultMarkdown(state: OrchestrationState) {
   const lines = [
     '# Consult Session',
@@ -17,22 +67,16 @@ export function renderConsultMarkdown(state: OrchestrationState) {
   ];
 
   if (state.interactiveBlockedRecovery) {
-    lines.push(
-      '',
-      '## Interactive Blocked Recovery',
-      `- Source phase: ${state.interactiveBlockedRecovery.sourcePhase}`,
-      `- Blocked reason: ${state.interactiveBlockedRecovery.blockedReason}`,
-      `- Max turns: ${state.interactiveBlockedRecovery.maxTurns}`,
-    );
+    appendInteractiveBlockedRecoverySection(lines, '## Interactive Blocked Recovery', state.interactiveBlockedRecovery);
+  }
 
-    if (state.interactiveBlockedRecovery.turns.length === 0) {
-      lines.push('- Operator guidance: pending');
-    } else {
-      for (const turn of state.interactiveBlockedRecovery.turns) {
-        lines.push(
-          `- Recovery turn ${turn.number} at ${turn.recordedAt}: ${turn.operatorGuidance}`,
-        );
-      }
+  if (state.interactiveBlockedRecoveryHistory.length > 0) {
+    for (const [index, recovery] of state.interactiveBlockedRecoveryHistory.entries()) {
+      appendInteractiveBlockedRecoverySection(lines, `## Interactive Blocked Recovery History ${index + 1}`, recovery, {
+        resolvedAt: recovery.resolvedAt,
+        resolvedByAction: recovery.resolvedByAction,
+        resultPhase: recovery.resultPhase,
+      });
     }
   }
 

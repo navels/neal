@@ -257,6 +257,43 @@ test('resume preserves interactive blocked recovery state without resuming execu
   assert.equal(state.interactiveBlockedRecovery?.turns.length, 0);
 });
 
+test('resume restores failed interactive blocked recovery state and rewrites artifacts', async () => {
+  const { cwd, statePath, state: savedState } = await createResumeFixture({
+    currentScopeNumber: 2,
+    phase: 'interactive_blocked_recovery',
+    status: 'failed',
+    blockedFromPhase: 'coder_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need operator guidance',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Keep the scope and avoid infrastructure edits.',
+          disposition: null,
+        },
+      ],
+    },
+  });
+
+  const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(state.phase, 'interactive_blocked_recovery');
+  assert.equal(state.status, 'running');
+  assert.equal(state.interactiveBlockedRecovery?.blockedReason, 'Need operator guidance');
+  assert.equal(state.interactiveBlockedRecovery?.turns.length, 1);
+
+  const consultMarkdown = await readFile(savedState.consultMarkdownPath, 'utf8');
+  assert.match(consultMarkdown, /Keep the scope and avoid infrastructure edits\./);
+
+  const progressMarkdown = await readFile(savedState.progressMarkdownPath, 'utf8');
+  assert.match(progressMarkdown, /## Interactive Blocked Recovery/);
+  assert.match(progressMarkdown, /Handled turns: 0/);
+});
+
 test('recordInteractiveBlockedRecoveryGuidance persists operator recovery input and artifacts', async () => {
   const { statePath, state } = await createResumeFixture({
     currentScopeNumber: 3,
@@ -319,6 +356,7 @@ test('interactive blocked recovery resumes through the next ordinary coder path'
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Apply the reviewer feedback and continue this scope.',
+          disposition: null,
         },
       ],
     },
@@ -342,6 +380,9 @@ test('interactive blocked recovery resumes through the next ordinary coder path'
   assert.equal(nextState.blockedFromPhase, null);
   assert.equal(nextState.coderSessionHandle, 'coder-session-4b');
   assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 1);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resolvedByAction, 'resume_current_scope');
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resultPhase, 'coder_response');
 });
 
 test('interactive blocked recovery can route replacement through split-plan machinery', async () => {
@@ -367,6 +408,7 @@ test('interactive blocked recovery can route replacement through split-plan mach
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this scope with a narrower derived plan.',
+          disposition: null,
         },
       ],
     },
@@ -389,6 +431,8 @@ test('interactive blocked recovery can route replacement through split-plan mach
   assert.equal(nextState.phase, 'reviewer_plan');
   assert.equal(nextState.status, 'running');
   assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 1);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resolvedByAction, 'replace_current_scope');
   assert.equal(nextState.derivedPlanStatus, 'pending_review');
   assert.equal(nextState.derivedFromScopeNumber, 6);
 });
@@ -410,6 +454,7 @@ test('interactive blocked recovery can remain paused after a handled turn', asyn
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Do not touch infrastructure, only local code.',
+          disposition: null,
         },
       ],
     },
@@ -436,6 +481,8 @@ test('interactive blocked recovery can remain paused after a handled turn', asyn
     nextState.interactiveBlockedRecovery?.blockedReason,
     'Need a concrete yes/no on whether credentials can be rotated in this scope.',
   );
+  assert.equal(nextState.interactiveBlockedRecovery?.turns[0]?.disposition?.action, 'stay_blocked');
+  assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 0);
 });
 
 test('interactive blocked recovery can finalize into a terminal blocked run', async () => {
@@ -455,6 +502,7 @@ test('interactive blocked recovery can finalize into a terminal blocked run', as
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Try one more time with the same repository constraints.',
+          disposition: null,
         },
       ],
     },
@@ -477,8 +525,14 @@ test('interactive blocked recovery can finalize into a terminal blocked run', as
   assert.equal(nextState.status, 'blocked');
   assert.equal(nextState.blockedFromPhase, 'coder_scope');
   assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 1);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resolvedByAction, 'terminal_block');
   assert.equal(nextState.completedScopes.at(-1)?.result, 'blocked');
   assert.match(nextState.completedScopes.at(-1)?.blocker ?? '', /External credentials must be provisioned/);
+
+  const consultMarkdown = await readFile(state.consultMarkdownPath, 'utf8');
+  assert.match(consultMarkdown, /## Interactive Blocked Recovery History 1/);
+  assert.match(consultMarkdown, /Recovery turn 1 coder action: terminal_block/);
 });
 
 test('resume keeps derived-plan reviewer rounds runnable after failure normalization', async () => {

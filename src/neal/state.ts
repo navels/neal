@@ -5,6 +5,7 @@ import type {
   AgentConfig,
   AgentProvider,
   ConsultRound,
+  InteractiveBlockedRecoveryRecord,
   InteractiveBlockedRecoveryState,
   OrchestrationState,
   OrchestratorInit,
@@ -110,6 +111,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     maxConsultsPerScope: 4,
     blockedFromPhase: null,
     interactiveBlockedRecovery: null,
+    interactiveBlockedRecoveryHistory: [],
     status: 'running',
   };
 }
@@ -293,8 +295,59 @@ function hydrateInteractiveBlockedRecovery(value: unknown): InteractiveBlockedRe
             number: turn.number,
             recordedAt: turn.recordedAt,
             operatorGuidance: turn.operatorGuidance,
+            disposition:
+              turn.disposition &&
+              typeof turn.disposition === 'object' &&
+              typeof turn.disposition.recordedAt === 'string' &&
+              typeof turn.disposition.summary === 'string' &&
+              typeof turn.disposition.rationale === 'string' &&
+              typeof turn.disposition.blocker === 'string' &&
+              typeof turn.disposition.replacementPlan === 'string' &&
+              typeof turn.disposition.resultingPhase === 'string' &&
+              (
+                turn.disposition.action === 'resume_current_scope' ||
+                turn.disposition.action === 'replace_current_scope' ||
+                turn.disposition.action === 'stay_blocked' ||
+                turn.disposition.action === 'terminal_block'
+              )
+                ? {
+                    recordedAt: turn.disposition.recordedAt,
+                    sessionHandle: typeof turn.disposition.sessionHandle === 'string' ? turn.disposition.sessionHandle : null,
+                    action: turn.disposition.action,
+                    summary: turn.disposition.summary,
+                    rationale: turn.disposition.rationale,
+                    blocker: turn.disposition.blocker,
+                    replacementPlan: turn.disposition.replacementPlan,
+                    resultingPhase: turn.disposition.resultingPhase,
+                  }
+                : null,
           }))
       : [],
+  };
+}
+
+function hydrateInteractiveBlockedRecoveryRecord(value: unknown): InteractiveBlockedRecoveryRecord {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Invalid session state: malformed interactive blocked recovery history');
+  }
+
+  const record = value as Partial<InteractiveBlockedRecoveryRecord>;
+  const hydratedRecovery = hydrateInteractiveBlockedRecovery(record);
+  if (!hydratedRecovery) {
+    throw new Error('Invalid session state: malformed interactive blocked recovery history');
+  }
+
+  return {
+    ...hydratedRecovery,
+    resolvedAt: typeof record.resolvedAt === 'string' ? record.resolvedAt : new Date(0).toISOString(),
+    resolvedByAction:
+      record.resolvedByAction === 'resume_current_scope' ||
+      record.resolvedByAction === 'replace_current_scope' ||
+      record.resolvedByAction === 'stay_blocked' ||
+      record.resolvedByAction === 'terminal_block'
+        ? record.resolvedByAction
+        : 'terminal_block',
+    resultPhase: typeof record.resultPhase === 'string' ? record.resultPhase : 'blocked',
   };
 }
 
@@ -474,6 +527,11 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
     interactiveBlockedRecovery: hydrateInteractiveBlockedRecovery(
       (parsed as { interactiveBlockedRecovery?: unknown }).interactiveBlockedRecovery,
     ),
+    interactiveBlockedRecoveryHistory: Array.isArray((parsed as { interactiveBlockedRecoveryHistory?: unknown }).interactiveBlockedRecoveryHistory)
+      ? (parsed as { interactiveBlockedRecoveryHistory: unknown[] }).interactiveBlockedRecoveryHistory.map(
+          hydrateInteractiveBlockedRecoveryRecord,
+        )
+      : [],
   };
 }
 

@@ -107,6 +107,17 @@ export type CoderBlockedRecoveryDisposition = {
   replacementPlan: string;
 };
 
+export type InteractiveBlockedRecoveryTurnDisposition = {
+  recordedAt: string;
+  sessionHandle: string | null;
+  action: InteractiveBlockedRecoveryAction;
+  summary: string;
+  rationale: string;
+  blocker: string;
+  replacementPlan: string;
+  resultingPhase: OrchestrationPhase;
+};
+
 export type ConsultRound = {
   number: number;
   sourcePhase: 'coder_scope' | 'coder_response';
@@ -121,6 +132,7 @@ export type InteractiveBlockedRecoveryTurn = {
   number: number;
   recordedAt: string;
   operatorGuidance: string;
+  disposition: InteractiveBlockedRecoveryTurnDisposition | null;
 };
 
 export type InteractiveBlockedRecoveryState = {
@@ -130,6 +142,12 @@ export type InteractiveBlockedRecoveryState = {
   maxTurns: number;
   lastHandledTurn: number;
   turns: InteractiveBlockedRecoveryTurn[];
+};
+
+export type InteractiveBlockedRecoveryRecord = InteractiveBlockedRecoveryState & {
+  resolvedAt: string;
+  resolvedByAction: InteractiveBlockedRecoveryAction;
+  resultPhase: OrchestrationPhase;
 };
 
 export type ProgressScope = {
@@ -190,6 +208,7 @@ export type OrchestrationState = {
   maxConsultsPerScope: number;
   blockedFromPhase: OrchestrationPhase | null;
   interactiveBlockedRecovery: InteractiveBlockedRecoveryState | null;
+  interactiveBlockedRecoveryHistory: InteractiveBlockedRecoveryRecord[];
   status: 'running' | 'done' | 'blocked' | 'failed';
 };
 

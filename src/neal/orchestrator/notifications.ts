@@ -12,6 +12,17 @@ async function notifyBlocked(state: OrchestrationState, reason: string, logger?:
   await notify('blocked', `[neal] ${planName}: ${reason}`);
 }
 
+async function notifyInteractiveBlockedRecovery(state: OrchestrationState, reason: string, logger?: RunLogger) {
+  const planName = basename(state.planDoc);
+  const scopeLabel = getCurrentScopeLabel(state);
+  await logger?.event('notify.interactive_blocked_recovery', {
+    reason,
+    planName,
+    scopeNumber: scopeLabel,
+  });
+  await notify('retry', `[neal] ${planName}: interactive blocked recovery for scope ${scopeLabel}: ${reason}`);
+}
+
 async function notifyComplete(state: OrchestrationState, message: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
   await logger?.event('notify.complete', { message, planName });
@@ -139,6 +150,7 @@ export {
   notifyComplete,
   notifyDerivedPlanAccepted,
   notifyDerivedPlanFailed,
+  notifyInteractiveBlockedRecovery,
   notifyRetry,
   notifyScopeAccepted,
   notifySplitPlanRejected,

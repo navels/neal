@@ -34,6 +34,7 @@ import {
   flushDerivedPlanNotifications,
   notifyBlocked,
   notifyComplete,
+  notifyInteractiveBlockedRecovery,
   notifyRetry,
   notifyScopeAccepted,
 } from './orchestrator/notifications.js';
@@ -499,6 +500,7 @@ export async function recordInteractiveBlockedRecoveryGuidance(
           number: turns.length + 1,
           recordedAt: new Date().toISOString(),
           operatorGuidance: trimmedGuidance,
+          disposition: null,
         },
       ],
     },
@@ -532,6 +534,70 @@ function hasPendingInteractiveBlockedRecoveryTurn(state: OrchestrationState) {
   }
 
   return state.interactiveBlockedRecovery.turns.length > state.interactiveBlockedRecovery.lastHandledTurn;
+}
+
+function withRecordedInteractiveBlockedRecoveryDisposition(
+  state: OrchestrationState,
+  disposition: CoderBlockedRecoveryDisposition,
+  sessionHandle: string | null,
+  resultingPhase: OrchestrationState['phase'],
+) {
+  if (!state.interactiveBlockedRecovery) {
+    return state;
+  }
+
+  const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
+  if (!latestTurn) {
+    return state;
+  }
+
+  return {
+    ...state,
+    interactiveBlockedRecovery: {
+      ...state.interactiveBlockedRecovery,
+      turns: state.interactiveBlockedRecovery.turns.map((turn) =>
+        turn.number === latestTurn.number
+          ? {
+              ...turn,
+              disposition: {
+                recordedAt: new Date().toISOString(),
+                sessionHandle,
+                action: disposition.action,
+                summary: disposition.summary,
+                rationale: disposition.rationale,
+                blocker: disposition.blocker.trim(),
+                replacementPlan: disposition.replacementPlan.trim(),
+                resultingPhase,
+              },
+            }
+          : turn,
+      ),
+    },
+  };
+}
+
+function finalizeInteractiveBlockedRecovery(
+  state: OrchestrationState,
+  action: CoderBlockedRecoveryDisposition['action'],
+  resultPhase: OrchestrationState['phase'],
+) {
+  if (!state.interactiveBlockedRecovery) {
+    return state;
+  }
+
+  return {
+    ...state,
+    interactiveBlockedRecovery: null,
+    interactiveBlockedRecoveryHistory: [
+      ...state.interactiveBlockedRecoveryHistory,
+      {
+        ...state.interactiveBlockedRecovery,
+        resolvedAt: new Date().toISOString(),
+        resolvedByAction: action,
+        resultPhase,
+      },
+    ],
+  };
 }
 
 function getInteractiveBlockedRecoveryResumePhase(
@@ -579,14 +645,18 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   });
 
   if (disposition.action === 'replace_current_scope') {
+    const replacedState = finalizeInteractiveBlockedRecovery(
+      withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, 'reviewer_plan'),
+      disposition.action,
+      'reviewer_plan',
+    );
     return persistSplitPlanRecovery(
       {
-        ...state,
+        ...replacedState,
         coderSessionHandle: sessionHandle,
         phase: state.interactiveBlockedRecovery.sourcePhase,
         status: 'running',
         blockedFromPhase: null,
-        interactiveBlockedRecovery: null,
         coderRetryCount: 0,
       },
       statePath,
@@ -604,13 +674,17 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   }
 
   if (disposition.action === 'resume_current_scope') {
+    const resumedPhase = getInteractiveBlockedRecoveryResumePhase(state.interactiveBlockedRecovery.sourcePhase);
     const nextState = await saveState(statePath, {
-      ...state,
+      ...finalizeInteractiveBlockedRecovery(
+        withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, resumedPhase),
+        disposition.action,
+        resumedPhase,
+      ),
       coderSessionHandle: sessionHandle,
-      phase: getInteractiveBlockedRecoveryResumePhase(state.interactiveBlockedRecovery.sourcePhase),
+      phase: resumedPhase,
       status: 'running',
       blockedFromPhase: null,
-      interactiveBlockedRecovery: null,
       coderRetryCount: 0,
     });
     await writeExecutionArtifacts(nextState);
@@ -618,14 +692,23 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   }
 
   if (disposition.action === 'stay_blocked') {
+    const recordedState = withRecordedInteractiveBlockedRecoveryDisposition(
+      state,
+      disposition,
+      sessionHandle,
+      'interactive_blocked_recovery',
+    );
+    if (!recordedState.interactiveBlockedRecovery) {
+      throw new Error('Interactive blocked recovery state disappeared while recording a stay_blocked disposition.');
+    }
     const nextState = await saveState(statePath, {
-      ...state,
+      ...recordedState,
       coderSessionHandle: sessionHandle,
       phase: 'interactive_blocked_recovery',
       status: 'running',
       blockedFromPhase: state.interactiveBlockedRecovery.sourcePhase,
       interactiveBlockedRecovery: {
-        ...state.interactiveBlockedRecovery,
+        ...recordedState.interactiveBlockedRecovery,
         blockedReason: trimmedBlocker,
         lastHandledTurn: turnNumber,
       },
@@ -636,13 +719,16 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   }
 
   const blockedState = await saveState(statePath, {
-    ...state,
+    ...finalizeInteractiveBlockedRecovery(
+      withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, 'blocked'),
+      disposition.action,
+      'blocked',
+    ),
     coderSessionHandle: sessionHandle,
     phase: 'blocked',
     status: 'blocked',
     lastScopeMarker: state.lastScopeMarker ?? 'AUTONOMY_BLOCKED',
     blockedFromPhase: state.interactiveBlockedRecovery.sourcePhase,
-    interactiveBlockedRecovery: null,
     coderRetryCount: 0,
   });
   await writeExecutionArtifacts(blockedState);
@@ -955,7 +1041,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
       return consultState;
     }
     const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, reason, logger);
-    await notifyBlocked(persistedState, reason, logger);
+    await notifyInteractiveBlockedRecovery(persistedState, reason, logger);
     return persistedState;
   }
   return nextState;
@@ -2443,6 +2529,18 @@ export async function loadOrInitialize(
         });
       }
     }
+
+    if (state.phase === 'interactive_blocked_recovery' && state.interactiveBlockedRecovery) {
+      await logger.event('run.resumed_interactive_blocked_recovery', {
+        statePath: resumeStatePath,
+        sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
+        blockedReason: state.interactiveBlockedRecovery.blockedReason,
+        recordedTurns: state.interactiveBlockedRecovery.turns.length,
+        lastHandledTurn: state.interactiveBlockedRecovery.lastHandledTurn,
+      });
+    }
+
+    await writeExecutionArtifacts(state);
 
     return {
       state,
