@@ -325,6 +325,9 @@ export async function initializeOrchestration(
   cwd: string,
   agentConfig: AgentConfig,
   topLevelMode: 'plan' | 'execute' = 'execute',
+  options?: {
+    ignoreLocalChanges?: boolean;
+  },
 ) {
   const absolutePlanDoc = resolve(planDoc);
   const stateDir = join(cwd, '.neal');
@@ -341,6 +344,7 @@ export async function initializeOrchestration(
     stateDir,
     runDir: logger.runDir,
     topLevelMode,
+    ignoreLocalChanges: options?.ignoreLocalChanges ?? false,
     agentConfig,
     progressJsonPath: join(logger.runDir, 'plan-progress.json'),
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
@@ -1817,7 +1821,7 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
   await logger?.event('phase.start', { phase: 'final_squash' });
   const headCommit = await getHeadCommit(state.cwd);
   const statusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(state.cwd));
-  if (statusOutput) {
+  if (statusOutput && !state.ignoreLocalChanges) {
     throw new Error(`Cannot finalize with a dirty worktree:\n${statusOutput}`);
   }
 
@@ -2152,5 +2156,5 @@ export async function loadOrInitialize(
     }
   }
 
-  return initializeOrchestration(planDoc, cwd, agentConfig, topLevelMode);
+  return initializeOrchestration(planDoc, cwd, agentConfig, topLevelMode, options);
 }

@@ -64,6 +64,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     cwd: init.cwd,
     runDir: init.runDir,
     topLevelMode: init.topLevelMode,
+    ignoreLocalChanges: init.ignoreLocalChanges,
     agentConfig: init.agentConfig,
     progressJsonPath: init.progressJsonPath,
     progressMarkdownPath: init.progressMarkdownPath,
@@ -331,6 +332,9 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
     ...parsed,
     runDir,
     topLevelMode: parsed.topLevelMode === 'plan' ? 'plan' : 'execute',
+    ignoreLocalChanges: typeof (parsed as { ignoreLocalChanges?: unknown }).ignoreLocalChanges === 'boolean'
+      ? (parsed as { ignoreLocalChanges: boolean }).ignoreLocalChanges
+      : false,
     agentConfig: hydrateAgentConfig(parsed.agentConfig),
     progressJsonPath,
     progressMarkdownPath,

@@ -123,6 +123,7 @@ export type OrchestrationState = {
   cwd: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';
+  ignoreLocalChanges: boolean;
   agentConfig: AgentConfig;
   progressJsonPath: string;
   progressMarkdownPath: string;
@@ -167,6 +168,7 @@ export type OrchestratorInit = {
   stateDir: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';
+  ignoreLocalChanges: boolean;
   agentConfig: AgentConfig;
   progressJsonPath: string;
   progressMarkdownPath: string;

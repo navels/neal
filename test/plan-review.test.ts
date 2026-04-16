@@ -102,6 +102,7 @@ test('executionShape persists through state round-trip and wrapper artifacts', a
       stateDir,
       runDir,
       topLevelMode: 'plan',
+      ignoreLocalChanges: false,
       agentConfig: getDefaultAgentConfig(),
       progressJsonPath: join(runDir, 'plan-progress.json'),
       progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
@@ -236,4 +237,54 @@ executionShape: multi_scope
   assert.equal(synthesis.executionShape, 'multi_scope');
   assert.equal(synthesis.reviewedPlanPath, planDoc);
   assert.deepEqual(synthesis.findings, []);
+});
+
+test('review markdown records the reviewed artifact for each plan-review round', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-plan-review-'));
+  const cwd = join(root, 'repo');
+  const stateDir = join(cwd, '.neal');
+  const runDir = join(stateDir, 'runs', 'test-run');
+  const planDoc = join(cwd, 'PLAN.md');
+
+  await mkdir(runDir, { recursive: true });
+  await writeFile(planDoc, '# Plan\n', 'utf8');
+
+  const state = await createInitialState(
+    {
+      cwd,
+      planDoc,
+      stateDir,
+      runDir,
+      topLevelMode: 'plan',
+      ignoreLocalChanges: false,
+      agentConfig: getDefaultAgentConfig(),
+      progressJsonPath: join(runDir, 'plan-progress.json'),
+      progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
+      reviewMarkdownPath: join(runDir, 'REVIEW.md'),
+      consultMarkdownPath: join(runDir, 'CONSULT.md'),
+      maxRounds: 3,
+    },
+    'abc123',
+  );
+
+  const markdown = renderReviewMarkdown({
+    ...state,
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-1',
+        reviewedPlanPath: planDoc,
+        commitRange: {
+          base: 'abc123',
+          head: 'abc123',
+        },
+        openBlockingCanonicalCount: 0,
+        findings: [],
+      },
+    ],
+  });
+
+  assert.match(markdown, /Last reviewed artifact: .*PLAN\.md/);
+  assert.match(markdown, /### Round 1/);
+  assert.match(markdown, /Reviewed artifact: .*PLAN\.md/);
 });

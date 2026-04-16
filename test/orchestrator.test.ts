@@ -48,6 +48,7 @@ async function createResumeFixture(overrides: Partial<OrchestrationState>) {
       stateDir,
       runDir,
       topLevelMode: 'execute',
+      ignoreLocalChanges: false,
       agentConfig: getDefaultAgentConfig(),
       progressJsonPath: join(runDir, 'plan-progress.json'),
       progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
@@ -111,6 +112,7 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
       stateDir,
       runDir,
       topLevelMode: 'execute',
+      ignoreLocalChanges: false,
       agentConfig: getDefaultAgentConfig(),
       progressJsonPath: join(runDir, 'plan-progress.json'),
       progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
@@ -173,6 +175,7 @@ async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationSta
       stateDir,
       runDir,
       topLevelMode: 'execute',
+      ignoreLocalChanges: false,
       agentConfig: getDefaultAgentConfig(),
       progressJsonPath: join(runDir, 'plan-progress.json'),
       progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
@@ -804,6 +807,32 @@ test('final squash preserves an empty derived scope checkpoint commit without at
     const notifyLog = await readFile(notifyLogPath, 'utf8');
     const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
     assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: empty derived scope checkpoint']);
+  } finally {
+    if (previousNotifyBin === undefined) {
+      delete process.env.AUTONOMY_NOTIFY_BIN;
+    } else {
+      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
+    }
+  }
+});
+
+test('final squash tolerates unrelated local changes when the run was started with ignoreLocalChanges', async () => {
+  const { statePath, state, notifyLogPath, notifyScriptPath, cwd } = await createFinalSquashFixture({
+    ignoreLocalChanges: true,
+    lastScopeMarker: 'AUTONOMY_DONE',
+  });
+  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
+  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  const strayFile = join(cwd, 'FEEDBACK-DERIVED_PLAN.md');
+  await writeFile(strayFile, 'local notes\n', 'utf8');
+
+  try {
+    const nextState = await runFinalSquashPhase(state, statePath);
+    assert.equal(nextState.phase, 'done');
+    assert.equal(nextState.status, 'done');
+    assert.equal(nextState.ignoreLocalChanges, true);
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /plan complete/);
   } finally {
     if (previousNotifyBin === undefined) {
       delete process.env.AUTONOMY_NOTIFY_BIN;
