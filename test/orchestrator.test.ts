@@ -13,6 +13,7 @@ import {
   loadOrInitialize,
   runFinalSquashPhase,
 } from '../src/neal/orchestrator.js';
+import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
 import { createInitialState, getDefaultAgentConfig, saveState } from '../src/neal/state.js';
@@ -417,7 +418,7 @@ test('flush sends split-plan rejection notification for guardrail blocks', async
         reviewRounds: 0,
         findings: 0,
         archivedReviewPath: null,
-        blocker: 'split-plan recovery rejected: scope 10 already emitted a derived plan once',
+        blocker: 'split-plan recovery rejected: scope 10 reached the split-plan limit (10)',
         derivedFromParentScope: null,
         replacedByDerivedPlanPath: null,
       },
@@ -439,6 +440,59 @@ test('flush sends split-plan rejection notification for guardrail blocks', async
       process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
     }
   }
+});
+
+test('persistSplitPlanRecovery allows split-plan attempts up to the configured cap and blocks at 10', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 7,
+    phase: 'coder_scope',
+    status: 'running',
+    splitPlanCountForCurrentScope: 10,
+  });
+
+  const nextState = await persistSplitPlanRecovery(
+    state,
+    statePath,
+    {
+      sourcePhase: 'coder_scope',
+      derivedPlanMarkdown: '# Derived plan',
+      createdCommits: [],
+    },
+    {
+      persistBlockedScope: async (blockedState, blockedStatePath, reason) => {
+        return saveState(blockedStatePath, {
+          ...blockedState,
+          blockedFromPhase: blockedState.blockedFromPhase ?? 'coder_scope',
+          completedScopes: [
+            ...blockedState.completedScopes,
+            {
+              number: String(blockedState.currentScopeNumber),
+              marker: 'AUTONOMY_SPLIT_PLAN',
+              result: 'blocked',
+              baseCommit: blockedState.baseCommit,
+              finalCommit: null,
+              commitSubject: null,
+              reviewRounds: blockedState.rounds.length,
+              findings: blockedState.findings.length,
+              archivedReviewPath: blockedState.archivedReviewPath,
+              blocker: reason,
+              derivedFromParentScope: null,
+              replacedByDerivedPlanPath: null,
+            },
+          ],
+        });
+      },
+      writeExecutionArtifacts: async () => {},
+    },
+  );
+
+  assert.equal(nextState.status, 'blocked');
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.lastScopeMarker, 'AUTONOMY_SPLIT_PLAN');
+  assert.match(
+    nextState.completedScopes.at(-1)?.blocker ?? '',
+    /reached the split-plan limit \(10\)/,
+  );
 });
 
 test('flush sends derived-plan failure notification for blocked derived-plan review', async () => {

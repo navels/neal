@@ -16,6 +16,7 @@ import { flushDerivedPlanNotifications } from './notifications.js';
 
 const WRAPPER_OWNED_PREFIXES = ['.neal/', '.forge/'];
 const WRAPPER_OWNED_PATHS = new Set(['.neal', '.forge', '.neal/session.json', '.forge/session.json']);
+const MAX_SPLIT_PLANS_PER_SCOPE = 10;
 
 function isWrapperOwnedPath(path: string) {
   return WRAPPER_OWNED_PATHS.has(path) || WRAPPER_OWNED_PREFIXES.some((prefix) => path === prefix.slice(0, -1) || path.startsWith(prefix));
@@ -115,8 +116,8 @@ export async function persistSplitPlanRecovery(
   args: PersistSplitPlanRecoveryArgs,
   deps: PersistSplitPlanRecoveryDeps,
 ) {
-  if (state.splitPlanCountForCurrentScope >= 1) {
-    const reason = `split-plan recovery rejected: scope ${state.currentScopeNumber} already emitted a derived plan once`;
+  if (state.splitPlanCountForCurrentScope >= MAX_SPLIT_PLANS_PER_SCOPE) {
+    const reason = `split-plan recovery rejected: scope ${state.currentScopeNumber} reached the split-plan limit (${MAX_SPLIT_PLANS_PER_SCOPE})`;
     const blockedState = await saveState(statePath, {
       ...state,
       lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
