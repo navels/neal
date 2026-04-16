@@ -1,9 +1,8 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
-import { notify } from '../notifier.js';
 import { getMaxReviewRounds, getPhaseHeartbeatMs, getReviewStuckWindow } from './config.js';
 import {
   CoderRoundError,
@@ -19,7 +18,6 @@ import {
 } from './agents.js';
 import { writeConsultMarkdown } from './consult.js';
 import {
-  cleanUntracked,
   getChangedFilesForRange,
   getCommitMessage,
   getCommitRange,
@@ -27,14 +25,18 @@ import {
   getDiffForRange,
   getDiffStatForRange,
   getHeadCommit,
-  getStagedDiff,
-  getUnstagedDiff,
-  getUntrackedFiles,
   getWorktreeStatus,
-  resetHard,
   squashCommits,
 } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
+import {
+  flushDerivedPlanNotifications,
+  notifyBlocked,
+  notifyComplete,
+  notifyRetry,
+  notifyScopeAccepted,
+} from './orchestrator/notifications.js';
+import { filterWrapperOwnedWorktreeStatus, persistSplitPlanRecovery } from './orchestrator/split-plan.js';
 import { validatePlanDocument } from './plan-validation.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
@@ -53,8 +55,7 @@ import type {
 } from './types.js';
 
 const execFile = promisify(execFileCallback);
-const WRAPPER_OWNED_PREFIXES = ['.neal/', '.forge/'];
-const WRAPPER_OWNED_PATHS = new Set(['.neal', '.forge', '.neal/session.json', '.forge/session.json']);
+export { flushDerivedPlanNotifications };
 
 function writeDiagnostic(message: string, logger?: RunLogger) {
   process.stderr.write(message);
@@ -321,85 +322,6 @@ export async function initializeOrchestration(
   };
 }
 
-async function notifyBlocked(state: OrchestrationState, reason: string, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  await logger?.event('notify.blocked', { reason, planName });
-  await notify('blocked', `[neal] ${planName}: ${reason}`);
-}
-
-async function notifyComplete(state: OrchestrationState, message: string, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  await logger?.event('notify.complete', { message, planName });
-  await notify('complete', `[neal] ${planName}: plan complete: ${message}`);
-}
-
-async function notifyScopeAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  const scopeLabel = getCurrentScopeLabel(state);
-  await logger?.event('notify.scope_complete', {
-    message,
-    planName,
-    scopeNumber: scopeLabel,
-  });
-  await notify('complete', `[neal] ${planName}: scope ${scopeLabel} complete: ${message}`);
-}
-
-async function notifyRetry(state: OrchestrationState, message: string, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  await logger?.event('notify.retry', {
-    message,
-    planName,
-    scopeNumber: getCurrentScopeLabel(state),
-    phase: state.phase,
-  });
-  await notify('retry', `[neal] ${planName}: ${message}`);
-}
-
-async function notifySplitPlanStarted(state: OrchestrationState, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  const scopeLabel = getCurrentScopeLabel(state);
-  await logger?.event('notify.split_plan_started', {
-    planName,
-    scopeNumber: scopeLabel,
-    derivedPlanPath: state.derivedPlanPath,
-  });
-  await notify('retry', `[neal] ${planName}: scope ${scopeLabel} split into derived plan; reviewing`);
-}
-
-async function notifyDerivedPlanAccepted(state: OrchestrationState, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  const scopeLabel = getParentScopeLabel(state);
-  await logger?.event('notify.derived_plan_accepted', {
-    planName,
-    scopeNumber: scopeLabel,
-    derivedPlanPath: state.derivedPlanPath,
-  });
-  await notify('complete', `[neal] ${planName}: derived plan accepted for scope ${scopeLabel}`);
-}
-
-async function notifyDerivedPlanFailed(state: OrchestrationState, reason: string, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  const scopeLabel = getParentScopeLabel(state);
-  await logger?.event('notify.derived_plan_failed', {
-    planName,
-    scopeNumber: scopeLabel,
-    derivedPlanPath: state.derivedPlanPath,
-    reason,
-  });
-  await notify('blocked', `[neal] ${planName}: blocked: derived plan review did not converge`);
-}
-
-async function notifySplitPlanRejected(state: OrchestrationState, reason: string, logger?: RunLogger) {
-  const planName = basename(state.planDoc);
-  const scopeLabel = getCurrentScopeLabel(state);
-  await logger?.event('notify.split_plan_rejected', {
-    planName,
-    scopeNumber: scopeLabel,
-    reason,
-  });
-  await notify('blocked', `[neal] ${planName}: blocked: split-plan recovery rejected for scope ${scopeLabel}`);
-}
-
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
   const scopeLabel = getCurrentScopeLabel(state);
   if (state.completedScopes.some((scope) => scope.number === scopeLabel)) {
@@ -429,11 +351,6 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   return nextState;
 }
 
-function getCurrentScopeBlockedReason(state: OrchestrationState) {
-  const currentScope = state.completedScopes.find((scope) => scope.number === getCurrentScopeLabel(state));
-  return currentScope?.blocker ?? null;
-}
-
 function isResumableBlockedPhase(
   phase: OrchestrationState['phase'] | null,
 ): phase is 'coder_scope' | 'coder_response' | 'coder_optional_response' | 'coder_plan' | 'coder_plan_response' | 'coder_plan_optional_response' {
@@ -445,22 +362,6 @@ function isResumableBlockedPhase(
     phase === 'coder_plan_response' ||
     phase === 'coder_plan_optional_response'
   );
-}
-
-function filterWrapperOwnedWorktreeStatus(statusOutput: string) {
-  return statusOutput
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .filter((line) => {
-      const path = line.length >= 3 ? line.slice(3).trim() : line.trim();
-      return !isWrapperOwnedPath(path);
-    })
-    .join('\n');
-}
-
-function isWrapperOwnedPath(path: string) {
-  return WRAPPER_OWNED_PATHS.has(path) || WRAPPER_OWNED_PREFIXES.some((prefix) => path === prefix.slice(0, -1) || path.startsWith(prefix));
 }
 
 function normalizeFinalCommitMessage(message: string) {
@@ -509,143 +410,6 @@ function stripTrailingMarker(text: string, marker: string) {
   return lines.join('\n').trim();
 }
 
-function getSplitPlanArtifactPaths(state: OrchestrationState) {
-  return {
-    derivedPlanPath: join(state.runDir, `DERIVED_PLAN_SCOPE_${state.currentScopeNumber}.md`),
-    discardedDiffPath: join(state.runDir, `SCOPE_${state.currentScopeNumber}_DISCARDED.diff`),
-  };
-}
-
-async function captureDiscardedScopeArtifact(cwd: string, artifactPath: string) {
-  const [status, stagedDiff, unstagedDiff, untrackedFiles] = await Promise.all([
-    getWorktreeStatus(cwd),
-    getStagedDiff(cwd),
-    getUnstagedDiff(cwd),
-    getUntrackedFiles(cwd),
-  ]);
-
-  const visibleUntrackedFiles = untrackedFiles.filter((file) => !isWrapperOwnedPath(file));
-  const lines = [
-    '# Discarded Scope WIP',
-    '',
-    '## Git Status',
-    '```text',
-    status || '(clean)',
-    '```',
-    '',
-    '## Staged Diff',
-    '```diff',
-    stagedDiff || '',
-    '```',
-    '',
-    '## Unstaged Diff',
-    '```diff',
-    unstagedDiff || '',
-    '```',
-    '',
-    '## Untracked Files',
-    visibleUntrackedFiles.length > 0 ? visibleUntrackedFiles.map((file) => `- ${file}`).join('\n') : '(none)',
-  ];
-
-  for (const file of visibleUntrackedFiles) {
-    lines.push('', `### ${file}`);
-    try {
-      const content = await readFile(join(cwd, file), 'utf8');
-      lines.push('```text', content, '```');
-    } catch {
-      lines.push('(binary or unreadable file omitted from inline snapshot)');
-    }
-  }
-
-  await writeFile(artifactPath, `${lines.join('\n')}\n`, 'utf8');
-}
-
-async function discardScopeWorktree(state: OrchestrationState) {
-  if (!state.baseCommit) {
-    throw new Error('Cannot discard scope worktree without a baseCommit');
-  }
-
-  await resetHard(state.cwd, state.baseCommit);
-  await cleanUntracked(state.cwd, ['.neal', '.forge']);
-  const remainingStatus = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(state.cwd));
-  if (remainingStatus) {
-    throw new Error(`Failed to restore worktree to scope base ${state.baseCommit}:\n${remainingStatus}`);
-  }
-}
-
-async function persistSplitPlanRecovery(
-  state: OrchestrationState,
-  statePath: string,
-  args: {
-    sourcePhase: 'coder_scope' | 'coder_response' | 'coder_optional_response';
-    derivedPlanMarkdown: string;
-    createdCommits: string[];
-    logger?: RunLogger;
-  },
-) {
-  if (state.splitPlanCountForCurrentScope >= 1) {
-    const reason = `split-plan recovery rejected: scope ${state.currentScopeNumber} already emitted a derived plan once`;
-    const blockedState = await saveState(statePath, {
-      ...state,
-      lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
-      phase: 'blocked',
-      status: 'blocked',
-      blockedFromPhase: null,
-    });
-    await writeExecutionArtifacts(blockedState);
-    return persistBlockedScope(blockedState, statePath, reason);
-  }
-
-  if (state.derivedPlanDepth >= 1) {
-    const reason = `split-plan recovery rejected: derived plan depth limit reached for scope ${state.currentScopeNumber}`;
-    const blockedState = await saveState(statePath, {
-      ...state,
-      lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
-      phase: 'blocked',
-      status: 'blocked',
-      blockedFromPhase: null,
-    });
-    await writeExecutionArtifacts(blockedState);
-    return persistBlockedScope(blockedState, statePath, reason);
-  }
-
-  const { derivedPlanPath, discardedDiffPath } = getSplitPlanArtifactPaths(state);
-  await captureDiscardedScopeArtifact(state.cwd, discardedDiffPath);
-  await writeFile(derivedPlanPath, `${args.derivedPlanMarkdown.trim()}\n`, 'utf8');
-  await discardScopeWorktree(state);
-
-  const nextState = await saveState(statePath, {
-    ...state,
-    lastScopeMarker: 'AUTONOMY_SPLIT_PLAN',
-    phase: 'reviewer_plan',
-    status: 'running',
-    blockedFromPhase: null,
-    derivedPlanPath,
-    derivedFromScopeNumber: state.currentScopeNumber,
-    derivedPlanStatus: 'pending_review',
-    splitPlanStartedNotified: false,
-    derivedPlanAcceptedNotified: false,
-    splitPlanBlockedNotified: false,
-    splitPlanCountForCurrentScope: state.splitPlanCountForCurrentScope + 1,
-    rounds: [],
-    consultRounds: [],
-    findings: [],
-    createdCommits: [],
-    coderRetryCount: 0,
-    reviewerSessionHandle: null,
-  });
-
-  await writeExecutionArtifacts(nextState);
-  await args.logger?.event('split_plan.persisted', {
-    scopeNumber: state.currentScopeNumber,
-    sourcePhase: args.sourcePhase,
-    derivedPlanPath,
-    discardedDiffPath,
-    createdCommits: args.createdCommits,
-  });
-  return flushDerivedPlanNotifications(nextState, statePath, args.logger);
-}
-
 function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationState, nextState: OrchestrationState) {
   return (
     previousState.topLevelMode === 'execute' &&
@@ -653,50 +417,6 @@ function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationState, ne
     nextState.derivedPlanStatus === 'accepted' &&
     nextState.phase === 'awaiting_derived_plan_execution'
   );
-}
-
-export async function flushDerivedPlanNotifications(
-  state: OrchestrationState,
-  statePath: string,
-  logger?: RunLogger,
-  explicitBlockReason?: string,
-) {
-  let nextState = state;
-
-  if (nextState.topLevelMode !== 'execute') {
-    return nextState;
-  }
-
-  if (nextState.derivedPlanPath && nextState.derivedPlanStatus === 'pending_review' && !nextState.splitPlanStartedNotified) {
-    await notifySplitPlanStarted(nextState, logger);
-    nextState = await saveState(statePath, {
-      ...nextState,
-      splitPlanStartedNotified: true,
-    });
-  }
-
-  if (nextState.derivedPlanStatus === 'accepted' && !nextState.derivedPlanAcceptedNotified) {
-    await notifyDerivedPlanAccepted(nextState, logger);
-    nextState = await saveState(statePath, {
-      ...nextState,
-      derivedPlanAcceptedNotified: true,
-    });
-  }
-
-  const blockReason = explicitBlockReason ?? getCurrentScopeBlockedReason(nextState);
-  if (nextState.status === 'blocked' && nextState.lastScopeMarker === 'AUTONOMY_SPLIT_PLAN' && !nextState.splitPlanBlockedNotified) {
-    if (nextState.derivedPlanPath) {
-      await notifyDerivedPlanFailed(nextState, blockReason ?? 'split-plan recovery failed');
-    } else {
-      await notifySplitPlanRejected(nextState, blockReason ?? 'split-plan recovery rejected');
-    }
-    nextState = await saveState(statePath, {
-      ...nextState,
-      splitPlanBlockedNotified: true,
-    });
-  }
-
-  return nextState;
 }
 
 async function finalizePlanReviewResponseWithoutOpenFindings(
@@ -909,12 +629,20 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
     nextPhase: nextState.phase,
   });
   if (splitPlan) {
-    return persistSplitPlanRecovery(nextState, statePath, {
-      sourcePhase: 'coder_scope',
-      derivedPlanMarkdown: stripTrailingMarker(codex.finalResponse, 'AUTONOMY_SPLIT_PLAN'),
-      createdCommits,
-      logger,
-    });
+    return persistSplitPlanRecovery(
+      nextState,
+      statePath,
+      {
+        sourcePhase: 'coder_scope',
+        derivedPlanMarkdown: stripTrailingMarker(codex.finalResponse, 'AUTONOMY_SPLIT_PLAN'),
+        createdCommits,
+        logger,
+      },
+      {
+        persistBlockedScope,
+        writeExecutionArtifacts,
+      },
+    );
   }
 
   if (nextState.status === 'blocked') {
@@ -1749,12 +1477,20 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
     nextPhase: nextState.phase,
   });
   if (codex.payload.outcome === 'split_plan') {
-    return persistSplitPlanRecovery(nextState, statePath, {
-      sourcePhase: 'coder_response',
-      derivedPlanMarkdown: codex.payload.derivedPlan?.trim() ?? '',
-      createdCommits,
-      logger,
-    });
+    return persistSplitPlanRecovery(
+      nextState,
+      statePath,
+      {
+        sourcePhase: 'coder_response',
+        derivedPlanMarkdown: codex.payload.derivedPlan?.trim() ?? '',
+        createdCommits,
+        logger,
+      },
+      {
+        persistBlockedScope,
+        writeExecutionArtifacts,
+      },
+    );
   }
 
   if (nextState.status === 'blocked') {
@@ -1887,12 +1623,20 @@ async function runCoderOptionalResponsePhase(state: OrchestrationState, statePat
     nextPhase: nextState.phase,
   });
   if (codex.payload.outcome === 'split_plan') {
-    return persistSplitPlanRecovery(nextState, statePath, {
-      sourcePhase: 'coder_optional_response',
-      derivedPlanMarkdown: codex.payload.derivedPlan?.trim() ?? '',
-      createdCommits,
-      logger,
-    });
+    return persistSplitPlanRecovery(
+      nextState,
+      statePath,
+      {
+        sourcePhase: 'coder_optional_response',
+        derivedPlanMarkdown: codex.payload.derivedPlan?.trim() ?? '',
+        createdCommits,
+        logger,
+      },
+      {
+        persistBlockedScope,
+        writeExecutionArtifacts,
+      },
+    );
   }
 
   if (nextState.status === 'blocked') {
