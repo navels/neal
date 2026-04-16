@@ -78,6 +78,27 @@ executionShape: multi_scope
   assert.match(result.errors.join('\n'), /requires a `## Execution Queue` section/);
 });
 
+test('rejects one-shot plans that also include an execution queue', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: one_shot
+
+## Execution Queue
+
+### Scope 1: Invalid
+- Goal: This should not exist on a one-shot plan.
+- Verification: \`pnpm typecheck\`
+- Success Condition: This should fail validation.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'one_shot');
+  assert.match(result.errors.join('\n'), /must not include a `## Execution Queue` section/);
+});
+
 test('rejects execution queues with numbering gaps', () => {
   const result = validatePlanDocument(`
 # Example Plan

@@ -47,14 +47,15 @@ test('fixture plans validate with their expected execution shape', async () => {
 test('fixture plans pass plan-review structural synthesis without synthetic findings', async () => {
   for (const fixture of PLAN_FIXTURES) {
     const planPath = getFixturePath(fixture.fileName);
-    const findings = await synthesizePlanReviewFindings({
+    const synthesis = await synthesizePlanReviewFindings({
       planPath,
       round: 1,
       roundSummary: `Fixture ${fixture.fileName} remains structurally valid.`,
       findings: [],
     });
 
-    assert.deepEqual(findings, [], `fixture ${fixture.fileName} should not add synthetic findings`);
+    assert.equal(synthesis.executionShape, fixture.expectedShape);
+    assert.deepEqual(synthesis.findings, [], `fixture ${fixture.fileName} should not add synthetic findings`);
   }
 });
 
@@ -70,12 +71,13 @@ test('already-good fixture keeps reviewer findings intact without structural chu
     roundSummary: 'Minor wording suggestion only.',
   };
 
-  const findings = await synthesizePlanReviewFindings({
+  const synthesis = await synthesizePlanReviewFindings({
     planPath,
     round: 2,
     roundSummary: reviewerFinding.roundSummary,
     findings: [reviewerFinding],
   });
 
-  assert.deepEqual(findings, [reviewerFinding]);
+  assert.equal(synthesis.executionShape, 'multi_scope');
+  assert.deepEqual(synthesis.findings, [reviewerFinding]);
 });

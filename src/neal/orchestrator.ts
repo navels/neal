@@ -117,26 +117,32 @@ export async function synthesizePlanReviewFindings(args: {
   round: number;
   roundSummary: string;
   findings: ReviewFindingInput[];
-}): Promise<ReviewFindingInput[]> {
+}): Promise<{ executionShape: OrchestrationState['executionShape']; findings: ReviewFindingInput[] }> {
   const planDocument = await readFile(args.planPath, 'utf8');
   const validation = validatePlanDocument(planDocument);
 
   if (validation.ok) {
-    return args.findings;
+    return {
+      executionShape: validation.executionShape,
+      findings: args.findings,
+    };
   }
 
-  return [
-    ...args.findings,
-    ...validation.errors.map((error) => ({
-      round: args.round,
-      source: 'plan_structure' as const,
-      severity: 'blocking' as const,
-      files: [args.planPath],
-      claim: `Plan document structure is invalid: ${error}`,
-      requiredAction: 'Revise the plan document so it satisfies the required execution-shape and execution-queue contract.',
-      roundSummary: args.roundSummary,
-    })),
-  ];
+  return {
+    executionShape: validation.executionShape,
+    findings: [
+      ...args.findings,
+      ...validation.errors.map((error) => ({
+        round: args.round,
+        source: 'plan_structure' as const,
+        severity: 'blocking' as const,
+        files: [args.planPath],
+        claim: `Plan document structure is invalid: ${error}`,
+        requiredAction: 'Revise the plan document so it satisfies the required execution-shape and execution-queue contract.',
+        roundSummary: args.roundSummary,
+      })),
+    ],
+  };
 }
 
 function startPhaseHeartbeat(
@@ -1187,7 +1193,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
     throw error;
   }
 
-  const normalizedFindingInputs = await synthesizePlanReviewFindings({
+  const synthesizedReview = await synthesizePlanReviewFindings({
     planPath: getPlanReviewTargetPath(state),
     round,
     roundSummary: claude.summary,
@@ -1196,6 +1202,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       source: finding.source,
     })),
   });
+  const normalizedFindingInputs = synthesizedReview.findings;
 
   printReviewResult('plan-review', claude.summary, normalizedFindingInputs, logger);
 
@@ -1230,7 +1237,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const nextState = await saveState(statePath, {
     ...state,
     reviewerSessionHandle: claude.sessionHandle,
-    executionShape: claude.executionShape,
+    executionShape: synthesizedReview.executionShape,
     phase: shouldBlockForConvergence
       ? 'blocked'
       : hasBlockingFindings

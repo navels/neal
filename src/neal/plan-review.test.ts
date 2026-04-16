@@ -95,7 +95,7 @@ executionShape: multi_scope
     'utf8',
   );
 
-  const findings = await synthesizePlanReviewFindings({
+  const synthesis = await synthesizePlanReviewFindings({
     planPath: planDoc,
     round: 2,
     roundSummary: 'Reviewer found one clarity issue.',
@@ -112,8 +112,9 @@ executionShape: multi_scope
     ],
   });
 
-  assert.equal(findings.length, 2);
-  assert.deepEqual(findings[0], {
+  assert.equal(synthesis.executionShape, 'multi_scope');
+  assert.equal(synthesis.findings.length, 2);
+  assert.deepEqual(synthesis.findings[0], {
     round: 2,
     source: 'reviewer',
     severity: 'non_blocking',
@@ -122,13 +123,13 @@ executionShape: multi_scope
     requiredAction: 'Tighten the prompt wording.',
     roundSummary: 'Reviewer found one clarity issue.',
   });
-  assert.equal(findings[1]?.round, 2);
-  assert.equal(findings[1]?.source, 'plan_structure');
-  assert.equal(findings[1]?.severity, 'blocking');
-  assert.deepEqual(findings[1]?.files, [planDoc]);
-  assert.match(findings[1]?.claim ?? '', /Plan document structure is invalid/);
-  assert.match(findings[1]?.claim ?? '', /requires a `## Execution Queue` section/);
-  assert.equal(findings[1]?.roundSummary, 'Reviewer found one clarity issue.');
+  assert.equal(synthesis.findings[1]?.round, 2);
+  assert.equal(synthesis.findings[1]?.source, 'plan_structure');
+  assert.equal(synthesis.findings[1]?.severity, 'blocking');
+  assert.deepEqual(synthesis.findings[1]?.files, [planDoc]);
+  assert.match(synthesis.findings[1]?.claim ?? '', /Plan document structure is invalid/);
+  assert.match(synthesis.findings[1]?.claim ?? '', /requires a `## Execution Queue` section/);
+  assert.equal(synthesis.findings[1]?.roundSummary, 'Reviewer found one clarity issue.');
 });
 
 test('plan-review synthesis leaves valid plans without synthetic findings', async () => {
@@ -146,12 +147,46 @@ executionShape: one_shot
     'utf8',
   );
 
-  const findings = await synthesizePlanReviewFindings({
+  const synthesis = await synthesizePlanReviewFindings({
     planPath: planDoc,
     round: 1,
     roundSummary: 'Looks good.',
     findings: [],
   });
 
-  assert.deepEqual(findings, []);
+  assert.equal(synthesis.executionShape, 'one_shot');
+  assert.deepEqual(synthesis.findings, []);
+});
+
+test('plan-review synthesis uses document-declared execution shape as the source of truth', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-plan-review-'));
+  const planDoc = join(root, 'PLAN.md');
+
+  await writeFile(
+    planDoc,
+    `# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Add validation
+- Goal: Add the validator.
+- Verification: \`pnpm typecheck\`
+- Success Condition: The validator works.
+`,
+    'utf8',
+  );
+
+  const synthesis = await synthesizePlanReviewFindings({
+    planPath: planDoc,
+    round: 1,
+    roundSummary: 'Looks good.',
+    findings: [],
+  });
+
+  assert.equal(synthesis.executionShape, 'multi_scope');
+  assert.deepEqual(synthesis.findings, []);
 });

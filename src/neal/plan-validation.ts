@@ -28,6 +28,10 @@ export function validatePlanDocument(planDocument: string): PlanValidationResult
     validateExecutionQueueSection(lines, errors);
   }
 
+  if (executionShape === 'one_shot') {
+    validateOneShotQueueAbsence(lines, errors);
+  }
+
   if (errors.length > 0) {
     return {
       ok: false,
@@ -105,6 +109,13 @@ function validateExecutionQueueSection(lines: string[], errors: string[]) {
 
   for (const scope of scopes) {
     validateScopeBullets(scope, errors);
+  }
+}
+
+function validateOneShotQueueAbsence(lines: string[], errors: string[]) {
+  const queueSection = findSection(lines, EXECUTION_QUEUE_HEADER);
+  if (queueSection !== null) {
+    errors.push('`executionShape: one_shot` must not include a `## Execution Queue` section.');
   }
 }
 
