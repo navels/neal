@@ -10,6 +10,7 @@ export type OrchestrationPhase =
   | 'coder_optional_response'
   | 'reviewer_consult'
   | 'coder_consult_response'
+  | 'interactive_blocked_recovery'
   | 'final_squash'
   | 'done'
   | 'blocked';
@@ -102,6 +103,20 @@ export type ConsultRound = {
   disposition: CoderConsultDisposition | null;
 };
 
+export type InteractiveBlockedRecoveryTurn = {
+  number: number;
+  recordedAt: string;
+  operatorGuidance: string;
+};
+
+export type InteractiveBlockedRecoveryState = {
+  enteredAt: string;
+  sourcePhase: Exclude<OrchestrationPhase, 'interactive_blocked_recovery' | 'done' | 'blocked'>;
+  blockedReason: string;
+  maxTurns: number;
+  turns: InteractiveBlockedRecoveryTurn[];
+};
+
 export type ProgressScope = {
   number: string;
   marker: ScopeMarker;
@@ -159,6 +174,7 @@ export type OrchestrationState = {
   maxRounds: number;
   maxConsultsPerScope: number;
   blockedFromPhase: OrchestrationPhase | null;
+  interactiveBlockedRecovery: InteractiveBlockedRecoveryState | null;
   status: 'running' | 'done' | 'blocked' | 'failed';
 };
 

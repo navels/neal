@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 
-import { loadOrInitialize, runOnePass } from './orchestrator.js';
+import { loadOrInitialize, recordInteractiveBlockedRecoveryGuidance, runOnePass } from './orchestrator.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
 import { getDefaultAgentConfig, loadState } from './state.js';
@@ -31,6 +31,7 @@ function usage(): never {
   console.error('Usage: neal --execute <plan-doc|inline-prompt>');
   console.error('   or: neal --plan <plan-doc>');
   console.error('   or: neal --resume [state-file]');
+  console.error('   or: neal --recover [state-file] --message <guidance>');
   console.error('   or: neal --resume-coder [state-file]');
   console.error('   or: neal --resume-reviewer [state-file]');
   console.error('   or: neal --summaries [runs-dir]');
@@ -255,6 +256,57 @@ async function main() {
 
   if (args[0] === '--summaries') {
     await showSummaries(args[1]);
+    return;
+  }
+
+  if (args[0] === '--recover') {
+    let statePath = resolve('.neal/session.json');
+    let message: string | null = null;
+    let index = 1;
+
+    if (args[index] && !args[index].startsWith('--')) {
+      statePath = resolve(args[index]);
+      index += 1;
+    }
+
+    while (index < args.length) {
+      const flag = args[index];
+      const value = args[index + 1];
+      switch (flag) {
+        case '--message':
+          if (!value) {
+            throw new Error('--recover requires a value for --message');
+          }
+          message = value;
+          index += 2;
+          break;
+        default:
+          throw new Error(`Unknown argument: ${flag}`);
+      }
+    }
+
+    if (!message) {
+      throw new Error('neal --recover requires --message <guidance>');
+    }
+
+    await access(statePath);
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
+    assertSupportedAgentConfig(loaded.state.agentConfig);
+    const nextState = await recordInteractiveBlockedRecoveryGuidance(loaded.statePath, message, loaded.logger);
+    process.stdout.write(
+      JSON.stringify(
+        {
+          ok: true,
+          phase: nextState.phase,
+          status: nextState.status,
+          statePath: loaded.statePath,
+          runDir: nextState.runDir,
+          recoveryTurns: nextState.interactiveBlockedRecovery?.turns.length ?? 0,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
     return;
   }
 

@@ -4,6 +4,13 @@ import { dirname } from 'node:path';
 import { getCurrentScopeLabel, getParentScopeLabel, isExecutingDerivedPlan } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
+type InteractiveBlockedRecoverySummary = {
+  sourcePhase: NonNullable<OrchestrationState['interactiveBlockedRecovery']>['sourcePhase'];
+  blockedReason: string;
+  turns: number;
+  remainingTurns: number;
+};
+
 type PlanProgressState = {
   version: 1;
   planDoc: string;
@@ -23,6 +30,7 @@ type PlanProgressState = {
     splitPlanCount: number;
     derivedPlanDepth: number;
   } | null;
+  interactiveBlockedRecovery: InteractiveBlockedRecoverySummary | null;
   completedScopes: OrchestrationState['completedScopes'];
 };
 
@@ -49,6 +57,17 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
             splitPlanCount: state.splitPlanCountForCurrentScope,
             derivedPlanDepth: state.derivedPlanDepth,
           },
+    interactiveBlockedRecovery: state.interactiveBlockedRecovery
+      ? {
+          sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
+          blockedReason: state.interactiveBlockedRecovery.blockedReason,
+          turns: state.interactiveBlockedRecovery.turns.length,
+          remainingTurns: Math.max(
+            state.interactiveBlockedRecovery.maxTurns - state.interactiveBlockedRecovery.turns.length,
+            0,
+          ),
+        }
+      : null,
     completedScopes: state.completedScopes,
   };
 }
@@ -78,6 +97,17 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Derived plan status: ${progress.currentScope.derivedPlanStatus ?? 'none'}`,
       `- Split plan count: ${progress.currentScope.splitPlanCount}`,
       `- Derived plan depth: ${progress.currentScope.derivedPlanDepth}`,
+    );
+  }
+
+  if (progress.interactiveBlockedRecovery) {
+    lines.push(
+      '',
+      '## Interactive Blocked Recovery',
+      `- Source phase: ${progress.interactiveBlockedRecovery.sourcePhase}`,
+      `- Blocked reason: ${progress.interactiveBlockedRecovery.blockedReason}`,
+      `- Recorded turns: ${progress.interactiveBlockedRecovery.turns}`,
+      `- Remaining turns: ${progress.interactiveBlockedRecovery.remainingTurns}`,
     );
   }
 

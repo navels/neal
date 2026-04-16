@@ -11,12 +11,13 @@ import {
   computeNextScopeStateAfterSquash,
   flushDerivedPlanNotifications,
   loadOrInitialize,
+  recordInteractiveBlockedRecoveryGuidance,
   runFinalSquashPhase,
 } from '../src/neal/orchestrator.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
-import { createInitialState, getDefaultAgentConfig, saveState } from '../src/neal/state.js';
+import { createInitialState, getDefaultAgentConfig, loadState, saveState } from '../src/neal/state.js';
 import type { OrchestrationState } from '../src/neal/types.js';
 
 const execFileAsync = promisify(execFile);
@@ -228,6 +229,73 @@ test('resume restores blocked derived-plan coder response sessions', async () =>
   assert.equal(state.derivedPlanPath, derivedPlanPath);
   assert.equal(state.derivedPlanStatus, 'pending_review');
   assert.equal(state.derivedFromScopeNumber, 4);
+});
+
+test('resume preserves interactive blocked recovery state without resuming execution', async () => {
+  const { cwd, statePath } = await createResumeFixture({
+    currentScopeNumber: 2,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+    coderSessionHandle: 'coder-session-1',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need operator guidance',
+      maxTurns: 3,
+      turns: [],
+    },
+  });
+
+  const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(state.phase, 'interactive_blocked_recovery');
+  assert.equal(state.status, 'running');
+  assert.equal(state.blockedFromPhase, 'coder_scope');
+  assert.equal(state.interactiveBlockedRecovery?.blockedReason, 'Need operator guidance');
+  assert.equal(state.interactiveBlockedRecovery?.turns.length, 0);
+});
+
+test('recordInteractiveBlockedRecoveryGuidance persists operator recovery input and artifacts', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 3,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings did not converge',
+      maxTurns: 3,
+      turns: [],
+    },
+  });
+
+  const nextState = await recordInteractiveBlockedRecoveryGuidance(
+    statePath,
+    'Replace this scope with a narrower plan and keep the last accepted commit.',
+  );
+  assert.equal(nextState.phase, 'interactive_blocked_recovery');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.match(
+    nextState.interactiveBlockedRecovery?.turns[0].operatorGuidance ?? '',
+    /Replace this scope with a narrower plan/,
+  );
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.equal(
+    reloadedState.interactiveBlockedRecovery?.turns[0].operatorGuidance,
+    'Replace this scope with a narrower plan and keep the last accepted commit.',
+  );
+
+  const consultMarkdown = await readFile(state.consultMarkdownPath, 'utf8');
+  assert.match(consultMarkdown, /## Interactive Blocked Recovery/);
+  assert.match(consultMarkdown, /Replace this scope with a narrower plan and keep the last accepted commit\./);
+
+  const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+  assert.match(progressMarkdown, /## Interactive Blocked Recovery/);
+  assert.match(progressMarkdown, /Recorded turns: 1/);
 });
 
 test('resume keeps derived-plan reviewer rounds runnable after failure normalization', async () => {

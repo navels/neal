@@ -55,6 +55,7 @@ import type {
   AgentConfig,
   CoderConsultRequest,
   FindingStatus,
+  InteractiveBlockedRecoveryState,
   OrchestrationState,
   OrchestratorInit,
   ReviewFinding,
@@ -406,6 +407,108 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   return nextState;
 }
 
+function getInteractiveBlockedRecoverySourcePhase(
+  phase: OrchestrationState['phase'] | null,
+): InteractiveBlockedRecoveryState['sourcePhase'] {
+  switch (phase) {
+    case 'coder_plan':
+    case 'reviewer_plan':
+    case 'coder_plan_response':
+    case 'coder_plan_optional_response':
+    case 'awaiting_derived_plan_execution':
+    case 'coder_scope':
+    case 'reviewer_scope':
+    case 'coder_response':
+    case 'coder_optional_response':
+    case 'reviewer_consult':
+    case 'coder_consult_response':
+    case 'final_squash':
+      return phase;
+    default:
+      return 'coder_scope';
+  }
+}
+
+async function enterInteractiveBlockedRecovery(
+  state: OrchestrationState,
+  statePath: string,
+  reason: string,
+  logger?: RunLogger,
+) {
+  const nextRecovery: InteractiveBlockedRecoveryState = state.interactiveBlockedRecovery ?? {
+    enteredAt: new Date().toISOString(),
+    sourcePhase: getInteractiveBlockedRecoverySourcePhase(state.blockedFromPhase ?? state.phase),
+    blockedReason: reason,
+    maxTurns: 3,
+    turns: [],
+  };
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: state.blockedFromPhase ?? state.phase,
+    interactiveBlockedRecovery: {
+      ...nextRecovery,
+      sourcePhase: getInteractiveBlockedRecoverySourcePhase(state.blockedFromPhase ?? state.phase),
+      blockedReason: reason,
+    },
+  });
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('interactive_blocked_recovery.entered', {
+    scopeNumber: nextState.currentScopeNumber,
+    sourcePhase: nextState.interactiveBlockedRecovery?.sourcePhase,
+    blockedReason: reason,
+  });
+  return nextState;
+}
+
+export async function recordInteractiveBlockedRecoveryGuidance(
+  statePath: string,
+  operatorGuidance: string,
+  logger?: RunLogger,
+) {
+  const trimmedGuidance = operatorGuidance.trim();
+  if (!trimmedGuidance) {
+    throw new Error('Recovery guidance must not be empty');
+  }
+
+  const state = await loadState(statePath);
+  if (state.phase !== 'interactive_blocked_recovery' || !state.interactiveBlockedRecovery) {
+    throw new Error(`Run is not in interactive blocked recovery: ${statePath}`);
+  }
+
+  const turns = state.interactiveBlockedRecovery.turns;
+  if (turns.length >= state.interactiveBlockedRecovery.maxTurns) {
+    throw new Error(
+      `Interactive blocked recovery has reached its turn limit (${state.interactiveBlockedRecovery.maxTurns})`,
+    );
+  }
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    interactiveBlockedRecovery: {
+      ...state.interactiveBlockedRecovery,
+      turns: [
+        ...turns,
+        {
+          number: turns.length + 1,
+          recordedAt: new Date().toISOString(),
+          operatorGuidance: trimmedGuidance,
+        },
+      ],
+    },
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('interactive_blocked_recovery.guidance_recorded', {
+    scopeNumber: nextState.currentScopeNumber,
+    recoveryTurn: nextState.interactiveBlockedRecovery?.turns.at(-1)?.number,
+    sourcePhase: nextState.interactiveBlockedRecovery?.sourcePhase,
+  });
+  return nextState;
+}
+
 function isResumableBlockedPhase(
   phase: OrchestrationState['phase'] | null,
 ): phase is 'coder_scope' | 'coder_response' | 'coder_optional_response' | 'coder_plan' | 'coder_plan_response' | 'coder_plan_optional_response' {
@@ -493,7 +596,7 @@ async function finalizeBlockedPlanReviewResponse(
   blocker: string,
   logger?: RunLogger,
 ) {
-  const persistedState = await persistBlockedScope(state, statePath, blocker);
+  const persistedState = await enterInteractiveBlockedRecovery(state, statePath, blocker, logger);
   if (!derivedPlanReview) {
     await notifyBlocked(persistedState, blocker, logger);
   }
@@ -715,12 +818,8 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
       });
       return consultState;
     }
-    const persistedState = await persistBlockedScope(nextState, statePath, reason);
-    await notifyBlocked(
-      persistedState,
-      reason,
-      logger,
-    );
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, reason, logger);
+    await notifyBlocked(persistedState, reason, logger);
     return persistedState;
   }
   return nextState;
@@ -780,7 +879,7 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
   });
   if (nextState.status === 'blocked') {
     const reason = completionProblem ?? 'The coder reported a blocker during plan revision';
-    const persistedState = await persistBlockedScope(nextState, statePath, reason);
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, reason, logger);
     await notifyBlocked(persistedState, reason, logger);
     return persistedState;
   }
@@ -919,7 +1018,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked' && blockReason) {
-    const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blockReason, logger);
     await notifyBlocked(persistedState, blockReason, logger);
     return persistedState;
   }
@@ -1074,7 +1173,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked' && blockReason) {
-    const persistedState = await persistBlockedScope(nextState, statePath, blockReason);
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blockReason, logger);
     if (!derivedPlanReview) {
       await notifyBlocked(persistedState, blockReason, logger);
     }
@@ -1408,7 +1507,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
       });
       return consultState;
     }
-    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blocker, logger);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
   }
@@ -1530,7 +1629,7 @@ async function runCoderOptionalResponsePhase(state: OrchestrationState, statePat
       codex.payload.blocker?.trim() ||
       codex.payload.summary.trim() ||
       'The coder reported a blocker while considering non-blocking review findings';
-    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blocker, logger);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
   }
@@ -1604,7 +1703,7 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
   });
   if (nextState.status === 'blocked') {
     const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder remained blocked after reviewer consultation';
-    const persistedState = await persistBlockedScope(nextState, statePath, blocker);
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blocker, logger);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
   }

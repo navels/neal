@@ -1,7 +1,16 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import type { AgentConfig, AgentProvider, ConsultRound, OrchestrationState, OrchestratorInit, ReviewFinding, ReviewRound } from './types.js';
+import type {
+  AgentConfig,
+  AgentProvider,
+  ConsultRound,
+  InteractiveBlockedRecoveryState,
+  OrchestrationState,
+  OrchestratorInit,
+  ReviewFinding,
+  ReviewRound,
+} from './types.js';
 
 const AGENT_PROVIDERS = new Set(['openai-codex', 'anthropic-claude']);
 
@@ -100,6 +109,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     maxRounds: init.maxRounds,
     maxConsultsPerScope: 4,
     blockedFromPhase: null,
+    interactiveBlockedRecovery: null,
     status: 'running',
   };
 }
@@ -238,6 +248,52 @@ function hydrateFinding(value: unknown): ReviewFinding {
       typeof (finding as { coderCommit?: unknown }).coderCommit === 'string'
         ? (finding as { coderCommit: string }).coderCommit
         : null,
+  };
+}
+
+function hydrateInteractiveBlockedRecovery(value: unknown): InteractiveBlockedRecoveryState | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const recovery = value as Partial<InteractiveBlockedRecoveryState>;
+  const sourcePhase =
+    recovery.sourcePhase === 'coder_plan' ||
+    recovery.sourcePhase === 'reviewer_plan' ||
+    recovery.sourcePhase === 'coder_plan_response' ||
+    recovery.sourcePhase === 'coder_plan_optional_response' ||
+    recovery.sourcePhase === 'awaiting_derived_plan_execution' ||
+    recovery.sourcePhase === 'coder_scope' ||
+    recovery.sourcePhase === 'reviewer_scope' ||
+    recovery.sourcePhase === 'coder_response' ||
+    recovery.sourcePhase === 'coder_optional_response' ||
+    recovery.sourcePhase === 'reviewer_consult' ||
+    recovery.sourcePhase === 'coder_consult_response' ||
+    recovery.sourcePhase === 'final_squash'
+      ? recovery.sourcePhase
+      : 'coder_scope';
+
+  return {
+    enteredAt: typeof recovery.enteredAt === 'string' ? recovery.enteredAt : new Date(0).toISOString(),
+    sourcePhase,
+    blockedReason: typeof recovery.blockedReason === 'string' ? recovery.blockedReason : '',
+    maxTurns: typeof recovery.maxTurns === 'number' ? recovery.maxTurns : 3,
+    turns: Array.isArray(recovery.turns)
+      ? recovery.turns
+          .filter(
+            (turn): turn is InteractiveBlockedRecoveryState['turns'][number] =>
+              Boolean(turn) &&
+              typeof turn === 'object' &&
+              typeof turn.number === 'number' &&
+              typeof turn.recordedAt === 'string' &&
+              typeof turn.operatorGuidance === 'string',
+          )
+          .map((turn) => ({
+            number: turn.number,
+            recordedAt: turn.recordedAt,
+            operatorGuidance: turn.operatorGuidance,
+          }))
+      : [],
   };
 }
 
@@ -414,6 +470,9 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
     completedScopes: Array.isArray(parsed.completedScopes) ? parsed.completedScopes.map(hydrateCompletedScope) : [],
     maxConsultsPerScope: typeof parsed.maxConsultsPerScope === 'number' ? parsed.maxConsultsPerScope : 4,
     blockedFromPhase: typeof parsed.blockedFromPhase === 'string' ? parsed.blockedFromPhase as OrchestrationState['phase'] : null,
+    interactiveBlockedRecovery: hydrateInteractiveBlockedRecovery(
+      (parsed as { interactiveBlockedRecovery?: unknown }).interactiveBlockedRecovery,
+    ),
   };
 }
 

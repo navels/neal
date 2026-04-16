@@ -16,6 +16,26 @@ export function renderConsultMarkdown(state: OrchestrationState) {
     '## Consult Rounds',
   ];
 
+  if (state.interactiveBlockedRecovery) {
+    lines.push(
+      '',
+      '## Interactive Blocked Recovery',
+      `- Source phase: ${state.interactiveBlockedRecovery.sourcePhase}`,
+      `- Blocked reason: ${state.interactiveBlockedRecovery.blockedReason}`,
+      `- Max turns: ${state.interactiveBlockedRecovery.maxTurns}`,
+    );
+
+    if (state.interactiveBlockedRecovery.turns.length === 0) {
+      lines.push('- Operator guidance: pending');
+    } else {
+      for (const turn of state.interactiveBlockedRecovery.turns) {
+        lines.push(
+          `- Recovery turn ${turn.number} at ${turn.recordedAt}: ${turn.operatorGuidance}`,
+        );
+      }
+    }
+  }
+
   if (state.consultRounds.length === 0) {
     lines.push('', 'No consult rounds yet.');
     return `${lines.join('\n')}\n`;
