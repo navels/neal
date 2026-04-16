@@ -1772,8 +1772,9 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
     : commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize scope work';
   const finalMessage = normalizeFinalCommitMessage(rawFinalMessage);
   const finalSubject = finalMessage.split(/\r?\n/, 1)[0] || 'Finalize scope work';
+  const changedFilesSinceBase = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
   const finalCommit =
-    state.createdCommits.length > 0
+    state.createdCommits.length > 0 && changedFilesSinceBase.length > 0
       ? await squashCommits(state.cwd, state.baseCommit, finalMessage)
       : headCommit;
 

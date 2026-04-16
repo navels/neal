@@ -146,6 +146,66 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
   return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
 }
 
+async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationState>) {
+  const root = await mkdtemp(join(tmpdir(), 'neal-final-squash-empty-'));
+  const cwd = join(root, 'repo');
+  const stateDir = join(cwd, '.neal');
+  const runDir = join(stateDir, 'runs', 'test-run');
+  const planDoc = join(cwd, 'PLAN.md');
+  const trackedFile = join(cwd, 'scope.txt');
+
+  await mkdir(runDir, { recursive: true });
+  await writeFile(planDoc, '# Plan\n', 'utf8');
+  await writeFile(trackedFile, 'base\n', 'utf8');
+
+  await runGit(root, 'init', 'repo');
+  await runGit(cwd, 'config', 'user.name', 'Neal Test');
+  await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+  await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+  await runGit(cwd, 'add', 'PLAN.md', 'scope.txt');
+  await runGit(cwd, 'commit', '-m', 'base commit');
+
+  const baseCommit = await runGit(cwd, 'rev-parse', 'HEAD');
+  const initialState = await createInitialState(
+    {
+      cwd,
+      planDoc,
+      stateDir,
+      runDir,
+      topLevelMode: 'execute',
+      agentConfig: getDefaultAgentConfig(),
+      progressJsonPath: join(runDir, 'plan-progress.json'),
+      progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
+      reviewMarkdownPath: join(runDir, 'REVIEW.md'),
+      consultMarkdownPath: join(runDir, 'CONSULT.md'),
+      maxRounds: 3,
+    },
+    baseCommit,
+  );
+
+  await runGit(cwd, 'commit', '--allow-empty', '-m', 'empty derived scope checkpoint');
+  const createdCommit = await runGit(cwd, 'rev-parse', 'HEAD');
+  const createdCommitsOverride = overrides.createdCommits;
+
+  const statePath = join(stateDir, 'session.json');
+  const state = await saveState(statePath, {
+    ...initialState,
+    currentScopeNumber: 5,
+    phase: 'final_squash',
+    status: 'running',
+    baseCommit,
+    splitPlanStartedNotified: true,
+    derivedPlanAcceptedNotified: true,
+    splitPlanBlockedNotified: false,
+    ...overrides,
+    createdCommits: createdCommitsOverride ?? [createdCommit],
+  });
+
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+
+  return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
+}
+
 test('resume restores blocked derived-plan coder response sessions', async () => {
   const derivedPlanPath = '/tmp/DERIVED_PLAN_SCOPE_4.md';
   const { cwd, statePath } = await createResumeFixture({
@@ -663,6 +723,44 @@ test('final squash rolls the last derived sub-scope up into the parent scope and
     const notifyLog = await readFile(notifyLogPath, 'utf8');
     const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
     assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.2 complete: derived scope work']);
+  } finally {
+    if (previousNotifyBin === undefined) {
+      delete process.env.AUTONOMY_NOTIFY_BIN;
+    } else {
+      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
+    }
+  }
+});
+
+test('final squash preserves an empty derived scope checkpoint commit without attempting a no-op squash', async () => {
+  const { statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath } =
+    await createEmptyFinalSquashFixture({
+      derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+      derivedPlanStatus: 'accepted',
+      derivedFromScopeNumber: 5,
+      derivedScopeIndex: 1,
+      lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
+    });
+  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
+  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+
+  try {
+    const nextState = await runFinalSquashPhase(state, statePath);
+    assert.equal(nextState.phase, 'coder_scope');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.currentScopeNumber, 5);
+    assert.equal(nextState.derivedScopeIndex, 2);
+    assert.equal(nextState.baseCommit, createdCommit);
+    assert.equal(nextState.completedScopes.some((scope) => scope.number === '5.1'), true);
+    const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
+    assert.equal(subScope?.finalCommit, createdCommit);
+    const directParent = await runGit(state.cwd, 'rev-parse', `${createdCommit}^`);
+    assert.equal(directParent, baseCommit);
+    const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${baseCommit}..${createdCommit}`);
+    assert.equal(squashedCount, '1');
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
+    assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: empty derived scope checkpoint']);
   } finally {
     if (previousNotifyBin === undefined) {
       delete process.env.AUTONOMY_NOTIFY_BIN;
