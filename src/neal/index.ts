@@ -91,7 +91,7 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
 
   if (shouldResumeLastThread && lastCoderSessionHandle) {
     process.stderr.write(`[neal] resuming ${lastCoderSessionHandle}\n`);
-    await resumeLastCoderSession(lastCoderSessionHandle);
+    await resumeLastCoderSession(finalState.agentConfig.coder.provider, lastCoderSessionHandle);
   }
 }
 
@@ -119,8 +119,9 @@ async function createInlineExecutePlanDoc(cwd: string, prompt: string) {
   return filePath;
 }
 
-async function resumeLastCoderSession(sessionHandle: string) {
-  await spawnResumeCommand('codex', ['resume', sessionHandle]);
+async function resumeLastCoderSession(provider: AgentProvider, sessionHandle: string) {
+  const { command, args } = getResumeCommandForProvider(provider, sessionHandle);
+  await spawnResumeCommand(command, args);
 }
 
 async function spawnResumeCommand(command: string, args: string[]) {
