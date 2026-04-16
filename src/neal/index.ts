@@ -16,6 +16,17 @@ import { showSummaries } from './summaries.js';
 import { CoderRoundError, ReviewerRoundError } from './agents.js';
 import type { AgentProvider } from './types.js';
 
+type SessionLaunchCommand = {
+  command: string;
+  args: string[];
+};
+
+type SessionLaunchTarget = {
+  role: 'coder' | 'reviewer';
+  provider: AgentProvider;
+  sessionHandle: string;
+};
+
 function usage(): never {
   console.error('Usage: neal --execute <plan-doc|inline-prompt>');
   console.error('   or: neal --plan <plan-doc>');
@@ -120,11 +131,14 @@ async function createInlineExecutePlanDoc(cwd: string, prompt: string) {
 }
 
 async function resumeLastCoderSession(provider: AgentProvider, sessionHandle: string) {
-  const { command, args } = getResumeCommandForProvider(provider, sessionHandle);
-  await spawnResumeCommand(command, args);
+  await openSession({
+    role: 'coder',
+    provider,
+    sessionHandle,
+  });
 }
 
-async function spawnResumeCommand(command: string, args: string[]) {
+async function spawnLaunchCommand({ command, args }: SessionLaunchCommand) {
   await new Promise<void>((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       stdio: 'inherit',
@@ -146,7 +160,7 @@ async function spawnResumeCommand(command: string, args: string[]) {
   });
 }
 
-function getResumeCommandForProvider(provider: AgentProvider, sessionHandle: string) {
+function getSessionLaunchCommand(provider: AgentProvider, sessionHandle: string): SessionLaunchCommand {
   switch (provider) {
     case 'openai-codex':
       return {
@@ -161,10 +175,13 @@ function getResumeCommandForProvider(provider: AgentProvider, sessionHandle: str
   }
 }
 
-async function resumeAgentSession(
-  role: 'coder' | 'reviewer',
-  statePath: string,
-) {
+async function openSession(target: SessionLaunchTarget) {
+  const launch = getSessionLaunchCommand(target.provider, target.sessionHandle);
+  process.stderr.write(`[neal] opening ${target.role} session via ${launch.command} ${launch.args.join(' ')}\n`);
+  await spawnLaunchCommand(launch);
+}
+
+async function openPersistedSession(role: 'coder' | 'reviewer', statePath: string) {
   const state = await loadState(statePath);
   const roleConfig = role === 'coder' ? state.agentConfig.coder : state.agentConfig.reviewer;
   const sessionHandle = role === 'coder' ? state.coderSessionHandle : state.reviewerSessionHandle;
@@ -173,9 +190,11 @@ async function resumeAgentSession(
     throw new Error(`No persisted ${role} session handle found in ${statePath}`);
   }
 
-  const { command, args } = getResumeCommandForProvider(roleConfig.provider, sessionHandle);
-  process.stderr.write(`[neal] opening ${role} session via ${command} ${args.join(' ')}\n`);
-  await spawnResumeCommand(command, args);
+  await openSession({
+    role,
+    provider: roleConfig.provider,
+    sessionHandle,
+  });
 }
 
 function createStopController() {
@@ -267,7 +286,7 @@ async function main() {
     }
     const statePath = resolve(args[index + 1] ?? '.neal/session.json');
     await access(statePath);
-    await resumeAgentSession(firstArg === '--resume-coder' ? 'coder' : 'reviewer', statePath);
+    await openPersistedSession(firstArg === '--resume-coder' ? 'coder' : 'reviewer', statePath);
     return;
   }
 

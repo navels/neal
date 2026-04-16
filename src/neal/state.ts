@@ -297,10 +297,7 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
   };
 }
 
-export async function loadState(path: string): Promise<OrchestrationState> {
-  const content = await readFile(path, 'utf8');
-  const parsed = JSON.parse(content);
-  validateState(parsed);
+function normalizeStateV1(parsed: OrchestrationState, path: string): OrchestrationState {
   const stateDir = dirname(path);
   const runDir = typeof parsed.runDir === 'string' ? parsed.runDir : join(stateDir, 'runs', 'legacy');
   const progressJsonPath = typeof parsed.progressJsonPath === 'string' ? parsed.progressJsonPath : join(runDir, 'plan-progress.json');
@@ -308,6 +305,7 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     typeof parsed.progressMarkdownPath === 'string' ? parsed.progressMarkdownPath : join(runDir, 'PLAN_PROGRESS.md');
   const consultMarkdownPath =
     typeof parsed.consultMarkdownPath === 'string' ? parsed.consultMarkdownPath : join(runDir, 'CONSULT.md');
+
   return {
     ...parsed,
     runDir,
@@ -392,4 +390,11 @@ export async function loadState(path: string): Promise<OrchestrationState> {
     maxConsultsPerScope: typeof parsed.maxConsultsPerScope === 'number' ? parsed.maxConsultsPerScope : 4,
     blockedFromPhase: typeof parsed.blockedFromPhase === 'string' ? parsed.blockedFromPhase as OrchestrationState['phase'] : null,
   };
+}
+
+export async function loadState(path: string): Promise<OrchestrationState> {
+  const content = await readFile(path, 'utf8');
+  const parsed = JSON.parse(content);
+  validateState(parsed);
+  return normalizeStateV1(parsed, path);
 }
