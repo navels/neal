@@ -6,25 +6,8 @@ export const AUTONOMY_DONE = 'AUTONOMY_DONE';
 export const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
 export const AUTONOMY_SPLIT_PLAN = 'AUTONOMY_SPLIT_PLAN';
 
-export function buildPlanningPrompt(planDoc: string) {
+function getCanonicalPlanContractLines() {
   return [
-    `Rewrite the draft plan document at ${planDoc} into a future execution plan for neal.`,
-    '',
-    'Before doing anything else:',
-    `1. Read ${planDoc}.`,
-    '2. Read any companion docs explicitly referenced by that plan.',
-    '3. Reset your instructions for this turn from the current contents of the plan and referenced context.',
-    '',
-    'Then revise only plan-related artifacts.',
-    'Do not edit runtime source code outside the plan itself and adjacent planning notes.',
-    'Do not make git commits.',
-    'Your output must be a pure future execution plan, not a planning-task checklist.',
-    'Replace the draft in place so the resulting file is meant to be run later with neal --execute, not neal --plan.',
-    'Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.',
-    'Ground the plan in the actual current repository state. Inspect the real target files and write steps against the symbols, exports, and file structure that actually exist.',
-    'Do not leave avoidable ambiguity in the plan when the repository already answers the question. Name concrete target functions, files, and exports when they are knowable from the repo.',
-    'Do not ask the future executor to perform redundant edits. If an export already propagates through an existing barrel file, say to verify that behavior instead of adding a fake extra edit step.',
-    'Make the final plan explicit about scope boundaries, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any repeated-scope selection rules.',
     'Choose exactly one execution shape: `one_shot` or `multi_scope`.',
     'Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot` or `executionShape: multi_scope`.',
     'If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.',
@@ -45,6 +28,29 @@ export function buildPlanningPrompt(planDoc: string) {
     '- Verification: `pnpm typecheck`',
     '- Success Condition: The bounded slice is complete and verified.',
     '```',
+  ];
+}
+
+export function buildPlanningPrompt(planDoc: string) {
+  return [
+    `Rewrite the draft plan document at ${planDoc} into a future execution plan for neal.`,
+    '',
+    'Before doing anything else:',
+    `1. Read ${planDoc}.`,
+    '2. Read any companion docs explicitly referenced by that plan.',
+    '3. Reset your instructions for this turn from the current contents of the plan and referenced context.',
+    '',
+    'Then revise only plan-related artifacts.',
+    'Do not edit runtime source code outside the plan itself and adjacent planning notes.',
+    'Do not make git commits.',
+    'Your output must be a pure future execution plan, not a planning-task checklist.',
+    'Replace the draft in place so the resulting file is meant to be run later with neal --execute, not neal --plan.',
+    'Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.',
+    'Ground the plan in the actual current repository state. Inspect the real target files and write steps against the symbols, exports, and file structure that actually exist.',
+    'Do not leave avoidable ambiguity in the plan when the repository already answers the question. Name concrete target functions, files, and exports when they are knowable from the repo.',
+    'Do not ask the future executor to perform redundant edits. If an export already propagates through an existing barrel file, say to verify that behavior instead of adding a fake extra edit step.',
+    'Make the final plan explicit about scope boundaries, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any repeated-scope selection rules.',
+    ...getCanonicalPlanContractLines(),
     'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
     '',
     'Final line must be exactly one of:',
@@ -71,7 +77,9 @@ export function buildScopePrompt(planDoc: string, progressText: string) {
     'If this scope completes the entire plan, return AUTONOMY_DONE. If more scopes remain, return AUTONOMY_SCOPE_DONE.',
     `If the target remains viable but the current scope has proven to be the wrong execution shape, return ${AUTONOMY_SPLIT_PLAN} instead of forcing the bad shape or using AUTONOMY_BLOCKED.`,
     `Use ${AUTONOMY_SPLIT_PLAN} only when the current scope result should be discarded and replaced by a safer derived plan for the same target.`,
-    `When you return ${AUTONOMY_SPLIT_PLAN}, include a derived plan markdown artifact before the final marker with these sections: Scope Replacement Rationale, New Strategy, Ordered Derived Scopes, Verification Strategy, and Adoption Rule.`,
+    `When you return ${AUTONOMY_SPLIT_PLAN}, include a derived plan markdown artifact before the final marker.`,
+    'The derived plan must use the same Neal-executable contract as a top-level plan. Any derived-plan-specific sections are optional additive context only; they must not replace or rename the canonical machine-consumed sections.',
+    ...getCanonicalPlanContractLines(),
     'Verify the relevant work before you finish.',
     'Create real git commit(s) for completed work.',
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
@@ -158,7 +166,7 @@ export function buildPlanReviewerPrompt(args: {
       ? 'Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.'
       : 'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
     mode === 'derived-plan'
-      ? 'Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence.'
+      ? 'Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.'
       : 'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
     mode === 'derived-plan'
       ? 'Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.'
@@ -168,7 +176,7 @@ export function buildPlanReviewerPrompt(args: {
       ? 'Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.'
       : 'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
     mode === 'derived-plan'
-      ? 'The derived plan should preserve the same target while replacing only the invalid scope shape.'
+      ? 'The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
       : 'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
     `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
     '',
@@ -228,7 +236,8 @@ export function buildCoderResponsePrompt(args: {
       ? 'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.'
       : 'Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.',
     `If the target remains viable but the current scope has proven to be the wrong execution shape, return outcome=\`split_plan\` with a concrete derived plan in \`derivedPlan\`.`,
-    'A derived plan must include these sections: Scope Replacement Rationale, New Strategy, Ordered Derived Scopes, Verification Strategy, and Adoption Rule.',
+    'A derived plan must use the same Neal-executable contract as a top-level plan. Derived-plan-specific rationale sections are optional additive context only; they must not replace or rename `## Execution Shape`, `executionShape: ...`, `## Execution Queue`, or the required `### Scope N:` entries.',
+    ...getCanonicalPlanContractLines(),
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),
@@ -299,8 +308,9 @@ export function buildCoderPlanResponsePrompt(args: {
       ? 'Do not silently widen the target or convert a real blocker into a vague replan.'
       : 'Do not leave planning-task scaffolding behind after you respond to the findings.',
     reviewMode === 'derived-plan'
-      ? 'Revise the derived scopes, verification strategy, or adoption rule as needed so the replacement sequence is reviewable and bounded.'
+      ? 'Revise the derived plan so it uses the same Neal-executable contract as a top-level plan. Any derived-plan-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.'
       : 'Where the current repository already answers an implementation detail, revise the plan to use the concrete existing symbol names and exports instead of leaving generic or redundant instructions.',
+    ...(reviewMode === 'derived-plan' ? getCanonicalPlanContractLines() : []),
     'Use `fixed` only when you actually revised the plan to resolve the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
     'Use `deferred` only when the finding is real but not safe to resolve without user input.',

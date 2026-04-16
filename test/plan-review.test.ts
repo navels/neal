@@ -4,7 +4,14 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildPlanReviewerPrompt, buildPlanReviewerSchema, buildPlanningPrompt } from '../src/neal/agents.js';
+import {
+  buildCoderPlanResponsePrompt,
+  buildCoderResponsePrompt,
+  buildPlanReviewerPrompt,
+  buildPlanReviewerSchema,
+  buildPlanningPrompt,
+  buildScopePrompt,
+} from '../src/neal/agents.js';
 import { synthesizePlanReviewFindings } from '../src/neal/orchestrator.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -21,6 +28,43 @@ test('planning prompt requires an explicit execution-shape declaration', () => {
   assert.match(prompt, /Declare that choice in the plan document with a literal `## Execution Shape` section/);
   assert.match(prompt, /executionShape: one_shot/);
   assert.match(prompt, /executionShape: multi_scope/);
+});
+
+test('derived-plan prompts require the same canonical Neal-executable contract', () => {
+  const scopePrompt = buildScopePrompt('/tmp/PLAN.md', 'Current scope: 1');
+  const coderResponsePrompt = buildCoderResponsePrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: 'Current scope: 1',
+    verificationHint: 'Run targeted verification.',
+    openFindings: [],
+  });
+  const planResponsePrompt = buildCoderPlanResponsePrompt({
+    planDoc: '/tmp/DERIVED_PLAN.md',
+    openFindings: [],
+    reviewMode: 'derived-plan',
+    parentPlanDoc: '/tmp/PLAN.md',
+    derivedFromScopeNumber: 3,
+  });
+  const reviewerPrompt = buildPlanReviewerPrompt({
+    planDoc: '/tmp/DERIVED_PLAN.md',
+    round: 1,
+    reviewMarkdownPath: '/tmp/REVIEW.md',
+    mode: 'derived-plan',
+    parentPlanDoc: '/tmp/PLAN.md',
+    derivedFromScopeNumber: 3,
+  });
+
+  for (const prompt of [scopePrompt, coderResponsePrompt, planResponsePrompt]) {
+    assert.match(prompt, /same Neal-executable contract as a top-level plan/);
+    assert.match(prompt, /## Execution Shape/);
+    assert.match(prompt, /executionShape: multi_scope/);
+    assert.match(prompt, /## Execution Queue/);
+    assert.match(prompt, /### Scope 1: Example scope/);
+    assert.doesNotMatch(prompt, /Ordered Derived Scopes/);
+  }
+
+  assert.match(reviewerPrompt, /same canonical `## Execution Shape` \/ `## Execution Queue` contract as a top-level plan/);
+  assert.match(reviewerPrompt, /canonical Neal-executable plan shape/);
 });
 
 test('plan reviewer schema and prompt require executionShape confirmation', () => {
