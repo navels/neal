@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { synthesizePlanReviewFindings } from '../src/neal/orchestrator.js';
+import { preparePlanReviewArtifact, synthesizePlanReviewFindings } from '../src/neal/orchestrator.js';
 import { validatePlanDocument } from '../src/neal/plan-validation.js';
 import type { ExecutionShape } from '../src/neal/types.js';
 
@@ -165,4 +167,54 @@ test('derived near-miss fixtures stay aligned with plan-review synthesis behavio
     rejectedSynthesis.findings.map((finding) => finding.claim).join('\n'),
     /must contain at least one `### Scope N:` entry|contains content before the first scope entry/,
   );
+});
+
+test('plan review persists a normalized derivative artifact and marks it as the reviewed artifact', async () => {
+  const planPath = getFixturePath('derived-near-miss-ovation-apps.md');
+  const runDir = await mkdtemp(join(tmpdir(), 'neal-plan-review-artifact-'));
+  const normalizedPlanPath = join(runDir, `${basename(planPath, '.md')}.normalized.md`);
+  const preparedReview = await preparePlanReviewArtifact({
+    planPath,
+    normalizedPlanPath,
+  });
+
+  assert.equal(preparedReview.reviewedPlanPath, normalizedPlanPath);
+  const normalizedDocument = await readFile(normalizedPlanPath, 'utf8');
+  assert.match(normalizedDocument, /## Execution Queue/);
+  assert.match(normalizedDocument, /### Scope 1: Migrate cartridge-data-inputs to the native base/);
+
+  const synthesis = await synthesizePlanReviewFindings({
+    planPath,
+    round: 1,
+    roundSummary: 'Normalized near-miss plan remains executable.',
+    findings: [],
+    preparedReview,
+  });
+
+  assert.equal(synthesis.reviewedPlanPath, normalizedPlanPath);
+  assert.deepEqual(synthesis.findings, []);
+});
+
+test('structural findings still point back to the original plan when a normalized derivative remains invalid', async () => {
+  const planPath = getFixturePath('derived-near-miss-ambiguous.md');
+  const runDir = await mkdtemp(join(tmpdir(), 'neal-plan-review-artifact-'));
+  const normalizedPlanPath = join(runDir, `${basename(planPath, '.md')}.normalized.md`);
+  const preparedReview = await preparePlanReviewArtifact({
+    planPath,
+    normalizedPlanPath,
+  });
+
+  assert.equal(preparedReview.reviewedPlanPath, normalizedPlanPath);
+
+  const synthesis = await synthesizePlanReviewFindings({
+    planPath,
+    round: 2,
+    roundSummary: 'Ambiguous normalized artifact still fails the contract.',
+    findings: [],
+    preparedReview,
+  });
+
+  assert.equal(synthesis.reviewedPlanPath, normalizedPlanPath);
+  assert.ok(synthesis.findings.length >= 1);
+  assert.ok(synthesis.findings.every((finding) => finding.files[0] === planPath));
 });

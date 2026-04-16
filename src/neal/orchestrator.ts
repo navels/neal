@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, parse, resolve } from 'node:path';
 
 import { getMaxReviewRounds, getPhaseHeartbeatMs, getReviewStuckWindow } from './config.js';
 import {
@@ -122,37 +122,73 @@ function printReviewResult(
 
 type ReviewFindingInput = Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>;
 
+type PreparedPlanReview = {
+  executionShape: OrchestrationState['executionShape'];
+  reviewedPlanPath: string;
+  originalPlanPath: string;
+  validation: ReturnType<typeof validatePlanDocument>;
+};
+
+function getNormalizedPlanArtifactPath(state: OrchestrationState, planPath: string) {
+  const parsed = parse(planPath);
+  const extension = parsed.ext || '.md';
+  return join(state.runDir, `${parsed.name}.normalized${extension}`);
+}
+
+export async function preparePlanReviewArtifact(args: {
+  planPath: string;
+  normalizedPlanPath?: string;
+}): Promise<PreparedPlanReview> {
+  const planDocument = await readFile(args.planPath, 'utf8');
+  const validation = validatePlanDocument(planDocument);
+  let reviewedPlanPath = args.planPath;
+
+  if (validation.normalization.applied && args.normalizedPlanPath) {
+    await mkdir(dirname(args.normalizedPlanPath), { recursive: true });
+    await writeFile(args.normalizedPlanPath, validation.normalization.normalizedDocument, 'utf8');
+    reviewedPlanPath = args.normalizedPlanPath;
+  }
+
+  return {
+    executionShape: validation.executionShape,
+    reviewedPlanPath,
+    originalPlanPath: args.planPath,
+    validation,
+  };
+}
+
 export async function synthesizePlanReviewFindings(args: {
   planPath: string;
   round: number;
   roundSummary: string;
   findings: ReviewFindingInput[];
+  preparedReview?: PreparedPlanReview;
 }): Promise<{
   executionShape: OrchestrationState['executionShape'];
   reviewedPlanPath: string;
   findings: ReviewFindingInput[];
 }> {
-  const planDocument = await readFile(args.planPath, 'utf8');
-  const validation = validatePlanDocument(planDocument);
+  const preparedReview = args.preparedReview ?? (await preparePlanReviewArtifact({ planPath: args.planPath }));
+  const { validation } = preparedReview;
 
   if (validation.ok) {
     return {
       executionShape: validation.executionShape,
-      reviewedPlanPath: args.planPath,
+      reviewedPlanPath: preparedReview.reviewedPlanPath,
       findings: args.findings,
     };
   }
 
   return {
     executionShape: validation.executionShape,
-    reviewedPlanPath: args.planPath,
+    reviewedPlanPath: preparedReview.reviewedPlanPath,
     findings: [
       ...args.findings,
       ...validation.errors.map((error) => ({
         round: args.round,
         source: 'plan_structure' as const,
         severity: 'blocking' as const,
-        files: [args.planPath],
+        files: [preparedReview.originalPlanPath],
         claim: `Plan document structure is invalid: ${error}`,
         requiredAction: 'Revise the plan document so it satisfies the required execution-shape and execution-queue contract.',
         roundSummary: args.roundSummary,
@@ -889,12 +925,16 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const derivedPlanReview = isDerivedPlanReviewState(state);
   const roundLimit = getPlanReviewRoundLimit(state);
   const reviewTargetPath = getPlanReviewTargetPath(state);
+  const preparedReview = await preparePlanReviewArtifact({
+    planPath: reviewTargetPath,
+    normalizedPlanPath: getNormalizedPlanArtifactPath(state, reviewTargetPath),
+  });
   let claude;
   try {
     claude = await runPlanReviewerRound({
       reviewer: state.agentConfig.reviewer,
       cwd: state.cwd,
-      planDoc: reviewTargetPath,
+      planDoc: preparedReview.reviewedPlanPath,
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
       mode: derivedPlanReview ? 'derived-plan' : 'plan',
@@ -932,6 +972,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       ...finding,
       source: finding.source,
     })),
+    preparedReview,
   });
   const normalizedFindingInputs = synthesizedReview.findings;
 
