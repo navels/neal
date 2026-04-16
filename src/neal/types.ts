@@ -128,6 +128,7 @@ export type InteractiveBlockedRecoveryState = {
   sourcePhase: Exclude<OrchestrationPhase, 'interactive_blocked_recovery' | 'done' | 'blocked'>;
   blockedReason: string;
   maxTurns: number;
+  lastHandledTurn: number;
   turns: InteractiveBlockedRecoveryTurn[];
 };
 

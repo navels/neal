@@ -99,7 +99,19 @@ async function discardScopeWorktree(state: OrchestrationState) {
 }
 
 type PersistSplitPlanRecoveryArgs = {
-  sourcePhase: 'coder_scope' | 'coder_response' | 'coder_optional_response';
+  sourcePhase:
+    | 'coder_scope'
+    | 'reviewer_scope'
+    | 'coder_response'
+    | 'coder_optional_response'
+    | 'reviewer_consult'
+    | 'coder_consult_response'
+    | 'reviewer_plan'
+    | 'coder_plan'
+    | 'coder_plan_response'
+    | 'coder_plan_optional_response'
+    | 'awaiting_derived_plan_execution'
+    | 'final_squash';
   derivedPlanMarkdown: string;
   createdCommits: string[];
   logger?: RunLogger;
@@ -153,6 +165,7 @@ export async function persistSplitPlanRecovery(
     phase: 'reviewer_plan',
     status: 'running',
     blockedFromPhase: null,
+    interactiveBlockedRecovery: null,
     derivedPlanPath,
     derivedFromScopeNumber: state.currentScopeNumber,
     derivedPlanStatus: 'pending_review',

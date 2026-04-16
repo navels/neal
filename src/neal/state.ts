@@ -278,6 +278,7 @@ function hydrateInteractiveBlockedRecovery(value: unknown): InteractiveBlockedRe
     sourcePhase,
     blockedReason: typeof recovery.blockedReason === 'string' ? recovery.blockedReason : '',
     maxTurns: typeof recovery.maxTurns === 'number' ? recovery.maxTurns : 3,
+    lastHandledTurn: typeof recovery.lastHandledTurn === 'number' ? recovery.lastHandledTurn : 0,
     turns: Array.isArray(recovery.turns)
       ? recovery.turns
           .filter(

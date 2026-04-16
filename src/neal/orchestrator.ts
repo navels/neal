@@ -7,6 +7,7 @@ import { getMaxReviewRounds, getPhaseHeartbeatMs, getReviewStuckWindow } from '.
 import {
   CoderRoundError,
   ReviewerRoundError,
+  runBlockedRecoveryCoderRound,
   runCoderConsultResponseRound,
   runCoderScopeRound,
   runCoderPlanResponseRound,
@@ -53,6 +54,7 @@ import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, hasAcc
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type {
   AgentConfig,
+  CoderBlockedRecoveryDisposition,
   CoderConsultRequest,
   FindingStatus,
   InteractiveBlockedRecoveryState,
@@ -242,7 +244,8 @@ async function persistCoderFailureState(
     | 'coder_optional_response'
     | 'coder_plan_response'
     | 'coder_plan_optional_response'
-    | 'coder_consult_response',
+    | 'coder_consult_response'
+    | 'interactive_blocked_recovery',
   error: CoderRoundError,
   logger?: RunLogger,
 ) {
@@ -440,6 +443,7 @@ async function enterInteractiveBlockedRecovery(
     sourcePhase: getInteractiveBlockedRecoverySourcePhase(state.blockedFromPhase ?? state.phase),
     blockedReason: reason,
     maxTurns: 3,
+    lastHandledTurn: 0,
     turns: [],
   };
 
@@ -520,6 +524,131 @@ function isResumableBlockedPhase(
     phase === 'coder_plan_response' ||
     phase === 'coder_plan_optional_response'
   );
+}
+
+function hasPendingInteractiveBlockedRecoveryTurn(state: OrchestrationState) {
+  if (state.phase !== 'interactive_blocked_recovery' || !state.interactiveBlockedRecovery) {
+    return false;
+  }
+
+  return state.interactiveBlockedRecovery.turns.length > state.interactiveBlockedRecovery.lastHandledTurn;
+}
+
+function getInteractiveBlockedRecoveryResumePhase(
+  sourcePhase: InteractiveBlockedRecoveryState['sourcePhase'],
+): RunnablePhase {
+  switch (sourcePhase) {
+    case 'reviewer_scope':
+      return 'coder_response';
+    case 'reviewer_plan':
+      return 'coder_plan_response';
+    case 'reviewer_consult':
+      return 'coder_consult_response';
+    case 'awaiting_derived_plan_execution':
+      return 'coder_scope';
+    default:
+      return sourcePhase;
+  }
+}
+
+export async function applyInteractiveBlockedRecoveryDisposition(
+  state: OrchestrationState,
+  statePath: string,
+  disposition: CoderBlockedRecoveryDisposition,
+  sessionHandle: string | null,
+  logger?: RunLogger,
+) {
+  if (state.phase !== 'interactive_blocked_recovery' || !state.interactiveBlockedRecovery) {
+    throw new Error(`Run is not in interactive blocked recovery: ${statePath}`);
+  }
+
+  const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
+  if (!latestTurn) {
+    throw new Error('Interactive blocked recovery requires recorded operator guidance before a coder response can be applied.');
+  }
+
+  const turnNumber = latestTurn.number;
+  const trimmedBlocker = disposition.blocker.trim();
+
+  await logger?.event('interactive_blocked_recovery.disposition', {
+    scopeNumber: state.currentScopeNumber,
+    recoveryTurn: turnNumber,
+    sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
+    action: disposition.action,
+    sessionHandle,
+  });
+
+  if (disposition.action === 'replace_current_scope') {
+    return persistSplitPlanRecovery(
+      {
+        ...state,
+        coderSessionHandle: sessionHandle,
+        phase: state.interactiveBlockedRecovery.sourcePhase,
+        status: 'running',
+        blockedFromPhase: null,
+        interactiveBlockedRecovery: null,
+        coderRetryCount: 0,
+      },
+      statePath,
+      {
+        sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
+        derivedPlanMarkdown: disposition.replacementPlan.trim(),
+        createdCommits: [],
+        logger,
+      },
+      {
+        persistBlockedScope,
+        writeExecutionArtifacts,
+      },
+    );
+  }
+
+  if (disposition.action === 'resume_current_scope') {
+    const nextState = await saveState(statePath, {
+      ...state,
+      coderSessionHandle: sessionHandle,
+      phase: getInteractiveBlockedRecoveryResumePhase(state.interactiveBlockedRecovery.sourcePhase),
+      status: 'running',
+      blockedFromPhase: null,
+      interactiveBlockedRecovery: null,
+      coderRetryCount: 0,
+    });
+    await writeExecutionArtifacts(nextState);
+    return nextState;
+  }
+
+  if (disposition.action === 'stay_blocked') {
+    const nextState = await saveState(statePath, {
+      ...state,
+      coderSessionHandle: sessionHandle,
+      phase: 'interactive_blocked_recovery',
+      status: 'running',
+      blockedFromPhase: state.interactiveBlockedRecovery.sourcePhase,
+      interactiveBlockedRecovery: {
+        ...state.interactiveBlockedRecovery,
+        blockedReason: trimmedBlocker,
+        lastHandledTurn: turnNumber,
+      },
+      coderRetryCount: 0,
+    });
+    await writeExecutionArtifacts(nextState);
+    return nextState;
+  }
+
+  const blockedState = await saveState(statePath, {
+    ...state,
+    coderSessionHandle: sessionHandle,
+    phase: 'blocked',
+    status: 'blocked',
+    lastScopeMarker: state.lastScopeMarker ?? 'AUTONOMY_BLOCKED',
+    blockedFromPhase: state.interactiveBlockedRecovery.sourcePhase,
+    interactiveBlockedRecovery: null,
+    coderRetryCount: 0,
+  });
+  await writeExecutionArtifacts(blockedState);
+  const persistedState = await persistBlockedScope(blockedState, statePath, trimmedBlocker);
+  await notifyBlocked(persistedState, trimmedBlocker, logger);
+  return flushDerivedPlanNotifications(persistedState, statePath, logger, trimmedBlocker);
 }
 
 function normalizeFinalCommitMessage(message: string) {
@@ -632,7 +761,8 @@ function shouldRetryCoderTimeout(
     | 'coder_response'
     | 'coder_optional_response'
     | 'coder_plan_response'
-    | 'coder_plan_optional_response',
+    | 'coder_plan_optional_response'
+    | 'interactive_blocked_recovery',
   error: CoderRoundError,
 ) {
   if (!isCoderTimeoutError(error) || state.coderRetryCount >= 1) {
@@ -640,7 +770,12 @@ function shouldRetryCoderTimeout(
   }
 
   if (state.topLevelMode === 'execute') {
-    return phase === 'coder_scope' || phase === 'coder_response' || phase === 'coder_optional_response';
+    return (
+      phase === 'coder_scope' ||
+      phase === 'coder_response' ||
+      phase === 'coder_optional_response' ||
+      phase === 'interactive_blocked_recovery'
+    );
   }
 
   return phase === 'coder_plan' || phase === 'coder_plan_response' || phase === 'coder_plan_optional_response';
@@ -683,7 +818,8 @@ async function scheduleCoderTimeoutRetry(
     | 'coder_response'
     | 'coder_optional_response'
     | 'coder_plan_response'
-    | 'coder_plan_optional_response',
+    | 'coder_plan_optional_response'
+    | 'interactive_blocked_recovery',
   error: CoderRoundError,
   logger?: RunLogger,
 ) {
@@ -822,6 +958,69 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
     await notifyBlocked(persistedState, reason, logger);
     return persistedState;
   }
+  return nextState;
+}
+
+async function runInteractiveBlockedRecoveryPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.interactiveBlockedRecovery) {
+    throw new Error('Cannot run interactive blocked recovery without blocked-recovery state');
+  }
+
+  const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
+  if (!latestTurn || latestTurn.number <= state.interactiveBlockedRecovery.lastHandledTurn) {
+    throw new Error('Interactive blocked recovery has no pending operator guidance to process.');
+  }
+
+  await logger?.event('phase.start', {
+    phase: 'interactive_blocked_recovery',
+    recoveryTurn: latestTurn.number,
+    sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
+  });
+
+  let codex;
+  try {
+    codex = await runBlockedRecoveryCoderRound({
+      coder: state.agentConfig.coder,
+      cwd: state.cwd,
+      planDoc: getExecutionPlanPath(state),
+      progressMarkdownPath: state.progressMarkdownPath,
+      consultMarkdownPath: state.consultMarkdownPath,
+      blockedReason: state.interactiveBlockedRecovery.blockedReason,
+      operatorGuidance: latestTurn.operatorGuidance,
+      maxTurns: state.interactiveBlockedRecovery.maxTurns,
+      turnsTaken: latestTurn.number,
+      sessionHandle: state.coderSessionHandle,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CoderRoundError) {
+      if (shouldRetryCoderTimeout(state, 'interactive_blocked_recovery', error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, 'interactive_blocked_recovery', error, logger);
+      }
+      if (isCoderTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
+      }
+      const failedState = await persistCoderFailureState(state, statePath, 'interactive_blocked_recovery', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    codex.payload,
+    codex.sessionHandle,
+    logger,
+  );
+  await logger?.event('phase.complete', {
+    phase: 'interactive_blocked_recovery',
+    recoveryTurn: latestTurn.number,
+    action: codex.payload.action,
+    nextPhase: nextState.phase,
+  });
   return nextState;
 }
 
@@ -2000,6 +2199,7 @@ type RunnablePhase = Extract<
   | 'coder_optional_response'
   | 'reviewer_consult'
   | 'coder_consult_response'
+  | 'interactive_blocked_recovery'
   | 'final_squash'
 >;
 
@@ -2015,6 +2215,7 @@ const RUNNABLE_PHASES = new Set<RunnablePhase>([
   'coder_optional_response',
   'reviewer_consult',
   'coder_consult_response',
+  'interactive_blocked_recovery',
   'final_squash',
 ]);
 
@@ -2033,7 +2234,10 @@ export async function runOnePass(
 ) {
   let currentState = state;
 
-  while (isRunnablePhase(currentState.phase)) {
+  while (
+    isRunnablePhase(currentState.phase) &&
+    (currentState.phase !== 'interactive_blocked_recovery' || hasPendingInteractiveBlockedRecoveryTurn(currentState))
+  ) {
     const stopHeartbeat = startPhaseHeartbeat(currentState.phase, () => currentState, logger);
     try {
       const currentPhase = currentState.phase;
@@ -2084,6 +2288,11 @@ export async function runOnePass(
         reviewer_consult: async () => runConsultPhase(currentState, statePath, logger),
         coder_consult_response: async () => {
           const nextState = await runCoderConsultResponsePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        interactive_blocked_recovery: async () => {
+          const nextState = await runInteractiveBlockedRecoveryPhase(currentState, statePath, logger);
           options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
           return nextState;
         },

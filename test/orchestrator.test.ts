@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import {
   adoptAcceptedDerivedPlan,
+  applyInteractiveBlockedRecoveryDisposition,
   computeNextScopeStateAfterSquash,
   flushDerivedPlanNotifications,
   loadOrInitialize,
@@ -243,6 +244,7 @@ test('resume preserves interactive blocked recovery state without resuming execu
       sourcePhase: 'coder_scope',
       blockedReason: 'Need operator guidance',
       maxTurns: 3,
+      lastHandledTurn: 0,
       turns: [],
     },
   });
@@ -266,6 +268,7 @@ test('recordInteractiveBlockedRecoveryGuidance persists operator recovery input 
       sourcePhase: 'reviewer_scope',
       blockedReason: 'Review findings did not converge',
       maxTurns: 3,
+      lastHandledTurn: 0,
       turns: [],
     },
   });
@@ -296,6 +299,186 @@ test('recordInteractiveBlockedRecoveryGuidance persists operator recovery input 
   const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
   assert.match(progressMarkdown, /## Interactive Blocked Recovery/);
   assert.match(progressMarkdown, /Recorded turns: 1/);
+});
+
+test('interactive blocked recovery resumes through the next ordinary coder path', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    coderSessionHandle: 'coder-session-4',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Apply the reviewer feedback and continue this scope.',
+        },
+      ],
+    },
+  });
+
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'resume_current_scope',
+      summary: 'The scope can continue.',
+      rationale: 'The operator clarified how to proceed.',
+      blocker: '',
+      replacementPlan: '',
+    },
+    'coder-session-4b',
+  );
+
+  assert.equal(nextState.phase, 'coder_response');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.blockedFromPhase, null);
+  assert.equal(nextState.coderSessionHandle, 'coder-session-4b');
+  assert.equal(nextState.interactiveBlockedRecovery, null);
+});
+
+test('interactive blocked recovery can route replacement through split-plan machinery', async () => {
+  const { statePath, state } = await createFinalSquashFixture({
+    currentScopeNumber: 6,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    derivedPlanPath: null,
+    derivedPlanStatus: null,
+    derivedFromScopeNumber: null,
+    derivedScopeIndex: null,
+    splitPlanCountForCurrentScope: 0,
+    createdCommits: [],
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'The current scope shape is wrong.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Replace this scope with a narrower derived plan.',
+        },
+      ],
+    },
+  });
+
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'replace_current_scope',
+      summary: 'This scope should be replaced.',
+      rationale: 'A narrower derived plan is safer.',
+      blocker: '',
+      replacementPlan:
+        '## Goal\n\nReplace the stale scope.\n\n## Execution Shape\n\nexecutionShape: one_shot\n',
+    },
+    'coder-session-6b',
+  );
+
+  assert.equal(nextState.phase, 'reviewer_plan');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.derivedPlanStatus, 'pending_review');
+  assert.equal(nextState.derivedFromScopeNumber, 6);
+});
+
+test('interactive blocked recovery can remain paused after a handled turn', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 5,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need clarification.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Do not touch infrastructure, only local code.',
+        },
+      ],
+    },
+  });
+
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'stay_blocked',
+      summary: 'Still blocked.',
+      rationale: 'The guidance did not answer the key prerequisite question.',
+      blocker: 'Need a concrete yes/no on whether credentials can be rotated in this scope.',
+      replacementPlan: '',
+    },
+    'coder-session-5b',
+  );
+
+  assert.equal(nextState.phase, 'interactive_blocked_recovery');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.blockedFromPhase, 'coder_scope');
+  assert.equal(nextState.interactiveBlockedRecovery?.lastHandledTurn, 1);
+  assert.equal(
+    nextState.interactiveBlockedRecovery?.blockedReason,
+    'Need a concrete yes/no on whether credentials can be rotated in this scope.',
+  );
+});
+
+test('interactive blocked recovery can finalize into a terminal blocked run', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 7,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need an external prerequisite.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Try one more time with the same repository constraints.',
+        },
+      ],
+    },
+  });
+
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'terminal_block',
+      summary: 'No safe in-repo path remains.',
+      rationale: 'The prerequisite must be handled outside Neal first.',
+      blocker: 'External credentials must be provisioned before this scope can continue.',
+      replacementPlan: '',
+    },
+    'coder-session-7b',
+  );
+
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.status, 'blocked');
+  assert.equal(nextState.blockedFromPhase, 'coder_scope');
+  assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.completedScopes.at(-1)?.result, 'blocked');
+  assert.match(nextState.completedScopes.at(-1)?.blocker ?? '', /External credentials must be provisioned/);
 });
 
 test('resume keeps derived-plan reviewer rounds runnable after failure normalization', async () => {
