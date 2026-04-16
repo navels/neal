@@ -277,6 +277,46 @@ export function buildCoderConsultResponsePrompt(args: {
   ].join('\n');
 }
 
+export function buildBlockedRecoveryCoderPrompt(args: {
+  planDoc: string;
+  progressText: string;
+  consultMarkdownPath: string;
+  blockedReason: string;
+  operatorGuidance: string;
+  maxTurns: number;
+  turnsTaken: number;
+}) {
+  return [
+    `Continue blocked recovery for the current neal scope in ${args.planDoc}.`,
+    `Read ${args.consultMarkdownPath} before responding so you understand the blocked-recovery history.`,
+    'Blocked recovery is now in-band inside Neal. Do not tell the operator to leave Neal or resume the coder session separately.',
+    'Use the inlined progress state below to stay on the current scope.',
+    'You are still handling the same blocked scope. Do not start a new scope.',
+    'Choose exactly one recovery action in your structured response:',
+    '- `resume_current_scope`',
+    '- `replace_current_scope`',
+    '- `stay_blocked`',
+    '- `terminal_block`',
+    'Use `resume_current_scope` when the current scope is still correct and the operator guidance gives enough direction to continue normally.',
+    'Use `replace_current_scope` when the current scope shape is wrong and Neal should route the replacement through the existing split-plan / derived-plan machinery.',
+    'Use `stay_blocked` when more operator guidance is still required and the run should remain in interactive blocked recovery.',
+    'Use `terminal_block` only when no safe in-repo path remains and the run should finalize as truly blocked.',
+    'Always include a `summary` and `rationale`.',
+    'Always include a `blocker` string. Use an empty string only when action=`resume_current_scope` or action=`replace_current_scope`.',
+    'Always include a `replacementPlan` string. Use an empty string unless action=`replace_current_scope`.',
+    'Do not invent a new recovery taxonomy or extra top-level actions.',
+    'Do not treat operator guidance as authorization to skip verification, waive policy, or reinterpret the target beyond the current scope.',
+    '',
+    'Blocked recovery context:',
+    `- Blocked reason: ${args.blockedReason}`,
+    `- Recovery turns used: ${args.turnsTaken} of ${args.maxTurns}`,
+    `- Latest operator guidance: ${args.operatorGuidance}`,
+    '',
+    'Current progress state:',
+    buildProgressSection(args.progressText),
+  ].join('\n');
+}
+
 export function buildCoderPlanResponsePrompt(args: {
   planDoc: string;
   openFindings: Pick<ReviewFinding, 'id' | 'source' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];

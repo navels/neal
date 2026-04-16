@@ -1,4 +1,4 @@
-import type { CoderConsultDisposition, ExecutionShape } from '../types.js';
+import type { CoderBlockedRecoveryDisposition, CoderConsultDisposition, ExecutionShape } from '../types.js';
 
 export type ReviewerFindingPayload = {
   severity: 'blocking' | 'non_blocking';
@@ -29,6 +29,7 @@ export type CoderResponsePayload = {
 };
 
 export type CoderConsultDispositionPayload = CoderConsultDisposition;
+export type CoderBlockedRecoveryDispositionPayload = CoderBlockedRecoveryDisposition;
 
 export function buildReviewerSchema() {
   return {
@@ -140,6 +141,24 @@ export function buildCoderConsultDispositionSchema() {
   } as const;
 }
 
+export function buildCoderBlockedRecoveryDispositionSchema() {
+  return {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['resume_current_scope', 'replace_current_scope', 'stay_blocked', 'terminal_block'],
+      },
+      summary: { type: 'string' },
+      rationale: { type: 'string' },
+      blocker: { type: 'string' },
+      replacementPlan: { type: 'string' },
+    },
+    required: ['action', 'summary', 'rationale', 'blocker', 'replacementPlan'],
+    additionalProperties: false,
+  } as const;
+}
+
 export function buildCoderPlanResponseSchema() {
   return {
     type: 'object',
@@ -181,4 +200,24 @@ export function parseCoderResponsePayload(raw: string) {
 
 export function parseCoderConsultDispositionPayload(raw: string) {
   return parseJsonPayload<CoderConsultDispositionPayload>(raw, 'Coder consult-response round');
+}
+
+export function parseCoderBlockedRecoveryDispositionPayload(raw: string) {
+  const payload = parseJsonPayload<CoderBlockedRecoveryDispositionPayload>(raw, 'Coder blocked-recovery round');
+  const blocker = payload.blocker.trim();
+  const replacementPlan = payload.replacementPlan.trim();
+
+  if (payload.action === 'replace_current_scope' && !replacementPlan) {
+    throw new Error('Coder blocked-recovery round returned action=replace_current_scope without a replacementPlan payload.');
+  }
+
+  if (payload.action !== 'replace_current_scope' && replacementPlan) {
+    throw new Error('Coder blocked-recovery round returned a replacementPlan payload without action=replace_current_scope.');
+  }
+
+  if ((payload.action === 'stay_blocked' || payload.action === 'terminal_block') && !blocker) {
+    throw new Error(`Coder blocked-recovery round returned action=${payload.action} without a blocker payload.`);
+  }
+
+  return payload;
 }

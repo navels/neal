@@ -93,6 +93,20 @@ export type CoderConsultDisposition = {
   rationale: string;
 };
 
+export type InteractiveBlockedRecoveryAction =
+  | 'resume_current_scope'
+  | 'replace_current_scope'
+  | 'stay_blocked'
+  | 'terminal_block';
+
+export type CoderBlockedRecoveryDisposition = {
+  action: InteractiveBlockedRecoveryAction;
+  summary: string;
+  rationale: string;
+  blocker: string;
+  replacementPlan: string;
+};
+
 export type ConsultRound = {
   number: number;
   sourcePhase: 'coder_scope' | 'coder_response';

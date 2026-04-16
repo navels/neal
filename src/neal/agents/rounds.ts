@@ -17,6 +17,7 @@ import {
   AUTONOMY_DONE,
   AUTONOMY_SCOPE_DONE,
   AUTONOMY_SPLIT_PLAN,
+  buildBlockedRecoveryCoderPrompt,
   buildCoderConsultResponsePrompt,
   buildCoderPlanResponsePrompt,
   buildCoderResponsePrompt,
@@ -27,14 +28,17 @@ import {
   buildScopePrompt,
 } from './prompts.js';
 import {
+  buildCoderBlockedRecoveryDispositionSchema,
   buildCoderConsultDispositionSchema,
   buildCoderPlanResponseSchema,
   buildCoderResponseSchema,
   buildConsultReviewerSchema,
   buildPlanReviewerSchema,
   buildReviewerSchema,
+  parseCoderBlockedRecoveryDispositionPayload,
   parseCoderConsultDispositionPayload,
   parseCoderResponsePayload,
+  type CoderBlockedRecoveryDispositionPayload,
   type CoderConsultDispositionPayload,
   type CoderResponsePayload,
   type PlanReviewerPayload,
@@ -404,6 +408,53 @@ export async function runCoderConsultResponseRound(args: {
     throw translateCoderProviderError(error);
   }
   const payload = parseCoderConsultDispositionPayload(finalResponse);
+
+  return {
+    sessionHandle,
+    payload,
+  };
+}
+
+export async function runBlockedRecoveryCoderRound(args: {
+  coder: AgentRoleConfig;
+  cwd: string;
+  planDoc: string;
+  progressMarkdownPath: string;
+  consultMarkdownPath: string;
+  blockedReason: string;
+  operatorGuidance: string;
+  maxTurns: number;
+  turnsTaken: number;
+  sessionHandle?: string | null;
+  logger?: RunLogger;
+}): Promise<{ sessionHandle: string | null; payload: CoderBlockedRecoveryDispositionPayload }> {
+  const coder = getCoderAdapter(args.coder);
+  const progressText = await safeReadText(args.progressMarkdownPath);
+
+  let finalResponse: string;
+  let sessionHandle: string | null;
+  try {
+    const result = await coder.runPrompt({
+      cwd: args.cwd,
+      prompt: buildBlockedRecoveryCoderPrompt({
+        planDoc: args.planDoc,
+        progressText,
+        consultMarkdownPath: args.consultMarkdownPath,
+        blockedReason: args.blockedReason,
+        operatorGuidance: args.operatorGuidance,
+        maxTurns: args.maxTurns,
+        turnsTaken: args.turnsTaken,
+      }),
+      resumeHandle: args.sessionHandle,
+      outputSchema: buildCoderBlockedRecoveryDispositionSchema(),
+      logger: args.logger,
+    });
+    finalResponse = result.finalResponse;
+    sessionHandle = result.sessionHandle;
+  } catch (error) {
+    throw translateCoderProviderError(error);
+  }
+  const payload = parseCoderBlockedRecoveryDispositionPayload(finalResponse);
 
   return {
     sessionHandle,
