@@ -411,6 +411,44 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   return nextState;
 }
 
+const DEFAULT_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS = 3;
+
+function getInteractiveBlockedRecoveryMaxTurns() {
+  const raw = process.env.NEAL_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS;
+  if (!raw) {
+    return DEFAULT_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS;
+  }
+
+  return parsed;
+}
+
+export class InteractiveBlockedRecoveryTurnLimitError extends Error {
+  readonly maxTurns: number;
+
+  constructor(maxTurns: number) {
+    super(`Interactive blocked recovery has reached its turn limit (${maxTurns}); resume the run and choose terminal_block or replace_current_scope.`);
+    this.name = 'InteractiveBlockedRecoveryTurnLimitError';
+    this.maxTurns = maxTurns;
+  }
+}
+
+export class InteractiveBlockedRecoveryPendingTurnError extends Error {
+  readonly pendingTurn: number;
+
+  constructor(pendingTurn: number) {
+    super(
+      `Interactive blocked recovery already has unhandled operator guidance for turn ${pendingTurn}; resume the run before recording more guidance.`,
+    );
+    this.name = 'InteractiveBlockedRecoveryPendingTurnError';
+    this.pendingTurn = pendingTurn;
+  }
+}
+
 function getInteractiveBlockedRecoverySourcePhase(
   phase: OrchestrationState['phase'] | null,
 ): InteractiveBlockedRecoveryState['sourcePhase'] {
@@ -429,7 +467,7 @@ function getInteractiveBlockedRecoverySourcePhase(
     case 'final_squash':
       return phase;
     default:
-      return 'coder_scope';
+      throw new Error(`Interactive blocked recovery does not support source phase: ${String(phase)}`);
   }
 }
 
@@ -439,11 +477,17 @@ async function enterInteractiveBlockedRecovery(
   reason: string,
   logger?: RunLogger,
 ) {
+  if (state.topLevelMode !== 'execute') {
+    throw new Error('Interactive blocked recovery is only supported for execute-mode runs');
+  }
+
+  const sourcePhase = getInteractiveBlockedRecoverySourcePhase(state.blockedFromPhase ?? state.phase);
   const nextRecovery: InteractiveBlockedRecoveryState = state.interactiveBlockedRecovery ?? {
     enteredAt: new Date().toISOString(),
-    sourcePhase: getInteractiveBlockedRecoverySourcePhase(state.blockedFromPhase ?? state.phase),
+    sourcePhase,
     blockedReason: reason,
-    maxTurns: 3,
+    // Keep the operator/coder loop short so recovery remains bounded and auditable.
+    maxTurns: getInteractiveBlockedRecoveryMaxTurns(),
     lastHandledTurn: 0,
     turns: [],
   };
@@ -455,7 +499,7 @@ async function enterInteractiveBlockedRecovery(
     blockedFromPhase: state.blockedFromPhase ?? state.phase,
     interactiveBlockedRecovery: {
       ...nextRecovery,
-      sourcePhase: getInteractiveBlockedRecoverySourcePhase(state.blockedFromPhase ?? state.phase),
+      sourcePhase,
       blockedReason: reason,
     },
   });
@@ -484,10 +528,13 @@ export async function recordInteractiveBlockedRecoveryGuidance(
   }
 
   const turns = state.interactiveBlockedRecovery.turns;
+  const pendingTurn = turns.at(-1);
+  if (pendingTurn && pendingTurn.number > state.interactiveBlockedRecovery.lastHandledTurn) {
+    throw new InteractiveBlockedRecoveryPendingTurnError(pendingTurn.number);
+  }
+
   if (turns.length >= state.interactiveBlockedRecovery.maxTurns) {
-    throw new Error(
-      `Interactive blocked recovery has reached its turn limit (${state.interactiveBlockedRecovery.maxTurns})`,
-    );
+    throw new InteractiveBlockedRecoveryTurnLimitError(state.interactiveBlockedRecovery.maxTurns);
   }
 
   const nextState = await saveState(statePath, {
@@ -600,6 +647,25 @@ function finalizeInteractiveBlockedRecovery(
   };
 }
 
+async function persistFinalizedInteractiveBlockedRecovery(
+  state: OrchestrationState,
+  statePath: string,
+  disposition: CoderBlockedRecoveryDisposition,
+  sessionHandle: string | null,
+  resultPhase: OrchestrationState['phase'],
+) {
+  const nextState = await saveState(
+    statePath,
+    finalizeInteractiveBlockedRecovery(
+      withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, resultPhase),
+      disposition.action,
+      resultPhase,
+    ),
+  );
+  await writeExecutionArtifacts(nextState);
+  return nextState;
+}
+
 function getInteractiveBlockedRecoveryResumePhase(
   sourcePhase: InteractiveBlockedRecoveryState['sourcePhase'],
 ): RunnablePhase {
@@ -627,6 +693,9 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   if (state.phase !== 'interactive_blocked_recovery' || !state.interactiveBlockedRecovery) {
     throw new Error(`Run is not in interactive blocked recovery: ${statePath}`);
   }
+  if (state.topLevelMode !== 'execute') {
+    throw new Error('Interactive blocked recovery is only supported for execute-mode runs');
+  }
 
   const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
   if (!latestTurn) {
@@ -645,18 +714,11 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   });
 
   if (disposition.action === 'replace_current_scope') {
-    const replacedState = finalizeInteractiveBlockedRecovery(
-      withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, 'reviewer_plan'),
-      disposition.action,
-      'reviewer_plan',
-    );
-    return persistSplitPlanRecovery(
+    const persistedState = await persistSplitPlanRecovery(
       {
-        ...replacedState,
+        ...state,
         coderSessionHandle: sessionHandle,
-        phase: state.interactiveBlockedRecovery.sourcePhase,
         status: 'running',
-        blockedFromPhase: null,
         coderRetryCount: 0,
       },
       statePath,
@@ -671,16 +733,31 @@ export async function applyInteractiveBlockedRecoveryDisposition(
         writeExecutionArtifacts,
       },
     );
+
+    const resultPhase = persistedState.phase === 'blocked' ? 'blocked' : 'reviewer_plan';
+    return persistFinalizedInteractiveBlockedRecovery(
+      {
+        ...persistedState,
+        interactiveBlockedRecovery: state.interactiveBlockedRecovery,
+      },
+      statePath,
+      disposition,
+      sessionHandle,
+      resultPhase,
+    );
   }
 
   if (disposition.action === 'resume_current_scope') {
     const resumedPhase = getInteractiveBlockedRecoveryResumePhase(state.interactiveBlockedRecovery.sourcePhase);
+    const finalizedState = await persistFinalizedInteractiveBlockedRecovery(
+      state,
+      statePath,
+      disposition,
+      sessionHandle,
+      resumedPhase,
+    );
     const nextState = await saveState(statePath, {
-      ...finalizeInteractiveBlockedRecovery(
-        withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, resumedPhase),
-        disposition.action,
-        resumedPhase,
-      ),
+      ...finalizedState,
       coderSessionHandle: sessionHandle,
       phase: resumedPhase,
       status: 'running',
@@ -718,12 +795,15 @@ export async function applyInteractiveBlockedRecoveryDisposition(
     return nextState;
   }
 
+  const finalizedBlockedState = await persistFinalizedInteractiveBlockedRecovery(
+    state,
+    statePath,
+    disposition,
+    sessionHandle,
+    'blocked',
+  );
   const blockedState = await saveState(statePath, {
-    ...finalizeInteractiveBlockedRecovery(
-      withRecordedInteractiveBlockedRecoveryDisposition(state, disposition, sessionHandle, 'blocked'),
-      disposition.action,
-      'blocked',
-    ),
+    ...finalizedBlockedState,
     coderSessionHandle: sessionHandle,
     phase: 'blocked',
     status: 'blocked',
@@ -811,6 +891,13 @@ async function finalizeBlockedPlanReviewResponse(
   blocker: string,
   logger?: RunLogger,
 ) {
+  if (state.topLevelMode !== 'execute') {
+    if (!derivedPlanReview) {
+      await notifyBlocked(state, blocker, logger);
+    }
+    return flushDerivedPlanNotifications(state, statePath, logger, blocker);
+  }
+
   const persistedState = await enterInteractiveBlockedRecovery(state, statePath, blocker, logger);
   if (!derivedPlanReview) {
     await notifyBlocked(persistedState, blocker, logger);

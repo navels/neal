@@ -8,7 +8,13 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 
-import { loadOrInitialize, recordInteractiveBlockedRecoveryGuidance, runOnePass } from './orchestrator.js';
+import {
+  InteractiveBlockedRecoveryPendingTurnError,
+  InteractiveBlockedRecoveryTurnLimitError,
+  loadOrInitialize,
+  recordInteractiveBlockedRecoveryGuidance,
+  runOnePass,
+} from './orchestrator.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
 import { getDefaultAgentConfig, loadState } from './state.js';
@@ -31,7 +37,7 @@ function usage(): never {
   console.error('Usage: neal --execute <plan-doc|inline-prompt>');
   console.error('   or: neal --plan <plan-doc>');
   console.error('   or: neal --resume [state-file]');
-  console.error('   or: neal --recover [state-file] --message <guidance>');
+  console.error('   or: neal --recover [state-file] --message <guidance>  # then run neal --resume');
   console.error('   or: neal --resume-coder [state-file]');
   console.error('   or: neal --resume-reviewer [state-file]');
   console.error('   or: neal --summaries [runs-dir]');
@@ -74,10 +80,21 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
     stopController.cleanup();
   }
 
+  const interactiveBlockedRecovery = finalState.interactiveBlockedRecovery;
+  const waitingForOperatorGuidance =
+    finalState.phase === 'interactive_blocked_recovery' && interactiveBlockedRecovery
+      ? interactiveBlockedRecovery.turns.length === interactiveBlockedRecovery.lastHandledTurn
+      : false;
+
+  if (waitingForOperatorGuidance) {
+    process.stderr.write(`[neal] waiting for operator guidance; use: neal --recover ${statePath} --message \"...\"\n`);
+  }
+
   process.stdout.write(
     JSON.stringify(
       {
         ok: true,
+        waitingForOperatorGuidance,
         phase: finalState.phase,
         status: finalState.status,
         topLevelMode: finalState.topLevelMode,
@@ -292,7 +309,54 @@ async function main() {
     await access(statePath);
     const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
     assertSupportedAgentConfig(loaded.state.agentConfig);
-    const nextState = await recordInteractiveBlockedRecoveryGuidance(loaded.statePath, message, loaded.logger);
+    if (loaded.state.topLevelMode !== 'execute') {
+      throw new Error('--recover is only supported for execute-mode runs');
+    }
+    let nextState;
+    try {
+      nextState = await recordInteractiveBlockedRecoveryGuidance(loaded.statePath, message, loaded.logger);
+    } catch (error) {
+      if (error instanceof InteractiveBlockedRecoveryPendingTurnError) {
+        process.stdout.write(
+          JSON.stringify(
+            {
+              ok: false,
+              code: 'interactive_blocked_recovery_pending_turn',
+              message: error.message,
+              statePath: loaded.statePath,
+              runDir: loaded.state.runDir,
+              pendingTurn: error.pendingTurn,
+              recoveryTurns: loaded.state.interactiveBlockedRecovery?.turns.length ?? 0,
+              nextStep: 'Run `neal --resume` to let the coder handle the pending recovery turn before recording more guidance.',
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+        return;
+      }
+      if (error instanceof InteractiveBlockedRecoveryTurnLimitError) {
+        process.stdout.write(
+          JSON.stringify(
+            {
+              ok: false,
+              code: 'interactive_blocked_recovery_turn_limit',
+              message: error.message,
+              statePath: loaded.statePath,
+              runDir: loaded.state.runDir,
+              maxTurns: error.maxTurns,
+              recoveryTurns: loaded.state.interactiveBlockedRecovery?.turns.length ?? 0,
+              nextStep: 'Run `neal --resume` and choose `terminal_block` or `replace_current_scope`.',
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+        return;
+      }
+      throw error;
+    }
+    process.stderr.write(`[neal] recovery guidance recorded; run: neal --resume ${loaded.statePath}\n`);
     process.stdout.write(
       JSON.stringify(
         {
@@ -302,6 +366,7 @@ async function main() {
           statePath: loaded.statePath,
           runDir: nextState.runDir,
           recoveryTurns: nextState.interactiveBlockedRecovery?.turns.length ?? 0,
+          nextStep: `Run \`neal --resume ${loaded.statePath}\` to process the recovery guidance.`,
         },
         null,
         2,

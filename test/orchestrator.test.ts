@@ -94,6 +94,12 @@ async function runNealCli(...args: string[]) {
   return stdout;
 }
 
+async function runNealCliResult(...args: string[]) {
+  return execFileAsync('pnpm', ['exec', 'tsx', 'src/neal/index.ts', ...args], {
+    cwd: process.cwd(),
+  });
+}
+
 async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) {
   const root = await mkdtemp(join(tmpdir(), 'neal-final-squash-'));
   const cwd = join(root, 'repo');
@@ -382,6 +388,7 @@ test('neal --recover records operator guidance without manual session edits', as
   assert.equal(result.statePath, statePath);
   assert.equal(result.runDir, state.runDir);
   assert.equal(result.recoveryTurns, 1);
+  assert.match(stdout, /neal --resume/);
 
   const reloadedState = await loadState(statePath);
   assert.equal(reloadedState.interactiveBlockedRecovery?.turns.length, 1);
@@ -397,6 +404,118 @@ test('neal --recover records operator guidance without manual session edits', as
   const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
   assert.match(progressMarkdown, /## Interactive Blocked Recovery/);
   assert.match(progressMarkdown, /Recorded turns: 1/);
+});
+
+test('neal --recover rejects recording more guidance while a recovery turn is still pending', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 3,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings did not converge',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Replace this scope with a narrower plan and keep the last accepted commit.',
+          disposition: null,
+        },
+      ],
+    },
+  });
+
+  const stdout = await runNealCli(
+    '--recover',
+    statePath,
+    '--message',
+    'One more operator instruction.',
+  );
+  const result = JSON.parse(stdout) as {
+    ok: boolean;
+    code: string;
+    message: string;
+    statePath: string;
+    runDir: string;
+    pendingTurn: number;
+    recoveryTurns: number;
+    nextStep: string;
+  };
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'interactive_blocked_recovery_pending_turn');
+  assert.equal(result.statePath, statePath);
+  assert.equal(result.runDir, state.runDir);
+  assert.equal(result.pendingTurn, 1);
+  assert.equal(result.recoveryTurns, 1);
+  assert.match(result.message, /unhandled operator guidance/);
+  assert.match(result.nextStep, /neal --resume/);
+});
+
+test('neal --recover returns a structured result when interactive blocked recovery hits its turn cap', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 3,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings did not converge',
+      maxTurns: 3,
+      lastHandledTurn: 3,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'First operator instruction.',
+          disposition: null,
+        },
+        {
+          number: 2,
+          recordedAt: '2026-04-16T00:02:00.000Z',
+          operatorGuidance: 'Second operator instruction.',
+          disposition: null,
+        },
+        {
+          number: 3,
+          recordedAt: '2026-04-16T00:03:00.000Z',
+          operatorGuidance: 'Third operator instruction.',
+          disposition: null,
+        },
+      ],
+    },
+  });
+
+  const stdout = await runNealCli(
+    '--recover',
+    statePath,
+    '--message',
+    'One more operator instruction.',
+  );
+  const result = JSON.parse(stdout) as {
+    ok: boolean;
+    code: string;
+    message: string;
+    statePath: string;
+    runDir: string;
+    maxTurns: number;
+    recoveryTurns: number;
+    nextStep: string;
+  };
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'interactive_blocked_recovery_turn_limit');
+  assert.equal(result.statePath, statePath);
+  assert.equal(result.runDir, state.runDir);
+  assert.equal(result.maxTurns, 3);
+  assert.equal(result.recoveryTurns, 3);
+  assert.match(result.message, /turn limit \(3\)/);
+  assert.match(result.nextStep, /neal --resume/);
 });
 
 test('interactive blocked recovery can stay blocked, resume after interruption, and then continue the scope', async () => {
@@ -586,8 +705,127 @@ test('interactive blocked recovery can route replacement through split-plan mach
   assert.equal(nextState.interactiveBlockedRecovery, null);
   assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 1);
   assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resolvedByAction, 'replace_current_scope');
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.turns[0]?.disposition?.action, 'replace_current_scope');
   assert.equal(nextState.derivedPlanStatus, 'pending_review');
   assert.equal(nextState.derivedFromScopeNumber, 6);
+});
+
+test('interactive blocked recovery records a blocked history result when replacement hits the split-plan cap', async () => {
+  const { statePath, state } = await createFinalSquashFixture({
+    currentScopeNumber: 6,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    derivedPlanPath: null,
+    derivedPlanStatus: null,
+    derivedFromScopeNumber: null,
+    derivedScopeIndex: null,
+    splitPlanCountForCurrentScope: 10,
+    createdCommits: [],
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'The current scope shape is wrong.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Replace this scope with a narrower derived plan.',
+          disposition: null,
+        },
+      ],
+    },
+  });
+
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'replace_current_scope',
+      summary: 'This scope should be replaced.',
+      rationale: 'A narrower derived plan is safer.',
+      blocker: '',
+      replacementPlan:
+        '## Goal\n\nReplace the stale scope.\n\n## Execution Shape\n\nexecutionShape: one_shot\n',
+    },
+    'coder-session-6b',
+  );
+
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.status, 'blocked');
+  assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 1);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resolvedByAction, 'replace_current_scope');
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resultPhase, 'blocked');
+  assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.turns[0]?.disposition?.action, 'replace_current_scope');
+  assert.match(nextState.completedScopes.at(-1)?.blocker ?? '', /split-plan limit/);
+});
+
+test('interactive blocked recovery dispositions reject plan-mode sessions', async () => {
+  const { statePath, state } = await createResumeFixture({
+    topLevelMode: 'plan',
+    currentScopeNumber: 4,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_plan',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_plan',
+      blockedReason: 'Plan review stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Keep revising the plan.',
+          disposition: null,
+        },
+      ],
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      applyInteractiveBlockedRecoveryDisposition(
+        state,
+        statePath,
+        {
+          action: 'resume_current_scope',
+          summary: 'Continue the plan review.',
+          rationale: 'The operator clarified the path forward.',
+          blocker: '',
+          replacementPlan: '',
+        },
+        'coder-session-plan',
+      ),
+    /only supported for execute-mode runs/,
+  );
+});
+
+test('neal --recover rejects plan-mode sessions', async () => {
+  const { statePath } = await createResumeFixture({
+    topLevelMode: 'plan',
+    currentScopeNumber: 4,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_plan',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_plan',
+      blockedReason: 'Plan review stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [],
+    },
+  });
+
+  await assert.rejects(
+    () => runNealCliResult('--recover', statePath, '--message', 'Keep revising the plan.'),
+    /--recover is only supported for execute-mode runs/,
+  );
 });
 
 test('interactive blocked recovery can remain paused after a handled turn', async () => {
@@ -636,6 +874,54 @@ test('interactive blocked recovery can remain paused after a handled turn', asyn
   );
   assert.equal(nextState.interactiveBlockedRecovery?.turns[0]?.disposition?.action, 'stay_blocked');
   assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 0);
+});
+
+test('neal --resume reports when interactive blocked recovery is waiting for operator guidance', async () => {
+  const { statePath } = await createResumeFixture({
+    currentScopeNumber: 5,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need clarification.',
+      maxTurns: 3,
+      lastHandledTurn: 1,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Do not touch infrastructure, only local code.',
+          disposition: {
+            recordedAt: '2026-04-16T00:02:00.000Z',
+            sessionHandle: 'coder-session-5b',
+            action: 'stay_blocked',
+            summary: 'Still blocked.',
+            rationale: 'The guidance did not answer the key prerequisite question.',
+            blocker: 'Need a concrete yes/no on whether credentials can be rotated in this scope.',
+            replacementPlan: '',
+            resultingPhase: 'interactive_blocked_recovery',
+          },
+        },
+      ],
+    },
+  });
+
+  const { stdout, stderr } = await runNealCliResult('--resume', statePath);
+  const result = JSON.parse(stdout) as {
+    ok: boolean;
+    waitingForOperatorGuidance: boolean;
+    phase: string;
+    status: string;
+  };
+
+  assert.equal(result.ok, true);
+  assert.equal(result.waitingForOperatorGuidance, true);
+  assert.equal(result.phase, 'interactive_blocked_recovery');
+  assert.equal(result.status, 'running');
+  assert.match(stderr, /waiting for operator guidance/);
+  assert.match(stderr, /neal --recover/);
 });
 
 test('interactive blocked recovery can finalize into a terminal blocked run', async () => {
