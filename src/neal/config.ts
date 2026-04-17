@@ -1,5 +1,3 @@
-import 'dotenv/config';
-
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -12,6 +10,8 @@ export type NealConfigFile = {
     review_stuck_window?: number | null;
     inactivity_timeout_ms?: number | null;
     api_retry_limit?: number | null;
+    interactive_blocked_recovery_max_turns?: number | null;
+    notify_bin?: string | null;
   };
   providers?: {
     'openai-codex'?: {
@@ -33,6 +33,8 @@ type NealResolvedConfig = {
     review_stuck_window: number;
     inactivity_timeout_ms: number;
     api_retry_limit: number;
+    interactive_blocked_recovery_max_turns: number;
+    notify_bin: string;
   };
   providers: {
     'openai-codex': {
@@ -54,6 +56,8 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     review_stuck_window: 3,
     inactivity_timeout_ms: 600_000,
     api_retry_limit: 10,
+    interactive_blocked_recovery_max_turns: 3,
+    notify_bin: resolve(homedir(), 'bin/notify'),
   },
   providers: {
     'openai-codex': {},
@@ -64,16 +68,7 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
   },
 };
 
-const warnedKeys = new Set<string>();
 const cachedConfig = new Map<string, NealConfigFile>();
-
-function warnOnce(key: string, message: string) {
-  if (warnedKeys.has(key)) {
-    return;
-  }
-  warnedKeys.add(key);
-  process.stderr.write(`${message}\n`);
-}
 
 function parseNumberValue(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -88,6 +83,10 @@ function parseNumberValue(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function parseStringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function readYamlFileIfPresent(path: string): NealConfigFile | null {
@@ -135,7 +134,6 @@ function loadConfigFile(cwd = process.cwd()): NealConfigFile {
 
   const repoConfigPath = resolve(cacheKey, 'config.yml');
   const homeConfigPath = join(homedir(), '.config', 'neal', 'config.yml');
-
   const resolved = mergeConfig(
     mergeConfig({}, readYamlFileIfPresent(repoConfigPath)),
     readYamlFileIfPresent(homeConfigPath),
@@ -144,161 +142,31 @@ function loadConfigFile(cwd = process.cwd()): NealConfigFile {
   return resolved;
 }
 
-function getStandardizedEnvNumber(name: string): number | undefined {
-  return parseNumberValue(process.env[name]);
-}
-
-function getNealNumber(
-  envName: string,
-  yamlValue: unknown,
-  fallback: number,
-) {
-  return getStandardizedEnvNumber(envName) ?? parseNumberValue(yamlValue) ?? fallback;
-}
-
-function getLegacyEnvNumber(
-  standardizedEnvName: string,
-  legacyEnvNames: string[],
-): number | undefined {
-  const values = legacyEnvNames
-    .map((name) => ({ name, value: parseNumberValue(process.env[name]) }))
-    .filter((entry): entry is { name: string; value: number } => entry.value !== undefined);
-
-  if (values.length === 0) {
-    return undefined;
-  }
-
-  for (const entry of values) {
-    warnOnce(
-      `legacy-env:${entry.name}`,
-      `[neal] ${entry.name} is deprecated; migrate to ${standardizedEnvName}.`,
-    );
-  }
-
-  const first = values[0];
-  const conflict = values.find((entry) => entry.value !== first.value);
-  if (conflict) {
-    warnOnce(
-      `legacy-env-conflict:${standardizedEnvName}`,
-      `[neal] Conflicting legacy env vars for ${standardizedEnvName}; using ${first.name}=${first.value} and ignoring ${conflict.name}=${conflict.value}. Migrate to ${standardizedEnvName}.`,
-    );
-  }
-
-  return first.value;
-}
-
-function getLegacyYamlNumber(
-  standardizedYamlPath: string,
-  standardizedEnvName: string,
-  entries: Array<{ path: string; value: number | undefined }>,
-): number | undefined {
-  const values = entries.filter((entry): entry is { path: string; value: number } => entry.value !== undefined);
-
-  if (values.length === 0) {
-    return undefined;
-  }
-
-  for (const entry of values) {
-    warnOnce(
-      `legacy-yaml:${entry.path}`,
-      `[neal] ${entry.path} is deprecated; migrate to ${standardizedYamlPath} or ${standardizedEnvName}.`,
-    );
-  }
-
-  const first = values[0];
-  const conflict = values.find((entry) => entry.value !== first.value);
-  if (conflict) {
-    warnOnce(
-      `legacy-yaml-conflict:${standardizedYamlPath}`,
-      `[neal] Conflicting legacy YAML keys for ${standardizedYamlPath}; using ${first.path}=${first.value} and ignoring ${conflict.path}=${conflict.value}. Migrate to ${standardizedYamlPath} or ${standardizedEnvName}.`,
-    );
-  }
-
-  return first.value;
-}
-
 export function getInactivityTimeoutMs(cwd = process.cwd()) {
-  const legacyEnv = getLegacyEnvNumber('NEAL_INACTIVITY_TIMEOUT_MS', [
-    'CODEX_INACTIVITY_TIMEOUT_MS',
-    'CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS',
-  ]);
-  const standardizedEnv = getStandardizedEnvNumber('NEAL_INACTIVITY_TIMEOUT_MS');
-  if (standardizedEnv !== undefined) {
-    return standardizedEnv;
-  }
-  if (legacyEnv !== undefined) {
-    return legacyEnv;
-  }
-
   const config = loadConfigFile(cwd);
-  const legacyYaml = getLegacyYamlNumber('neal.inactivity_timeout_ms', 'NEAL_INACTIVITY_TIMEOUT_MS', [
-    {
-      path: 'providers.openai-codex.inactivity_timeout_ms',
-      value: parseNumberValue(config.providers?.['openai-codex']?.inactivity_timeout_ms),
-    },
-    {
-      path: 'providers.anthropic-claude.inactivity_timeout_ms',
-      value: parseNumberValue(config.providers?.['anthropic-claude']?.inactivity_timeout_ms),
-    },
-  ]);
-  const standardizedYaml = parseNumberValue(config.neal?.inactivity_timeout_ms);
-  if (standardizedYaml !== undefined) {
-    return standardizedYaml;
-  }
-  if (legacyYaml !== undefined) {
-    return legacyYaml;
-  }
-
-  return DEFAULT_CONFIG.neal.inactivity_timeout_ms;
+  return (
+    parseNumberValue(config.neal?.inactivity_timeout_ms) ??
+    DEFAULT_CONFIG.neal.inactivity_timeout_ms
+  );
 }
 
 export function getApiRetryLimit(cwd = process.cwd()) {
-  const legacyEnv = getLegacyEnvNumber('NEAL_API_RETRY_LIMIT', [
-    'CLAUDE_API_RETRY_LIMIT',
-    'CLAUDE_REVIEW_API_RETRY_LIMIT',
-  ]);
-  const standardizedEnv = getStandardizedEnvNumber('NEAL_API_RETRY_LIMIT');
-  if (standardizedEnv !== undefined) {
-    return standardizedEnv;
-  }
-  if (legacyEnv !== undefined) {
-    return legacyEnv;
-  }
-
   const config = loadConfigFile(cwd);
-  const legacyYaml = getLegacyYamlNumber('neal.api_retry_limit', 'NEAL_API_RETRY_LIMIT', [
-    {
-      path: 'providers.anthropic-claude.api_retry_limit',
-      value: parseNumberValue(config.providers?.['anthropic-claude']?.api_retry_limit),
-    },
-  ]);
-  const standardizedYaml = parseNumberValue(config.neal?.api_retry_limit);
-  if (standardizedYaml !== undefined) {
-    return standardizedYaml;
-  }
-  if (legacyYaml !== undefined) {
-    return legacyYaml;
-  }
-
-  return DEFAULT_CONFIG.neal.api_retry_limit;
+  return (
+    parseNumberValue(config.neal?.api_retry_limit) ??
+    DEFAULT_CONFIG.neal.api_retry_limit
+  );
 }
 
 export function getClaudeMaxTurns(cwd = process.cwd()) {
-  const envValue = parseNumberValue(process.env.CLAUDE_REVIEW_MAX_TURNS);
-  if (envValue !== undefined) {
-    return envValue;
-  }
-
   const config = loadConfigFile(cwd);
-  return parseNumberValue(config.providers?.['anthropic-claude']?.max_turns) ?? DEFAULT_CONFIG.providers['anthropic-claude'].max_turns;
+  return (
+    parseNumberValue(config.providers?.['anthropic-claude']?.max_turns) ??
+    DEFAULT_CONFIG.providers['anthropic-claude'].max_turns
+  );
 }
 
 export function getClaudeContinuationLimit(cwd = process.cwd()) {
-  const envValue = parseNumberValue(process.env.CLAUDE_REVIEW_CONTINUATION_LIMIT);
-  if (envValue !== undefined) {
-    return envValue;
-  }
-
   const config = loadConfigFile(cwd);
   return (
     parseNumberValue(config.providers?.['anthropic-claude']?.continuation_limit) ??
@@ -308,15 +176,40 @@ export function getClaudeContinuationLimit(cwd = process.cwd()) {
 
 export function getPhaseHeartbeatMs(cwd = process.cwd()) {
   const config = loadConfigFile(cwd);
-  return getNealNumber('NEAL_PHASE_HEARTBEAT_MS', config.neal?.phase_heartbeat_ms, DEFAULT_CONFIG.neal.phase_heartbeat_ms);
+  return (
+    parseNumberValue(config.neal?.phase_heartbeat_ms) ??
+    DEFAULT_CONFIG.neal.phase_heartbeat_ms
+  );
 }
 
 export function getMaxReviewRounds(cwd = process.cwd()) {
   const config = loadConfigFile(cwd);
-  return getNealNumber('NEAL_MAX_REVIEW_ROUNDS', config.neal?.max_review_rounds, DEFAULT_CONFIG.neal.max_review_rounds);
+  return (
+    parseNumberValue(config.neal?.max_review_rounds) ??
+    DEFAULT_CONFIG.neal.max_review_rounds
+  );
 }
 
 export function getReviewStuckWindow(cwd = process.cwd()) {
   const config = loadConfigFile(cwd);
-  return getNealNumber('NEAL_REVIEW_STUCK_WINDOW', config.neal?.review_stuck_window, DEFAULT_CONFIG.neal.review_stuck_window);
+  return (
+    parseNumberValue(config.neal?.review_stuck_window) ??
+    DEFAULT_CONFIG.neal.review_stuck_window
+  );
+}
+
+export function getInteractiveBlockedRecoveryMaxTurns(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parseNumberValue(config.neal?.interactive_blocked_recovery_max_turns) ??
+    DEFAULT_CONFIG.neal.interactive_blocked_recovery_max_turns
+  );
+}
+
+export function getNotifyBin(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parseStringValue(config.neal?.notify_bin) ??
+    DEFAULT_CONFIG.neal.notify_bin
+  );
 }

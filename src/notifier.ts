@@ -1,12 +1,8 @@
 import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+
+import { getNotifyBin } from './neal/config.js';
 
 export type NotificationKind = 'done' | 'blocked' | 'complete' | 'retry';
-
-function getCommandPath(envName: string, defaultRelativePath: string) {
-  return process.env[envName] ?? resolve(homedir(), defaultRelativePath);
-}
 
 async function runCommand(command: string, args: string[]) {
   await new Promise<void>((resolvePromise, rejectPromise) => {
@@ -30,7 +26,7 @@ async function runCommand(command: string, args: string[]) {
   });
 }
 
-export async function notify(kind: NotificationKind, message: string) {
-  const notifyPath = getCommandPath('AUTONOMY_NOTIFY_BIN', 'bin/notify');
+export async function notify(kind: NotificationKind, message: string, cwd = process.cwd()) {
+  const notifyPath = getNotifyBin(cwd);
   await runCommand(notifyPath, [message]);
 }

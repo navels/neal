@@ -18,6 +18,7 @@ async function createState(overrides: Partial<OrchestrationState> = {}) {
   const planDoc = join(cwd, 'PLAN.md');
 
   await mkdir(runDir, { recursive: true });
+  await writeFile(join(cwd, 'config.yml'), 'neal:\n  notify_bin: /usr/bin/true\n', 'utf8');
   await writeFile(planDoc, '# Plan\n', 'utf8');
 
   const state = await createInitialState(
@@ -101,20 +102,10 @@ test('interactive blocked recovery notification is distinct from a terminal bloc
     'utf8',
   );
   await chmod(notifyScriptPath, 0o755);
+  await writeFile(join(state.cwd, 'config.yml'), `neal:\n  notify_bin: ${notifyScriptPath}\n`, 'utf8');
 
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
-
-  try {
-    await notifyInteractiveBlockedRecovery(state, 'Need operator guidance');
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    assert.match(notifyLog, /interactive blocked recovery for scope 3: Need operator guidance/);
-    assert.doesNotMatch(notifyLog, /: blocked:/);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  await notifyInteractiveBlockedRecovery(state, 'Need operator guidance');
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.match(notifyLog, /interactive blocked recovery for scope 3: Need operator guidance/);
+  assert.doesNotMatch(notifyLog, /: blocked:/);
 });

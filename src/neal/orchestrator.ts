@@ -3,7 +3,12 @@ import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, parse, resolve } from 'node:path';
 
-import { getMaxReviewRounds, getPhaseHeartbeatMs, getReviewStuckWindow } from './config.js';
+import {
+  getInteractiveBlockedRecoveryMaxTurns,
+  getMaxReviewRounds,
+  getPhaseHeartbeatMs,
+  getReviewStuckWindow,
+} from './config.js';
 import {
   CoderRoundError,
   ReviewerRoundError,
@@ -205,7 +210,7 @@ function startPhaseHeartbeat(
   phase: OrchestrationState['phase'],
   getState: () => OrchestrationState,
   logger?: RunLogger,
-  intervalMs = getPhaseHeartbeatMs(),
+  intervalMs = getPhaseHeartbeatMs(getState().cwd),
 ) {
   if (!logger || intervalMs <= 0) {
     return () => {};
@@ -411,22 +416,6 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
   return nextState;
 }
 
-const DEFAULT_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS = 3;
-
-function getInteractiveBlockedRecoveryMaxTurns() {
-  const raw = process.env.NEAL_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS;
-  if (!raw) {
-    return DEFAULT_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS;
-  }
-
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return DEFAULT_INTERACTIVE_BLOCKED_RECOVERY_MAX_TURNS;
-  }
-
-  return parsed;
-}
-
 export class InteractiveBlockedRecoveryPendingTurnError extends Error {
   readonly pendingTurn: number;
 
@@ -477,7 +466,7 @@ async function enterInteractiveBlockedRecovery(
     sourcePhase,
     blockedReason: reason,
     // Keep the operator/coder loop short so recovery remains bounded and auditable.
-    maxTurns: getInteractiveBlockedRecoveryMaxTurns(),
+    maxTurns: getInteractiveBlockedRecoveryMaxTurns(state.cwd),
     lastHandledTurn: 0,
     pendingDirective: null,
     turns: [],
@@ -1394,13 +1383,13 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
   const reachedMaxRounds = round >= state.maxRounds;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
-  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
+  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount, state.cwd);
   const reopenedCanonical = getReopenedCanonical(mergedFindings);
   const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
   const blockReason = reopenedCanonical
     ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`
     : stalledBlockingCount
-      ? `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow()} consecutive reviewer rounds`
+      ? `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow(state.cwd)} consecutive reviewer rounds`
       : reachedMaxRounds && hasBlockingFindings
         ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
         : null;
@@ -1538,13 +1527,13 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
   const reachedMaxRounds = round >= roundLimit;
   const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
-  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount);
+  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount, state.cwd);
   const reopenedCanonical = getReopenedCanonical(mergedFindings);
   const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
   const blockReason = reopenedCanonical
     ? getDerivedPlanBlockedReason(state, `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`)
     : stalledBlockingCount
-      ? getDerivedPlanBlockedReason(state, `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow()} consecutive reviewer rounds`)
+      ? getDerivedPlanBlockedReason(state, `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow(state.cwd)} consecutive reviewer rounds`)
       : reachedMaxRounds && hasBlockingFindings
         ? getDerivedPlanBlockedReason(state, `reached max review rounds (${roundLimit}) with blocking findings still open`)
         : null;
@@ -1736,9 +1725,9 @@ function countOpenBlockingCanonicals(findings: ReviewFinding[]) {
   return new Set(findings.filter(isOpenBlockingFinding).map((finding) => finding.canonicalId)).size;
 }
 
-function hasRepeatedNonReduction(rounds: OrchestrationState['rounds'], currentCount: number) {
+function hasRepeatedNonReduction(rounds: OrchestrationState['rounds'], currentCount: number, cwd: string) {
   const counts = [...rounds.map((round) => round.openBlockingCanonicalCount), currentCount];
-  const reviewStuckWindow = getReviewStuckWindow();
+  const reviewStuckWindow = getReviewStuckWindow(cwd);
   if (counts.length < reviewStuckWindow || currentCount <= 0) {
     return false;
   }

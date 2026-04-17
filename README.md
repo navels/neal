@@ -23,7 +23,7 @@ Install dependencies:
 pnpm install
 ```
 
-`neal` loads environment variables from a standard `.env` file at process startup via `dotenv`. Because you normally run it from the target repository, provider credentials and overrides can live in that repo's `.env`.
+`neal` loads environment variables from a standard `.env` file at process startup via `dotenv`. Because you normally run it from the target repository, provider credentials can live in that repo's `.env`.
 
 Run from the target repository:
 
@@ -42,39 +42,33 @@ pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relativ
 `neal` reads wrapper runtime settings with this precedence:
 
 1. CLI flags
-2. environment variables and `.env`
-3. `~/.config/neal/config.yml`
-4. repo `config.yml`
-5. built-in defaults
+2. `~/.config/neal/config.yml`
+3. repo `config.yml`
+4. built-in defaults
 
 The preferred shared runtime shape lives under `neal.*`:
 
 ```yaml
 neal:
+  phase_heartbeat_ms: 60000
+  max_review_rounds: 20
+  review_stuck_window: 3
   inactivity_timeout_ms: 600000
   api_retry_limit: 10
+  interactive_blocked_recovery_max_turns: 3
+  notify_bin: /Users/you/bin/notify
 
 providers:
+  openai-codex:
+    inactivity_timeout_ms: 600000
   anthropic-claude:
+    inactivity_timeout_ms: 600000
+    api_retry_limit: 10
     max_turns: 100
     continuation_limit: 2
 ```
 
-In this slice, `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout and adapter retry budget now belong under `neal.*`.
-
-Preferred environment overrides:
-
-- `NEAL_INACTIVITY_TIMEOUT_MS`
-- `NEAL_API_RETRY_LIMIT`
-- `CLAUDE_REVIEW_MAX_TURNS`
-- `CLAUDE_REVIEW_CONTINUATION_LIMIT`
-
-Temporary compatibility aliases still work for the shared knobs:
-
-- env: `CODEX_INACTIVITY_TIMEOUT_MS`, `CLAUDE_REVIEW_INACTIVITY_TIMEOUT_MS`, `CLAUDE_API_RETRY_LIMIT`, `CLAUDE_REVIEW_API_RETRY_LIMIT`
-- YAML: `providers.openai-codex.inactivity_timeout_ms`, `providers.anthropic-claude.inactivity_timeout_ms`, `providers.anthropic-claude.api_retry_limit`
-
-When both old and new names are set, the standardized `NEAL_*` names win. Legacy aliases emit a one-time stderr warning so operators can migrate.
+In this slice, `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout, retry budget, blocked-recovery cap, heartbeat cadence, review loop limits, and notification command now live under `neal.*`.
 
 ## Sandbox E2E
 
@@ -132,11 +126,11 @@ The direct session-resume commands dispatch by persisted provider:
 
 `neal` also writes wrapper-generated consult and retrospective artifacts into the run directory. `CONSULT.md` reflects the latest blocker consultation state, and `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, with checkpoint-specific archives written alongside them so you can inspect whether the review loop is adding value or exposing inefficiencies.
 
-Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Override the default 10-minute inactivity timeout with `NEAL_INACTIVITY_TIMEOUT_MS`. Anthropic reviewer sessions now default to `100` turns via `CLAUDE_REVIEW_MAX_TURNS`, `neal` will continue the same reviewer session up to `2` times by default when it hits `error_max_turns` before returning structured findings, and transient Anthropic API/internal failures are retried up to `10` times by default. Override those limits with `CLAUDE_REVIEW_CONTINUATION_LIMIT` and `NEAL_API_RETRY_LIMIT`. The legacy Anthropic timeout and retry env vars still work as compatibility aliases, but the `NEAL_*` names win when both are set.
+Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Anthropic reviewer sessions default to `100` turns and `neal` will continue the same reviewer session up to `2` times by default when it hits `error_max_turns` before returning structured findings. Transient Anthropic API/internal failures are retried up to `10` times by default. Tune those values in `config.yml`.
 
-Execute and planning review loops now default to `20` rounds via `NEAL_MAX_REVIEW_ROUNDS`. `neal` also detects `review_stuck` conditions and blocks early when blocking findings keep reopening or the open blocking count fails to decrease across multiple consecutive review rounds. Override that non-reduction window with `NEAL_REVIEW_STUCK_WINDOW`.
+Execute and planning review loops now default to `20` rounds. `neal` also detects `review_stuck` conditions and blocks early when blocking findings keep reopening or the open blocking count fails to decrease across multiple consecutive review rounds. Tune that non-reduction window in `config.yml`.
 
-Coder turns now get the same treatment. If a streamed coder turn goes silent for too long, `neal` fails the run with the current session id instead of hanging indefinitely. Override the default 10-minute coder inactivity timeout with `NEAL_INACTIVITY_TIMEOUT_MS`. The legacy `CODEX_INACTIVITY_TIMEOUT_MS` alias still works temporarily. You can also tune wrapper heartbeat logging with `NEAL_PHASE_HEARTBEAT_MS`; set it to `0` to disable phase heartbeats entirely.
+Coder turns now get the same treatment. If a streamed coder turn goes silent for too long, `neal` fails the run with the current session id instead of hanging indefinitely. You can also tune wrapper heartbeat logging in `config.yml`; set `neal.phase_heartbeat_ms` to `0` to disable phase heartbeats entirely.
 
 In execute mode, a coder inactivity timeout now triggers one automatic retry on a fresh coder session for the current scope phase. `neal` sends a retry notification when that happens. If the fresh-session retry also times out, the run fails and sends a failure notification.
 
@@ -169,11 +163,7 @@ Plan authors should describe execution in terms of scopes:
 
 ## Notifications
 
-The tool no longer depends on the `work-autonomously` skill. By default it:
-
-- runs `~/bin/notify "<message>"` for `blocked`, `complete`, `done`, and `retry`
-
-Override that command with `AUTONOMY_NOTIFY_BIN` if your local setup differs.
+The tool no longer depends on the `work-autonomously` skill. By default it runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`. The checked-in default is `~/bin/notify`.
 
 ## Retry Behavior
 

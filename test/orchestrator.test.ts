@@ -1,4 +1,4 @@
-import test, { after } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -23,17 +23,14 @@ import { createInitialState, getDefaultAgentConfig, loadState, saveState } from 
 import type { OrchestrationState } from '../src/neal/types.js';
 
 const execFileAsync = promisify(execFile);
-const originalNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
 
-process.env.AUTONOMY_NOTIFY_BIN = '/usr/bin/true';
-
-after(() => {
-  if (originalNotifyBin === undefined) {
-    delete process.env.AUTONOMY_NOTIFY_BIN;
-  } else {
-    process.env.AUTONOMY_NOTIFY_BIN = originalNotifyBin;
-  }
-});
+async function writeRepoConfig(cwd: string, overrides?: { notifyBin?: string }) {
+  await writeFile(
+    join(cwd, 'config.yml'),
+    `neal:\n  notify_bin: ${overrides?.notifyBin ?? '/usr/bin/true'}\n`,
+    'utf8',
+  );
+}
 
 async function createResumeFixture(overrides: Partial<OrchestrationState>) {
   const root = await mkdtemp(join(tmpdir(), 'neal-scope4-'));
@@ -42,6 +39,7 @@ async function createResumeFixture(overrides: Partial<OrchestrationState>) {
   const runDir = join(stateDir, 'runs', 'test-run');
   const planDoc = join(cwd, 'PLAN.md');
   await mkdir(runDir, { recursive: true });
+  await writeRepoConfig(cwd);
   await writeFile(planDoc, '# Plan\n', 'utf8');
 
   const initialState = await createInitialState(
@@ -110,6 +108,7 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
   const trackedFile = join(cwd, 'scope.txt');
 
   await mkdir(runDir, { recursive: true });
+  await writeRepoConfig(cwd);
   await writeFile(planDoc, '# Plan\n', 'utf8');
   await writeFile(trackedFile, 'base\n', 'utf8');
 
@@ -117,7 +116,7 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
   await runGit(cwd, 'config', 'user.name', 'Neal Test');
   await runGit(cwd, 'config', 'user.email', 'neal@example.com');
   await runGit(cwd, 'config', 'commit.gpgsign', 'false');
-  await runGit(cwd, 'add', 'PLAN.md', 'scope.txt');
+  await runGit(cwd, 'add', 'PLAN.md', 'config.yml', 'scope.txt');
   await runGit(cwd, 'commit', '-m', 'base commit');
 
   const baseCommit = await runGit(cwd, 'rev-parse', 'HEAD');
@@ -173,6 +172,7 @@ async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationSta
   const trackedFile = join(cwd, 'scope.txt');
 
   await mkdir(runDir, { recursive: true });
+  await writeRepoConfig(cwd);
   await writeFile(planDoc, '# Plan\n', 'utf8');
   await writeFile(trackedFile, 'base\n', 'utf8');
 
@@ -180,7 +180,7 @@ async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationSta
   await runGit(cwd, 'config', 'user.name', 'Neal Test');
   await runGit(cwd, 'config', 'user.email', 'neal@example.com');
   await runGit(cwd, 'config', 'commit.gpgsign', 'false');
-  await runGit(cwd, 'add', 'PLAN.md', 'scope.txt');
+  await runGit(cwd, 'add', 'PLAN.md', 'config.yml', 'scope.txt');
   await runGit(cwd, 'commit', '-m', 'base commit');
 
   const baseCommit = await runGit(cwd, 'rev-parse', 'HEAD');
@@ -1200,22 +1200,13 @@ test('resume backfills accepted derived plan notification once', async () => {
     derivedPlanAcceptedNotified: false,
   });
   const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
-    assert.equal(state.phase, 'awaiting_derived_plan_execution');
-    assert.equal(state.derivedPlanAcceptedNotified, true);
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    assert.match(notifyLog, /derived plan accepted for scope 9/);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(state.phase, 'awaiting_derived_plan_execution');
+  assert.equal(state.derivedPlanAcceptedNotified, true);
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.match(notifyLog, /derived plan accepted for scope 9/);
 });
 
 test('resume keeps active derived execution on the same derived sub-scope', async () => {
@@ -1270,21 +1261,12 @@ test('flush sends split-plan rejection notification for guardrail blocks', async
     ],
   });
   const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const nextState = await flushDerivedPlanNotifications(state, statePath);
-    assert.equal(nextState.splitPlanBlockedNotified, true);
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    assert.match(notifyLog, /split-plan recovery rejected for scope 10/);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const nextState = await flushDerivedPlanNotifications(state, statePath);
+  assert.equal(nextState.splitPlanBlockedNotified, true);
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.match(notifyLog, /split-plan recovery rejected for scope 10/);
 });
 
 test('persistSplitPlanRecovery allows split-plan attempts up to the configured cap and blocks at 10', async () => {
@@ -1403,21 +1385,12 @@ test('flush sends derived-plan failure notification for blocked derived-plan rev
     ],
   });
   const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const nextState = await flushDerivedPlanNotifications(state, statePath);
-    assert.equal(nextState.splitPlanBlockedNotified, true);
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    assert.match(notifyLog, /derived plan review did not converge/);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const nextState = await flushDerivedPlanNotifications(state, statePath);
+  assert.equal(nextState.splitPlanBlockedNotified, true);
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.match(notifyLog, /derived plan review did not converge/);
 });
 
 test('final squash advances to the next derived sub-scope without rolling up the parent', async () => {
@@ -1428,36 +1401,27 @@ test('final squash advances to the next derived sub-scope without rolling up the
     derivedScopeIndex: 1,
     lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
   });
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  await writeRepoConfig(state.cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const nextState = await runFinalSquashPhase(state, statePath);
-    assert.equal(nextState.phase, 'coder_scope');
-    assert.equal(nextState.status, 'running');
-    assert.equal(nextState.currentScopeNumber, 5);
-    assert.equal(nextState.derivedScopeIndex, 2);
-    assert.equal(nextState.derivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_5.md');
-    assert.equal(nextState.derivedPlanStatus, 'accepted');
-    assert.equal(nextState.completedScopes.some((scope) => scope.number === '5.1'), true);
-    assert.equal(nextState.completedScopes.some((scope) => scope.number === '5'), false);
-    const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
-    assert.equal(subScope?.derivedFromParentScope, '5');
-    assert.equal(subScope?.finalCommit, nextState.baseCommit);
-    const directParent = await runGit(state.cwd, 'rev-parse', `${nextState.baseCommit}^`);
-    assert.equal(directParent, state.baseCommit);
-    const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${state.baseCommit}..${nextState.baseCommit}`);
-    assert.equal(squashedCount, '1');
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
-    assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: derived scope work']);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const nextState = await runFinalSquashPhase(state, statePath);
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 5);
+  assert.equal(nextState.derivedScopeIndex, 2);
+  assert.equal(nextState.derivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_5.md');
+  assert.equal(nextState.derivedPlanStatus, 'accepted');
+  assert.equal(nextState.completedScopes.some((scope) => scope.number === '5.1'), true);
+  assert.equal(nextState.completedScopes.some((scope) => scope.number === '5'), false);
+  const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
+  assert.equal(subScope?.derivedFromParentScope, '5');
+  assert.equal(subScope?.finalCommit, nextState.baseCommit);
+  const directParent = await runGit(state.cwd, 'rev-parse', `${nextState.baseCommit}^`);
+  assert.equal(directParent, state.baseCommit);
+  const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${state.baseCommit}..${nextState.baseCommit}`);
+  assert.equal(squashedCount, '1');
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
+  assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: derived scope work']);
 });
 
 test('computeNextScopeStateAfterSquash advances a non-terminal derived sub-scope', async () => {
@@ -1517,39 +1481,30 @@ test('final squash rolls the last derived sub-scope up into the parent scope and
     derivedScopeIndex: 2,
     lastScopeMarker: 'AUTONOMY_DONE',
   });
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  await writeRepoConfig(state.cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const nextState = await runFinalSquashPhase(state, statePath);
-    assert.equal(nextState.phase, 'coder_scope');
-    assert.equal(nextState.status, 'running');
-    assert.equal(nextState.currentScopeNumber, 6);
-    assert.equal(nextState.derivedPlanPath, null);
-    assert.equal(nextState.derivedFromScopeNumber, null);
-    assert.equal(nextState.derivedPlanStatus, null);
-    assert.equal(nextState.derivedScopeIndex, null);
-    const subScope = nextState.completedScopes.find((scope) => scope.number === '5.2');
-    const parentScope = nextState.completedScopes.find((scope) => scope.number === '5');
-    assert.equal(subScope?.derivedFromParentScope, '5');
-    assert.equal(parentScope?.marker, 'AUTONOMY_SCOPE_DONE');
-    assert.equal(parentScope?.replacedByDerivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_5.md');
-    assert.equal(parentScope?.finalCommit, subScope?.finalCommit);
-    assert.equal(parentScope?.finalCommit, nextState.baseCommit);
-    const directParent = await runGit(state.cwd, 'rev-parse', `${nextState.baseCommit}^`);
-    assert.equal(directParent, state.baseCommit);
-    const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${state.baseCommit}..${nextState.baseCommit}`);
-    assert.equal(squashedCount, '1');
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
-    assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.2 complete: derived scope work']);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const nextState = await runFinalSquashPhase(state, statePath);
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 6);
+  assert.equal(nextState.derivedPlanPath, null);
+  assert.equal(nextState.derivedFromScopeNumber, null);
+  assert.equal(nextState.derivedPlanStatus, null);
+  assert.equal(nextState.derivedScopeIndex, null);
+  const subScope = nextState.completedScopes.find((scope) => scope.number === '5.2');
+  const parentScope = nextState.completedScopes.find((scope) => scope.number === '5');
+  assert.equal(subScope?.derivedFromParentScope, '5');
+  assert.equal(parentScope?.marker, 'AUTONOMY_SCOPE_DONE');
+  assert.equal(parentScope?.replacedByDerivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_5.md');
+  assert.equal(parentScope?.finalCommit, subScope?.finalCommit);
+  assert.equal(parentScope?.finalCommit, nextState.baseCommit);
+  const directParent = await runGit(state.cwd, 'rev-parse', `${nextState.baseCommit}^`);
+  assert.equal(directParent, state.baseCommit);
+  const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${state.baseCommit}..${nextState.baseCommit}`);
+  assert.equal(squashedCount, '1');
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
+  assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.2 complete: derived scope work']);
 });
 
 test('final squash preserves an empty derived scope checkpoint commit without attempting a no-op squash', async () => {
@@ -1561,33 +1516,24 @@ test('final squash preserves an empty derived scope checkpoint commit without at
       derivedScopeIndex: 1,
       lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
     });
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
+  await writeRepoConfig(state.cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const nextState = await runFinalSquashPhase(state, statePath);
-    assert.equal(nextState.phase, 'coder_scope');
-    assert.equal(nextState.status, 'running');
-    assert.equal(nextState.currentScopeNumber, 5);
-    assert.equal(nextState.derivedScopeIndex, 2);
-    assert.equal(nextState.baseCommit, createdCommit);
-    assert.equal(nextState.completedScopes.some((scope) => scope.number === '5.1'), true);
-    const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
-    assert.equal(subScope?.finalCommit, createdCommit);
-    const directParent = await runGit(state.cwd, 'rev-parse', `${createdCommit}^`);
-    assert.equal(directParent, baseCommit);
-    const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${baseCommit}..${createdCommit}`);
-    assert.equal(squashedCount, '1');
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
-    assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: empty derived scope checkpoint']);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const nextState = await runFinalSquashPhase(state, statePath);
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 5);
+  assert.equal(nextState.derivedScopeIndex, 2);
+  assert.equal(nextState.baseCommit, createdCommit);
+  assert.equal(nextState.completedScopes.some((scope) => scope.number === '5.1'), true);
+  const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
+  assert.equal(subScope?.finalCommit, createdCommit);
+  const directParent = await runGit(state.cwd, 'rev-parse', `${createdCommit}^`);
+  assert.equal(directParent, baseCommit);
+  const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${baseCommit}..${createdCommit}`);
+  assert.equal(squashedCount, '1');
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
+  assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: empty derived scope checkpoint']);
 });
 
 test('final squash tolerates unrelated local changes when the run was started with ignoreLocalChanges', async () => {
@@ -1595,25 +1541,16 @@ test('final squash tolerates unrelated local changes when the run was started wi
     ignoreLocalChanges: true,
     lastScopeMarker: 'AUTONOMY_DONE',
   });
-  const previousNotifyBin = process.env.AUTONOMY_NOTIFY_BIN;
-  process.env.AUTONOMY_NOTIFY_BIN = notifyScriptPath;
   const strayFile = join(cwd, 'FEEDBACK-DERIVED_PLAN.md');
   await writeFile(strayFile, 'local notes\n', 'utf8');
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
 
-  try {
-    const nextState = await runFinalSquashPhase(state, statePath);
-    assert.equal(nextState.phase, 'done');
-    assert.equal(nextState.status, 'done');
-    assert.equal(nextState.ignoreLocalChanges, true);
-    const notifyLog = await readFile(notifyLogPath, 'utf8');
-    assert.match(notifyLog, /plan complete/);
-  } finally {
-    if (previousNotifyBin === undefined) {
-      delete process.env.AUTONOMY_NOTIFY_BIN;
-    } else {
-      process.env.AUTONOMY_NOTIFY_BIN = previousNotifyBin;
-    }
-  }
+  const nextState = await runFinalSquashPhase(state, statePath);
+  assert.equal(nextState.phase, 'done');
+  assert.equal(nextState.status, 'done');
+  assert.equal(nextState.ignoreLocalChanges, true);
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.match(notifyLog, /plan complete/);
 });
 
 test('computeNextScopeStateAfterSquash rolls up the last derived sub-scope into the parent scope', async () => {

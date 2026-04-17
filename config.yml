@@ -1,8 +1,17 @@
 neal:
+  phase_heartbeat_ms: 60000
+  max_review_rounds: 20
+  review_stuck_window: 3
   inactivity_timeout_ms: 600000
   api_retry_limit: 10
+  interactive_blocked_recovery_max_turns: 3
+  notify_bin: /Users/lee.nave/bin/notify
 
 providers:
+  openai-codex:
+    inactivity_timeout_ms: 600000
   anthropic-claude:
+    inactivity_timeout_ms: 600000
+    api_retry_limit: 10
     max_turns: 100
     continuation_limit: 2
