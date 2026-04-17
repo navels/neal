@@ -174,18 +174,132 @@ export function buildReviewerPrompt(args: {
   ].join('\n');
 }
 
+export function buildDiagnosticAnalysisPrompt(args: {
+  planDoc: string;
+  progressText: string;
+  question: string;
+  target: string;
+  analysisArtifactPath: string;
+  baselineRef: string | null;
+  baselineSource: string;
+  blockedReason: string | null;
+}) {
+  return [
+    `Continue the diagnostic-recovery analysis for the active execute run described in ${args.planDoc}.`,
+    '',
+    'Your task in this phase is only to author the diagnostic analysis artifact.',
+    `Write the markdown body that Neal will save to ${args.analysisArtifactPath}.`,
+    'Do not author the recovery plan in this phase.',
+    'Answer the operator diagnostic question directly and keep the analysis bounded to the requested target.',
+    'Use the current repository state as the primary source of truth unless baseline context is required.',
+    args.baselineRef
+      ? `When baseline comparison is needed, inspect baseline ${args.baselineRef} using non-mutating git queries such as \`git show ${args.baselineRef}:<path>\` or \`git diff ${args.baselineRef}..HEAD -- <path>\`. Do not checkout or mutate that baseline.`
+      : 'No explicit baseline was provided. If comparison helps, use the active run context and current repository state only.',
+    args.blockedReason
+      ? `This diagnostic recovery was started from blocker context: ${args.blockedReason}`
+      : 'No explicit blocker reason was recorded for this diagnostic recovery.',
+    '',
+    'Operator diagnostic request:',
+    `- Question: ${args.question}`,
+    `- Target: ${args.target}`,
+    `- Effective baseline: ${args.baselineRef ?? 'none'}`,
+    `- Baseline source: ${args.baselineSource}`,
+    '',
+    'Required analysis goals:',
+    '- analyze from the specified baseline/context',
+    '- answer the operator diagnostic question directly',
+    '- identify what is structurally different or uniquely difficult about the target',
+    '- avoid proposing implementation work beyond what is necessary to motivate a later recovery plan',
+    '',
+    'Required markdown sections:',
+    '- `# Diagnostic Analysis`',
+    '- `## Request Context`',
+    '- `## Findings`',
+    '- `## Recovery Implications`',
+    '',
+    'You may inspect the progress artifact for run context, but do not edit wrapper-owned artifacts.',
+    'Keep any commentary outside the artifact body out of the response.',
+    `End your response with exactly one terminal marker on the final line: ${AUTONOMY_DONE} or ${AUTONOMY_BLOCKED}.`,
+    'Use AUTONOMY_BLOCKED only if you cannot produce the diagnostic analysis artifact from the available repository and baseline context.',
+    '',
+    'Current progress state:',
+    buildProgressSection(args.progressText),
+    '',
+    'Final line must be exactly one of:',
+    `- ${AUTONOMY_DONE}`,
+    `- ${AUTONOMY_BLOCKED}`,
+  ].join('\n');
+}
+
+export function buildRecoveryPlanPrompt(args: {
+  planDoc: string;
+  progressText: string;
+  question: string;
+  target: string;
+  analysisArtifactPath: string;
+  recoveryPlanPath: string;
+  baselineRef: string | null;
+  baselineSource: string;
+}) {
+  return [
+    `Continue the diagnostic-recovery authoring flow for the active execute run described in ${args.planDoc}.`,
+    '',
+    'Your task in this phase is only to author the recovery plan artifact.',
+    `Read the diagnostic analysis at ${args.analysisArtifactPath} before you write the plan.`,
+    `Write the markdown body that Neal will save to ${args.recoveryPlanPath}.`,
+    'Do not review the plan in this phase and do not propose adoption decisions.',
+    'Turn the diagnostic analysis into an executable recovery plan that remains narrow, auditable, and safe to adopt back into the active run.',
+    args.baselineRef
+      ? `The diagnostic analysis may reference baseline ${args.baselineRef} (${args.baselineSource}). Keep any further baseline inspection read-only and non-mutating.`
+      : 'No explicit baseline was provided. Rely on the diagnostic analysis and current repository state.',
+    '',
+    'Operator diagnostic request:',
+    `- Question: ${args.question}`,
+    `- Target: ${args.target}`,
+    `- Diagnostic analysis artifact: ${args.analysisArtifactPath}`,
+    '',
+    'Required recovery-plan goals:',
+    '- turn the diagnostic analysis into an executable recovery plan',
+    '- preserve the ordinary Neal-executable plan contract',
+    '- keep the recovery plan narrow and adoption-safe',
+    '- declare exactly one execution shape using the canonical `## Execution Shape` section',
+    '- if multi-scope is necessary, include the canonical `## Execution Queue` with explicit ordered scopes',
+    '',
+    'Required markdown sections:',
+    '- `## Problem Statement`',
+    '- `## Goal`',
+    '- `## Execution Shape`',
+    '- `## Execution Queue` when `executionShape: multi_scope`',
+    '',
+    'The plan must be Neal-executable and ready for ordinary Neal plan review in a later phase.',
+    'Keep any commentary outside the artifact body out of the response.',
+    `End your response with exactly one terminal marker on the final line: ${AUTONOMY_DONE} or ${AUTONOMY_BLOCKED}.`,
+    'Use AUTONOMY_BLOCKED only if the diagnostic analysis does not provide enough grounded information to author a safe recovery plan.',
+    '',
+    'Current progress state:',
+    buildProgressSection(args.progressText),
+    '',
+    'Final line must be exactly one of:',
+    `- ${AUTONOMY_DONE}`,
+    `- ${AUTONOMY_BLOCKED}`,
+  ].join('\n');
+}
+
 export function buildPlanReviewerPrompt(args: {
   planDoc: string;
   round: number;
   reviewMarkdownPath: string;
-  mode?: 'plan' | 'derived-plan';
+  mode?: 'plan' | 'derived-plan' | 'recovery-plan';
   parentPlanDoc?: string;
   derivedFromScopeNumber?: number | null;
+  recoveryParentScopeLabel?: string | null;
 }) {
   const mode = args.mode ?? 'plan';
   return [
     mode === 'derived-plan'
       ? `Review the derived implementation plan at ${args.planDoc} for scope ${args.derivedFromScopeNumber ?? 'unknown'} in parent plan ${args.parentPlanDoc ?? args.planDoc}.`
+      : mode === 'recovery-plan'
+        ? `Review the diagnostic recovery plan candidate at ${args.planDoc} for parent objective ${args.recoveryParentScopeLabel ?? 'unknown'} in active plan ${args.parentPlanDoc ?? args.planDoc}.`
       : `Review the plan document at ${args.planDoc}.`,
     `Review round: ${args.round}.`,
     '',
@@ -201,19 +315,29 @@ export function buildPlanReviewerPrompt(args: {
     'A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.',
     mode === 'derived-plan'
       ? 'Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.'
+      : mode === 'recovery-plan'
+        ? 'Use blocking severity when the recovery plan does not safely replace the failing parent-objective context, is not adoption-safe, leaves the blast radius too broad, or lacks concrete verification.'
       : 'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
     mode === 'derived-plan'
       ? 'Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.'
+      : mode === 'recovery-plan'
+        ? 'Review it as a candidate recovery plan, not as a brand-new top-level initiative. It should stay anchored to the current active run and parent objective.'
       : 'Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run neal --plan, or how to validate the planning task.',
     mode === 'derived-plan'
       ? 'Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.'
+      : mode === 'recovery-plan'
+        ? 'Also use blocking severity if the proposal silently broadens into unrelated future work instead of a bounded recovery path for the diagnosed failure mode.'
       : 'Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".',
     'Use non_blocking severity for clarity improvements that do not block execution.',
     mode === 'derived-plan'
       ? 'Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.'
+      : mode === 'recovery-plan'
+        ? 'Focus on whether the recovery plan directly answers the diagnostic analysis, remains narrow enough to adopt back into the active run, and preserves the canonical Neal-executable plan shape.'
       : 'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
     mode === 'derived-plan'
       ? 'The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
+      : mode === 'recovery-plan'
+        ? 'The recovery plan should remain a candidate replacement for the active parent objective, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
       : 'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
     'If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.',
     `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
@@ -366,9 +490,10 @@ export function buildCoderPlanResponsePrompt(args: {
   planDoc: string;
   openFindings: Pick<ReviewFinding, 'id' | 'source' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   mode?: 'blocking' | 'optional';
-  reviewMode?: 'plan' | 'derived-plan';
+  reviewMode?: 'plan' | 'derived-plan' | 'recovery-plan';
   parentPlanDoc?: string;
   derivedFromScopeNumber?: number | null;
+  recoveryParentScopeLabel?: string | null;
 }) {
   const mode = args.mode ?? 'blocking';
   const reviewMode = args.reviewMode ?? 'plan';
@@ -376,6 +501,8 @@ export function buildCoderPlanResponsePrompt(args: {
   return [
     reviewMode === 'derived-plan'
       ? `Continue refining the derived implementation plan at ${args.planDoc} for scope ${args.derivedFromScopeNumber ?? 'unknown'} in parent plan ${args.parentPlanDoc ?? args.planDoc}.`
+      : reviewMode === 'recovery-plan'
+        ? `Continue refining the diagnostic recovery plan candidate at ${args.planDoc} for parent objective ${args.recoveryParentScopeLabel ?? 'unknown'} in active plan ${args.parentPlanDoc ?? args.planDoc}.`
       : `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
     '',
     mode === 'blocking'
@@ -383,19 +510,27 @@ export function buildCoderPlanResponsePrompt(args: {
       : 'The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.',
     reviewMode === 'derived-plan'
       ? 'Edit only the derived plan artifact and directly related planning notes for that derived plan.'
+      : reviewMode === 'recovery-plan'
+        ? 'Edit only the diagnostic recovery plan artifact and directly related recovery-planning notes.'
       : 'Edit only the plan document and directly related planning artifacts.',
     'Do not edit runtime source code.',
     'Do not make git commits.',
     reviewMode === 'derived-plan'
       ? 'Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.'
+      : reviewMode === 'recovery-plan'
+        ? 'Keep the same diagnostic target, but make the recovery plan concrete enough to adopt back into the active run safely.'
       : 'The final file must be a pure future execution plan for neal --execute.',
     reviewMode === 'derived-plan'
       ? 'Do not silently widen the target or convert a real blocker into a vague replan.'
+      : reviewMode === 'recovery-plan'
+        ? 'Do not silently widen the recovery target or turn the candidate recovery plan into a fresh unrelated roadmap.'
       : 'Do not leave planning-task scaffolding behind after you respond to the findings.',
     reviewMode === 'derived-plan'
       ? 'Revise the derived plan so it uses the same Neal-executable contract as a top-level plan. Any derived-plan-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.'
+      : reviewMode === 'recovery-plan'
+        ? 'Revise the recovery plan so it uses the same Neal-executable contract as a top-level plan. Any diagnostic-recovery-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.'
       : 'Where the current repository already answers an implementation detail, revise the plan to use the concrete existing symbol names and exports instead of leaving generic or redundant instructions.',
-    ...(reviewMode === 'derived-plan' ? getCanonicalPlanContractLines() : []),
+    ...(reviewMode === 'derived-plan' || reviewMode === 'recovery-plan' ? getCanonicalPlanContractLines() : []),
     'Use `fixed` only when you actually revised the plan to resolve the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',
     'Use `deferred` only when the finding is real but not safe to resolve without user input.',

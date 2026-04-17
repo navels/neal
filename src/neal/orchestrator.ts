@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, parse, resolve } from 'node:path';
 
 import {
@@ -14,6 +14,8 @@ import {
   ReviewerRoundError,
   runBlockedRecoveryCoderRound,
   runCoderConsultResponseRound,
+  runDiagnosticAnalysisRound,
+  runRecoveryPlanRound,
   runCoderScopeRound,
   runCoderPlanResponseRound,
   runCoderPlanRound,
@@ -70,6 +72,9 @@ import type {
   AgentConfig,
   CoderBlockedRecoveryDisposition,
   CoderConsultRequest,
+  DiagnosticRecoveryBaselineSource,
+  DiagnosticRecoveryDecision,
+  DiagnosticRecoveryState,
   FindingStatus,
   InteractiveBlockedRecoveryState,
   OrchestrationState,
@@ -338,6 +343,8 @@ async function persistCoderFailureState(
   phase:
     | 'coder_scope'
     | 'coder_plan'
+    | 'diagnostic_recovery_analyze'
+    | 'diagnostic_recovery_author_plan'
     | 'coder_response'
     | 'coder_optional_response'
     | 'coder_plan_response'
@@ -378,6 +385,26 @@ function getPlanningCompletionProblem(marker: string | null) {
   }
 
   return marker === 'AUTONOMY_DONE' ? null : 'Planning mode must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
+}
+
+function getDiagnosticAnalysisCompletionProblem(marker: string | null) {
+  if (marker === 'AUTONOMY_BLOCKED') {
+    return null;
+  }
+
+  return marker === 'AUTONOMY_DONE'
+    ? null
+    : 'Diagnostic analysis must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
+}
+
+function getRecoveryPlanCompletionProblem(marker: string | null) {
+  if (marker === 'AUTONOMY_BLOCKED') {
+    return null;
+  }
+
+  return marker === 'AUTONOMY_DONE'
+    ? null
+    : 'Diagnostic recovery plan authoring must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
 }
 
 async function writeExecutionArtifacts(state: OrchestrationState) {
@@ -657,16 +684,390 @@ export async function recordInteractiveBlockedRecoveryGuidance(
   return nextState;
 }
 
+function isPausedExecuteRun(state: OrchestrationState) {
+  return (
+    state.topLevelMode === 'execute' &&
+    state.phase === 'coder_scope' &&
+    state.status === 'running' &&
+    state.completedScopes.length > 0 &&
+    state.createdCommits.length === 0 &&
+    state.rounds.length === 0 &&
+    state.findings.length === 0 &&
+    state.consultRounds.length === 0 &&
+    state.coderSessionHandle === null &&
+    state.reviewerSessionHandle === null
+  );
+}
+
+function getDiagnosticRecoveryBlockedReason(state: OrchestrationState) {
+  if (state.phase === 'interactive_blocked_recovery') {
+    return state.interactiveBlockedRecovery?.blockedReason ?? null;
+  }
+
+  if (state.phase === 'blocked') {
+    return state.completedScopes.find((scope) => scope.number === getCurrentScopeLabel(state))?.blocker ?? null;
+  }
+
+  return null;
+}
+
+async function getNextDiagnosticRecoverySequence(runDir: string) {
+  const entries = await readdir(runDir).catch(() => []);
+  let maxSequence = 0;
+  for (const entry of entries) {
+    const match = /^DIAGNOSTIC_RECOVERY_(\d+)_(?:ANALYSIS|PLAN)\.md$/.exec(entry);
+    if (!match) {
+      continue;
+    }
+    maxSequence = Math.max(maxSequence, Number(match[1]));
+  }
+  return maxSequence + 1;
+}
+
+function resolveDiagnosticRecoveryBaseline(state: OrchestrationState, requestedBaselineRef: string | null): {
+  effectiveBaselineRef: string | null;
+  effectiveBaselineSource: DiagnosticRecoveryBaselineSource;
+} {
+  if (requestedBaselineRef) {
+    return {
+      effectiveBaselineRef: requestedBaselineRef,
+      effectiveBaselineSource: 'explicit',
+    };
+  }
+
+  const parentScopeLabel = getParentScopeLabel(state);
+  const activeParentBaseCommit =
+    state.completedScopes.find((scope) => scope.number === parentScopeLabel && scope.baseCommit)?.baseCommit ??
+    state.completedScopes.find((scope) => scope.derivedFromParentScope === parentScopeLabel && scope.baseCommit)?.baseCommit ??
+    state.baseCommit;
+
+  if (activeParentBaseCommit) {
+    return {
+      effectiveBaselineRef: activeParentBaseCommit,
+      effectiveBaselineSource: 'active_parent_base_commit',
+    };
+  }
+
+  return {
+    effectiveBaselineRef: state.initialBaseCommit,
+    effectiveBaselineSource: 'run_base_commit',
+  };
+}
+
+function getResolvedDiagnosticRecoveryPlanPath(state: OrchestrationState) {
+  return state.rounds.at(-1)?.reviewedPlanPath ?? state.diagnosticRecovery?.recoveryPlanPath ?? null;
+}
+
+function getAdoptableDiagnosticRecoveryPlanPath(state: OrchestrationState) {
+  const latestRound = state.rounds.at(-1);
+  const reviewedPlanPath = latestRound?.reviewedPlanPath ?? null;
+
+  if (!reviewedPlanPath) {
+    throw new Error('Cannot adopt diagnostic recovery without a reviewed recovery plan artifact');
+  }
+
+  if ((latestRound?.openBlockingCanonicalCount ?? 0) > 0) {
+    throw new Error('Cannot adopt diagnostic recovery while recovery-plan review still has open blocking findings');
+  }
+
+  const hasOpenBlockingFindings = state.findings.some(
+    (finding) => finding.severity === 'blocking' && finding.status === 'open',
+  );
+  if (hasOpenBlockingFindings) {
+    throw new Error('Cannot adopt diagnostic recovery while recovery-plan review still has open blocking findings');
+  }
+
+  return reviewedPlanPath;
+}
+
+type StartDiagnosticRecoveryArgs = {
+  question: string;
+  target: string;
+  baselineRef?: string | null;
+};
+
+export async function startDiagnosticRecovery(
+  statePath: string,
+  args: StartDiagnosticRecoveryArgs,
+  logger?: RunLogger,
+) {
+  const question = args.question.trim();
+  const target = args.target.trim();
+  const requestedBaselineRef = args.baselineRef?.trim() ? args.baselineRef.trim() : null;
+
+  if (!question) {
+    throw new Error('Diagnostic recovery requires a non-empty diagnostic question');
+  }
+  if (!target) {
+    throw new Error('Diagnostic recovery requires a non-empty diagnostic target');
+  }
+
+  const state = await loadState(statePath);
+  if (state.topLevelMode !== 'execute') {
+    throw new Error('--diagnose is only supported for execute-mode runs');
+  }
+  if (state.diagnosticRecovery) {
+    throw new Error(`Diagnostic recovery is already active for this run: ${statePath}`);
+  }
+
+  const allowedSourcePhase =
+    state.phase === 'blocked' || state.phase === 'interactive_blocked_recovery' || isPausedExecuteRun(state);
+  if (!allowedSourcePhase) {
+    throw new Error(
+      'Diagnostic recovery may start only from a paused execute scope, a blocked run, or interactive blocked recovery.',
+    );
+  }
+
+  const sequence = await getNextDiagnosticRecoverySequence(state.runDir);
+  const { effectiveBaselineRef, effectiveBaselineSource } = resolveDiagnosticRecoveryBaseline(state, requestedBaselineRef);
+  const diagnosticRecovery: DiagnosticRecoveryState = {
+    sequence,
+    startedAt: new Date().toISOString(),
+    sourcePhase: state.phase === 'blocked' || state.phase === 'interactive_blocked_recovery' ? state.phase : 'coder_scope',
+    resumePhase: state.phase === 'blocked' ? state.blockedFromPhase : state.phase,
+    parentScopeLabel: getParentScopeLabel(state),
+    blockedReason: getDiagnosticRecoveryBlockedReason(state),
+    question,
+    target,
+    requestedBaselineRef,
+    effectiveBaselineRef,
+    effectiveBaselineSource,
+    analysisArtifactPath: join(state.runDir, `DIAGNOSTIC_RECOVERY_${sequence}_ANALYSIS.md`),
+    recoveryPlanPath: join(state.runDir, `DIAGNOSTIC_RECOVERY_${sequence}_PLAN.md`),
+  };
+
+  const nextState = await saveState(statePath, {
+    ...state,
+    phase: 'diagnostic_recovery_analyze',
+    status: 'running',
+    blockedFromPhase: state.phase === 'blocked' ? state.blockedFromPhase : state.phase,
+    coderSessionHandle: null,
+    reviewerSessionHandle: null,
+    coderRetryCount: 0,
+    diagnosticRecovery,
+  });
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('diagnostic_recovery.started', {
+    statePath,
+    scopeNumber: getCurrentScopeLabel(nextState),
+    sourcePhase: diagnosticRecovery.sourcePhase,
+    resumePhase: diagnosticRecovery.resumePhase,
+    parentScopeLabel: diagnosticRecovery.parentScopeLabel,
+    effectiveBaselineRef: diagnosticRecovery.effectiveBaselineRef,
+    effectiveBaselineSource: diagnosticRecovery.effectiveBaselineSource,
+    analysisArtifactPath: diagnosticRecovery.analysisArtifactPath,
+    recoveryPlanPath: diagnosticRecovery.recoveryPlanPath,
+  });
+  return nextState;
+}
+
+function finalizeDiagnosticRecoveryRecord(
+  state: OrchestrationState,
+  decision: DiagnosticRecoveryDecision,
+  rationale: string | null,
+  resultPhase: OrchestrationState['phase'],
+  adoptedPlanPath: string | null,
+  reviewArtifactPath: string | null,
+) {
+  if (!state.diagnosticRecovery) {
+    throw new Error('Cannot finalize diagnostic recovery without active diagnostic-recovery state');
+  }
+
+  return {
+    ...state.diagnosticRecovery,
+    resolvedAt: new Date().toISOString(),
+    decision,
+    rationale,
+    resultPhase,
+    adoptedPlanPath,
+    reviewArtifactPath,
+    reviewRoundCount: state.rounds.length,
+    reviewFindingCount: state.findings.length,
+  };
+}
+
+async function archiveDiagnosticRecoveryReviewState(state: OrchestrationState) {
+  if (!state.diagnosticRecovery) {
+    return null;
+  }
+
+  const reviewArtifactPath = join(state.runDir, `DIAGNOSTIC_RECOVERY_${state.diagnosticRecovery.sequence}_REVIEW.md`);
+  await writeFile(reviewArtifactPath, renderReviewMarkdown(state), 'utf8');
+  return reviewArtifactPath;
+}
+
+function getDiagnosticRecoveryResolutionState(
+  state: OrchestrationState,
+  decision: Exclude<DiagnosticRecoveryDecision, 'adopt_recovery_plan'>,
+) {
+  const recovery = state.diagnosticRecovery;
+  if (!recovery) {
+    throw new Error('Cannot resolve diagnostic recovery without active diagnostic-recovery state');
+  }
+
+  if (recovery.sourcePhase === 'interactive_blocked_recovery') {
+    return {
+      phase: 'interactive_blocked_recovery' as const,
+      status: 'running' as const,
+      blockedFromPhase: state.interactiveBlockedRecovery?.sourcePhase ?? recovery.resumePhase,
+    };
+  }
+
+  if (recovery.sourcePhase === 'blocked') {
+    return {
+      phase: 'blocked' as const,
+      status: 'blocked' as const,
+      blockedFromPhase: recovery.resumePhase,
+    };
+  }
+
+  return {
+    phase: recovery.resumePhase ?? 'coder_scope',
+    status: 'running' as const,
+    blockedFromPhase: null,
+  };
+}
+
+function canResolveDiagnosticRecoveryFromState(
+  state: OrchestrationState,
+  decision: DiagnosticRecoveryDecision,
+) {
+  if (!state.diagnosticRecovery) {
+    return false;
+  }
+
+  if (state.phase === 'diagnostic_recovery_adopt') {
+    return true;
+  }
+
+  if (decision === 'adopt_recovery_plan') {
+    return false;
+  }
+
+  return (
+    state.phase === 'blocked' &&
+    (state.blockedFromPhase === 'diagnostic_recovery_analyze' ||
+      state.blockedFromPhase === 'diagnostic_recovery_author_plan' ||
+      state.blockedFromPhase === 'diagnostic_recovery_review')
+  );
+}
+
+export async function resolveDiagnosticRecovery(
+  statePath: string,
+  args: {
+    decision: DiagnosticRecoveryDecision;
+    rationale?: string | null;
+  },
+  logger?: RunLogger,
+) {
+  const state = await loadState(statePath);
+  if (state.topLevelMode !== 'execute') {
+    throw new Error('Diagnostic recovery resolution is only supported for execute-mode runs');
+  }
+  if (!canResolveDiagnosticRecoveryFromState(state, args.decision)) {
+    throw new Error(`Run is not awaiting a diagnostic recovery decision: ${statePath}`);
+  }
+  const diagnosticRecovery = state.diagnosticRecovery;
+  if (!diagnosticRecovery) {
+    throw new Error(`Run is not awaiting a diagnostic recovery decision: ${statePath}`);
+  }
+
+  const rationale = args.rationale?.trim() ? args.rationale.trim() : null;
+  const resolvedPlanPath =
+    args.decision === 'adopt_recovery_plan' ? getAdoptableDiagnosticRecoveryPlanPath(state) : getResolvedDiagnosticRecoveryPlanPath(state);
+  const parentScopeNumber = Number.parseInt(diagnosticRecovery.parentScopeLabel, 10);
+  const nextDerivedFromScopeNumber = Number.isFinite(parentScopeNumber) ? parentScopeNumber : state.currentScopeNumber;
+  const reviewArtifactPath = await archiveDiagnosticRecoveryReviewState(state);
+  const restoredState = args.decision === 'adopt_recovery_plan' ? null : getDiagnosticRecoveryResolutionState(state, args.decision);
+
+  const baseState = {
+    ...state,
+    diagnosticRecovery: null,
+    diagnosticRecoveryHistory: [
+      ...state.diagnosticRecoveryHistory,
+      finalizeDiagnosticRecoveryRecord(
+        state,
+        args.decision,
+        rationale,
+        args.decision === 'adopt_recovery_plan' ? 'awaiting_derived_plan_execution' : restoredState!.phase,
+        args.decision === 'adopt_recovery_plan' ? resolvedPlanPath : null,
+        reviewArtifactPath,
+      ),
+    ],
+  };
+
+  const nextState =
+    args.decision === 'adopt_recovery_plan'
+      ? await saveState(statePath, {
+          ...baseState,
+          phase: 'awaiting_derived_plan_execution',
+          status: 'running',
+          blockedFromPhase: null,
+          coderSessionHandle: null,
+          reviewerSessionHandle: null,
+          coderRetryCount: 0,
+          lastScopeMarker: null,
+          currentScopeProgressJustification: null,
+          currentScopeMeaningfulProgressVerdict: null,
+          derivedPlanPath: resolvedPlanPath,
+          derivedPlanStatus: 'accepted',
+          derivedFromScopeNumber: nextDerivedFromScopeNumber,
+          derivedScopeIndex: null,
+          interactiveBlockedRecovery: null,
+          splitPlanStartedNotified: false,
+          derivedPlanAcceptedNotified: false,
+          splitPlanBlockedNotified: false,
+          splitPlanCountForCurrentScope: 0,
+          derivedPlanDepth: 0,
+          createdCommits: [],
+        })
+      : await saveState(statePath, {
+          ...baseState,
+          phase: restoredState!.phase,
+          status: restoredState!.status,
+          blockedFromPhase: restoredState!.blockedFromPhase,
+          coderSessionHandle: null,
+          reviewerSessionHandle: null,
+          coderRetryCount: 0,
+          lastScopeMarker: restoredState!.phase === 'blocked' ? state.lastScopeMarker ?? 'AUTONOMY_BLOCKED' : null,
+          currentScopeProgressJustification: null,
+          currentScopeMeaningfulProgressVerdict: null,
+          rounds: [],
+          findings: [],
+          consultRounds: [],
+        });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('diagnostic_recovery.resolved', {
+    statePath,
+    decision: args.decision,
+    resultPhase: nextState.phase,
+    adoptedPlanPath: args.decision === 'adopt_recovery_plan' ? resolvedPlanPath : null,
+    parentScopeLabel: diagnosticRecovery.parentScopeLabel,
+  });
+  return nextState;
+}
+
 function isResumableBlockedPhase(
   phase: OrchestrationState['phase'] | null,
-): phase is 'coder_scope' | 'coder_response' | 'coder_optional_response' | 'coder_plan' | 'coder_plan_response' | 'coder_plan_optional_response' {
+): phase is
+  | 'coder_scope'
+  | 'coder_response'
+  | 'coder_optional_response'
+  | 'coder_plan'
+  | 'coder_plan_response'
+  | 'coder_plan_optional_response'
+  | 'diagnostic_recovery_analyze'
+  | 'diagnostic_recovery_author_plan' {
   return (
     phase === 'coder_scope' ||
     phase === 'coder_response' ||
     phase === 'coder_optional_response' ||
     phase === 'coder_plan' ||
     phase === 'coder_plan_response' ||
-    phase === 'coder_plan_optional_response'
+    phase === 'coder_plan_optional_response' ||
+    phase === 'diagnostic_recovery_analyze' ||
+    phase === 'diagnostic_recovery_author_plan'
   );
 }
 
@@ -979,8 +1380,48 @@ function isDerivedPlanReviewState(state: OrchestrationState) {
   return state.topLevelMode === 'execute' && Boolean(state.derivedPlanPath) && state.derivedPlanStatus === 'pending_review';
 }
 
+function isDiagnosticRecoveryPlanReviewState(state: OrchestrationState) {
+  if (!state.diagnosticRecovery?.recoveryPlanPath) {
+    return false;
+  }
+
+  if (state.phase === 'diagnostic_recovery_review' || state.phase === 'diagnostic_recovery_adopt') {
+    return true;
+  }
+
+  if (state.phase === 'blocked' && state.blockedFromPhase === 'diagnostic_recovery_review') {
+    return true;
+  }
+
+  if (state.phase === 'coder_plan_response' || state.phase === 'coder_plan_optional_response') {
+    return state.rounds.at(-1)?.reviewedPlanPath === state.diagnosticRecovery.recoveryPlanPath;
+  }
+
+  return false;
+}
+
+function getPlanReviewMode(state: OrchestrationState) {
+  if (isDerivedPlanReviewState(state)) {
+    return 'derived-plan' as const;
+  }
+
+  if (isDiagnosticRecoveryPlanReviewState(state)) {
+    return 'recovery-plan' as const;
+  }
+
+  return 'plan' as const;
+}
+
 function getPlanReviewTargetPath(state: OrchestrationState) {
-  return isDerivedPlanReviewState(state) && state.derivedPlanPath ? state.derivedPlanPath : state.planDoc;
+  if (isDerivedPlanReviewState(state) && state.derivedPlanPath) {
+    return state.derivedPlanPath;
+  }
+
+  if (isDiagnosticRecoveryPlanReviewState(state) && state.diagnosticRecovery?.recoveryPlanPath) {
+    return state.diagnosticRecovery.recoveryPlanPath;
+  }
+
+  return state.planDoc;
 }
 
 function getPlanReviewRoundLimit(state: OrchestrationState) {
@@ -1014,7 +1455,8 @@ async function finalizePlanReviewResponseWithoutOpenFindings(
   derivedPlanReview: boolean,
   logger?: RunLogger,
 ) {
-  let nextState = await saveState(statePath, transitionPlanReviewWithoutOpenFindings(state, derivedPlanReview));
+  const reviewMode = getPlanReviewMode(state);
+  let nextState = await saveState(statePath, transitionPlanReviewWithoutOpenFindings(state, reviewMode));
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase,
@@ -1035,11 +1477,24 @@ export async function finalizeBlockedPlanReviewResponse(
   blocker: string,
   logger?: RunLogger,
 ) {
+  const diagnosticRecoveryPlanReview = isDiagnosticRecoveryPlanReviewState(state);
   if (state.topLevelMode !== 'execute') {
     if (!derivedPlanReview) {
       await notifyBlocked(state, blocker, logger);
     }
     return flushDerivedPlanNotifications(state, statePath, logger, blocker);
+  }
+
+  if (diagnosticRecoveryPlanReview) {
+    const nextState = await saveState(statePath, {
+      ...state,
+      phase: 'blocked',
+      status: 'blocked',
+      blockedFromPhase: 'diagnostic_recovery_review',
+    });
+    await writeExecutionArtifacts(nextState);
+    await notifyBlocked(nextState, blocker, logger);
+    return flushDerivedPlanNotifications(nextState, statePath, logger, blocker);
   }
 
   const persistedState = await enterInteractiveBlockedRecovery(state, statePath, blocker, logger);
@@ -1075,6 +1530,8 @@ function shouldRetryCoderTimeout(
   phase:
     | 'coder_scope'
     | 'coder_plan'
+    | 'diagnostic_recovery_analyze'
+    | 'diagnostic_recovery_author_plan'
     | 'coder_response'
     | 'coder_optional_response'
     | 'coder_plan_response'
@@ -1089,6 +1546,8 @@ function shouldRetryCoderTimeout(
   if (state.topLevelMode === 'execute') {
     return (
       phase === 'coder_scope' ||
+      phase === 'diagnostic_recovery_analyze' ||
+      phase === 'diagnostic_recovery_author_plan' ||
       phase === 'coder_response' ||
       phase === 'coder_optional_response' ||
       phase === 'interactive_blocked_recovery'
@@ -1132,6 +1591,8 @@ async function scheduleCoderTimeoutRetry(
   phase:
     | 'coder_scope'
     | 'coder_plan'
+    | 'diagnostic_recovery_analyze'
+    | 'diagnostic_recovery_author_plan'
     | 'coder_response'
     | 'coder_optional_response'
     | 'coder_plan_response'
@@ -1275,6 +1736,181 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
     const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, reason, logger);
     await notifyInteractiveBlockedRecovery(persistedState, reason, logger);
     return persistedState;
+  }
+  return nextState;
+}
+
+async function runDiagnosticRecoveryAnalyzePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.diagnosticRecovery) {
+    throw new Error('Cannot run diagnostic recovery analysis without diagnostic-recovery state');
+  }
+
+  await logger?.event('phase.start', {
+    phase: 'diagnostic_recovery_analyze',
+    sequence: state.diagnosticRecovery.sequence,
+    analysisArtifactPath: state.diagnosticRecovery.analysisArtifactPath,
+  });
+
+  let workingState = state;
+  let codex;
+  try {
+    codex = await runDiagnosticAnalysisRound({
+      coder: state.agentConfig.coder,
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      progressMarkdownPath: state.progressMarkdownPath,
+      question: state.diagnosticRecovery.question,
+      target: state.diagnosticRecovery.target,
+      analysisArtifactPath: state.diagnosticRecovery.analysisArtifactPath,
+      baselineRef: state.diagnosticRecovery.effectiveBaselineRef,
+      baselineSource: state.diagnosticRecovery.effectiveBaselineSource,
+      blockedReason: state.diagnosticRecovery.blockedReason,
+      sessionHandle: state.coderSessionHandle,
+      onSessionStarted: async (sessionHandle) => {
+        state.coderSessionHandle = sessionHandle;
+        workingState = await saveState(statePath, {
+          ...workingState,
+          coderSessionHandle: sessionHandle,
+        });
+      },
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CoderRoundError) {
+      if (shouldRetryCoderTimeout(workingState, 'diagnostic_recovery_analyze', error)) {
+        return scheduleCoderTimeoutRetry(workingState, statePath, 'diagnostic_recovery_analyze', error, logger);
+      }
+      if (isCoderTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
+      }
+      const failedState = await persistCoderFailureState(workingState, statePath, 'diagnostic_recovery_analyze', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+
+  const completionProblem = getDiagnosticAnalysisCompletionProblem(codex.marker);
+  if (codex.marker === 'AUTONOMY_DONE' && !completionProblem && codex.artifactBody.length === 0) {
+    throw new Error('Diagnostic recovery analysis returned an empty artifact body.');
+  }
+
+  if (!completionProblem && codex.marker === 'AUTONOMY_DONE') {
+    await mkdir(dirname(state.diagnosticRecovery.analysisArtifactPath), { recursive: true });
+    await writeFile(state.diagnosticRecovery.analysisArtifactPath, `${codex.artifactBody}\n`, 'utf8');
+  }
+
+  const completed = codex.marker === 'AUTONOMY_DONE' && !completionProblem;
+  const nextState = await saveState(statePath, {
+    ...workingState,
+    coderSessionHandle: codex.sessionHandle,
+    lastScopeMarker: codex.marker as ScopeMarker | null,
+    phase: completed ? 'diagnostic_recovery_author_plan' : 'blocked',
+    status: completed ? 'running' : 'blocked',
+    blockedFromPhase: completed ? null : 'diagnostic_recovery_analyze',
+    coderRetryCount: 0,
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'diagnostic_recovery_analyze',
+    marker: codex.marker,
+    sessionHandle: codex.sessionHandle,
+    nextPhase: nextState.phase,
+    analysisArtifactPath: state.diagnosticRecovery.analysisArtifactPath,
+  });
+  if (!completed) {
+    const reason = completionProblem ?? 'The coder reported a blocker during diagnostic analysis';
+    await notifyBlocked(nextState, reason, logger);
+  }
+  return nextState;
+}
+
+async function runDiagnosticRecoveryAuthorPlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.diagnosticRecovery) {
+    throw new Error('Cannot run diagnostic recovery plan authoring without diagnostic-recovery state');
+  }
+
+  await logger?.event('phase.start', {
+    phase: 'diagnostic_recovery_author_plan',
+    sequence: state.diagnosticRecovery.sequence,
+    analysisArtifactPath: state.diagnosticRecovery.analysisArtifactPath,
+    recoveryPlanPath: state.diagnosticRecovery.recoveryPlanPath,
+  });
+
+  let workingState = state;
+  let codex;
+  try {
+    codex = await runRecoveryPlanRound({
+      coder: state.agentConfig.coder,
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      progressMarkdownPath: state.progressMarkdownPath,
+      question: state.diagnosticRecovery.question,
+      target: state.diagnosticRecovery.target,
+      analysisArtifactPath: state.diagnosticRecovery.analysisArtifactPath,
+      recoveryPlanPath: state.diagnosticRecovery.recoveryPlanPath,
+      baselineRef: state.diagnosticRecovery.effectiveBaselineRef,
+      baselineSource: state.diagnosticRecovery.effectiveBaselineSource,
+      sessionHandle: state.coderSessionHandle,
+      onSessionStarted: async (sessionHandle) => {
+        state.coderSessionHandle = sessionHandle;
+        workingState = await saveState(statePath, {
+          ...workingState,
+          coderSessionHandle: sessionHandle,
+        });
+      },
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof CoderRoundError) {
+      if (shouldRetryCoderTimeout(workingState, 'diagnostic_recovery_author_plan', error)) {
+        return scheduleCoderTimeoutRetry(workingState, statePath, 'diagnostic_recovery_author_plan', error, logger);
+      }
+      if (isCoderTimeoutError(error)) {
+        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
+      }
+      const failedState = await persistCoderFailureState(workingState, statePath, 'diagnostic_recovery_author_plan', error, logger);
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+
+  const completionProblem = getRecoveryPlanCompletionProblem(codex.marker);
+  if (codex.marker === 'AUTONOMY_DONE' && !completionProblem && codex.artifactBody.length === 0) {
+    throw new Error('Diagnostic recovery plan authoring returned an empty artifact body.');
+  }
+
+  if (!completionProblem && codex.marker === 'AUTONOMY_DONE') {
+    await mkdir(dirname(state.diagnosticRecovery.recoveryPlanPath), { recursive: true });
+    await writeFile(state.diagnosticRecovery.recoveryPlanPath, `${codex.artifactBody}\n`, 'utf8');
+  }
+
+  const completed = codex.marker === 'AUTONOMY_DONE' && !completionProblem;
+  const nextState = await saveState(statePath, {
+    ...workingState,
+    coderSessionHandle: codex.sessionHandle,
+    lastScopeMarker: codex.marker as ScopeMarker | null,
+    phase: completed ? 'diagnostic_recovery_review' : 'blocked',
+    status: completed ? 'running' : 'blocked',
+    blockedFromPhase: completed ? null : 'diagnostic_recovery_author_plan',
+    coderRetryCount: 0,
+  });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'diagnostic_recovery_author_plan',
+    marker: codex.marker,
+    sessionHandle: codex.sessionHandle,
+    nextPhase: nextState.phase,
+    recoveryPlanPath: state.diagnosticRecovery.recoveryPlanPath,
+  });
+  if (!completed) {
+    const reason = completionProblem ?? 'The coder reported a blocker during recovery plan authoring';
+    await notifyBlocked(nextState, reason, logger);
   }
   return nextState;
 }
@@ -1562,6 +2198,8 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
   await logger?.event('phase.start', { phase: 'reviewer_plan', round: state.rounds.length + 1 });
   const round = state.rounds.length + 1;
   const derivedPlanReview = isDerivedPlanReviewState(state);
+  const diagnosticRecoveryPlanReview = isDiagnosticRecoveryPlanReviewState(state);
+  const reviewMode = getPlanReviewMode(state);
   const roundLimit = getPlanReviewRoundLimit(state);
   const reviewTargetPath = getPlanReviewTargetPath(state);
   const preparedReview = await preparePlanReviewArtifact({
@@ -1576,9 +2214,10 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       planDoc: preparedReview.reviewedPlanPath,
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
-      mode: derivedPlanReview ? 'derived-plan' : 'plan',
-      parentPlanDoc: derivedPlanReview ? state.planDoc : undefined,
+      mode: reviewMode,
+      parentPlanDoc: derivedPlanReview || diagnosticRecoveryPlanReview ? state.planDoc : undefined,
       derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
+      recoveryParentScopeLabel: diagnosticRecoveryPlanReview ? state.diagnosticRecovery?.parentScopeLabel : null,
       logger,
     });
   } catch (error) {
@@ -1659,6 +2298,8 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
           ? 'coder_plan_optional_response'
           : derivedPlanReview
             ? 'awaiting_derived_plan_execution'
+            : diagnosticRecoveryPlanReview
+              ? 'diagnostic_recovery_adopt'
             : 'done',
     status: shouldBlockForConvergence
       ? 'blocked'
@@ -1668,6 +2309,8 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
           : 'running'
         : derivedPlanReview
           ? 'running'
+          : diagnosticRecoveryPlanReview
+            ? 'running'
           : 'done',
     rounds: [
       ...state.rounds,
@@ -1693,7 +2336,12 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
         : derivedPlanReview && (shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds))
           ? 'rejected'
           : state.derivedPlanStatus,
-    blockedFromPhase: shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds) ? 'reviewer_plan' : null,
+    blockedFromPhase:
+      shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds)
+        ? diagnosticRecoveryPlanReview
+          ? 'diagnostic_recovery_review'
+          : 'reviewer_plan'
+        : null,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -1706,11 +2354,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked' && blockReason) {
-    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blockReason, logger);
-    if (!derivedPlanReview) {
-      await notifyBlocked(persistedState, blockReason, logger);
-    }
-    return flushDerivedPlanNotifications(persistedState, statePath, logger, blockReason);
+    return finalizeBlockedPlanReviewResponse(nextState, statePath, derivedPlanReview, blockReason, logger);
   }
   if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
     return flushDerivedPlanNotifications(nextState, statePath, logger);
@@ -2250,6 +2894,8 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
 
   await logger?.event('phase.start', { phase: 'coder_plan_response' });
   const derivedPlanReview = isDerivedPlanReviewState(state);
+  const reviewMode = getPlanReviewMode(state);
+  const diagnosticRecoveryPlanReview = reviewMode === 'recovery-plan';
   const openFindings = state.findings.filter(isOpenBlockingFinding);
   if (openFindings.length === 0) {
     return finalizePlanReviewResponseWithoutOpenFindings(state, statePath, 'coder_plan_response', derivedPlanReview, logger);
@@ -2271,9 +2917,10 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
         roundSummary: finding.roundSummary,
       })),
       sessionHandle: state.coderSessionHandle,
-      reviewMode: derivedPlanReview ? 'derived-plan' : 'plan',
-      parentPlanDoc: derivedPlanReview ? state.planDoc : undefined,
+      reviewMode,
+      parentPlanDoc: derivedPlanReview || diagnosticRecoveryPlanReview ? state.planDoc : undefined,
       derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
+      recoveryParentScopeLabel: diagnosticRecoveryPlanReview ? state.diagnosticRecovery?.parentScopeLabel : null,
       logger,
     });
   } catch (error) {
@@ -2311,7 +2958,12 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     ...state,
     coderSessionHandle: codex.sessionHandle,
     findings,
-    phase: codex.payload.outcome === 'blocked' ? 'blocked' : 'reviewer_plan',
+    phase:
+      codex.payload.outcome === 'blocked'
+        ? 'blocked'
+        : diagnosticRecoveryPlanReview
+          ? 'diagnostic_recovery_review'
+          : 'reviewer_plan',
     status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
     derivedPlanStatus: codex.payload.outcome === 'blocked' && derivedPlanReview ? 'rejected' : state.derivedPlanStatus,
     blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_plan_response' : null,
@@ -2341,6 +2993,8 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
 
   await logger?.event('phase.start', { phase: 'coder_plan_optional_response' });
   const derivedPlanReview = isDerivedPlanReviewState(state);
+  const reviewMode = getPlanReviewMode(state);
+  const diagnosticRecoveryPlanReview = reviewMode === 'recovery-plan';
   const openFindings = state.findings.filter(isOpenNonBlockingFinding);
   if (openFindings.length === 0) {
     return finalizePlanReviewResponseWithoutOpenFindings(
@@ -2369,9 +3023,10 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       })),
       mode: 'optional',
       sessionHandle: state.coderSessionHandle,
-      reviewMode: derivedPlanReview ? 'derived-plan' : 'plan',
-      parentPlanDoc: derivedPlanReview ? state.planDoc : undefined,
+      reviewMode,
+      parentPlanDoc: derivedPlanReview || diagnosticRecoveryPlanReview ? state.planDoc : undefined,
       derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
+      recoveryParentScopeLabel: diagnosticRecoveryPlanReview ? state.diagnosticRecovery?.parentScopeLabel : null,
       logger,
     });
   } catch (error) {
@@ -2409,8 +3064,20 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
     ...state,
     coderSessionHandle: codex.sessionHandle,
     findings,
-    phase: codex.payload.outcome === 'blocked' ? 'blocked' : derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
-    status: codex.payload.outcome === 'blocked' ? 'blocked' : derivedPlanReview ? 'running' : 'done',
+    phase:
+      codex.payload.outcome === 'blocked'
+        ? 'blocked'
+        : derivedPlanReview
+          ? 'awaiting_derived_plan_execution'
+          : diagnosticRecoveryPlanReview
+            ? 'diagnostic_recovery_adopt'
+            : 'done',
+    status:
+      codex.payload.outcome === 'blocked'
+        ? 'blocked'
+        : derivedPlanReview || diagnosticRecoveryPlanReview
+          ? 'running'
+          : 'done',
     derivedPlanStatus:
       codex.payload.outcome === 'blocked' && derivedPlanReview
         ? 'rejected'
@@ -2524,6 +3191,9 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
 type RunnablePhase = Extract<
   OrchestrationState['phase'],
   | 'coder_plan'
+  | 'diagnostic_recovery_analyze'
+  | 'diagnostic_recovery_author_plan'
+  | 'diagnostic_recovery_review'
   | 'reviewer_plan'
   | 'coder_plan_response'
   | 'coder_plan_optional_response'
@@ -2540,6 +3210,9 @@ type RunnablePhase = Extract<
 
 const RUNNABLE_PHASES = new Set<RunnablePhase>([
   'coder_plan',
+  'diagnostic_recovery_analyze',
+  'diagnostic_recovery_author_plan',
+  'diagnostic_recovery_review',
   'reviewer_plan',
   'coder_plan_response',
   'coder_plan_optional_response',
@@ -2585,6 +3258,17 @@ export async function runOnePass(
           options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
           return nextState;
         },
+        diagnostic_recovery_analyze: async () => {
+          const nextState = await runDiagnosticRecoveryAnalyzePhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        diagnostic_recovery_author_plan: async () => {
+          const nextState = await runDiagnosticRecoveryAuthorPlanPhase(currentState, statePath, logger);
+          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+          return nextState;
+        },
+        diagnostic_recovery_review: async () => runPlanReviewPhase(currentState, statePath, logger),
         reviewer_plan: async () => runPlanReviewPhase(currentState, statePath, logger),
         coder_plan_response: async () => {
           const nextState = await runCoderPlanResponsePhase(currentState, statePath, logger);

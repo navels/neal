@@ -12,8 +12,34 @@ function getDiscardedDiffPath(state: OrchestrationState) {
   return join(state.runDir, `SCOPE_${state.currentScopeNumber}_DISCARDED.diff`);
 }
 
+function getReviewTarget(state: OrchestrationState) {
+  if (
+    state.diagnosticRecovery?.recoveryPlanPath &&
+    (state.phase === 'diagnostic_recovery_review' ||
+      state.phase === 'diagnostic_recovery_adopt' ||
+      state.rounds.some((round) => round.reviewedPlanPath === state.diagnosticRecovery?.recoveryPlanPath))
+  ) {
+    return {
+      path: state.diagnosticRecovery.recoveryPlanPath,
+      label: 'diagnostic recovery plan candidate',
+    };
+  }
+
+  if (state.derivedPlanPath) {
+    return {
+      path: state.derivedPlanPath,
+      label: 'derived plan',
+    };
+  }
+
+  return {
+    path: getExecutionPlanPath(state),
+    label: 'plan document',
+  };
+}
+
 export function renderReviewMarkdown(state: OrchestrationState) {
-  const reviewTarget = state.derivedPlanPath ?? getExecutionPlanPath(state);
+  const reviewTarget = getReviewTarget(state);
   const lastReviewedPlanPath = state.rounds.at(-1)?.reviewedPlanPath ?? null;
   const parentScopeLabel = state.topLevelMode === 'execute' ? getParentScopeLabel(state) : null;
   const lines = [
@@ -21,7 +47,8 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     '',
     '## Metadata',
     `- Plan: ${state.planDoc}`,
-    `- Review target: ${reviewTarget}`,
+    `- Review target: ${reviewTarget.path}`,
+    `- Review target kind: ${reviewTarget.label}`,
     `- Last reviewed artifact: ${lastReviewedPlanPath ?? 'pending'}`,
     `- Scope: ${getCurrentScopeLabel(state)}`,
     `- Phase: ${state.phase}`,
@@ -67,6 +94,44 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     for (const line of renderRecentAcceptedScopesSummary(state, parentScopeLabel ?? String(state.currentScopeNumber)).split('\n')) {
       lines.push(line);
     }
+  }
+
+  if (state.diagnosticRecovery) {
+    lines.push(
+      '',
+      '## Diagnostic Recovery',
+      `- Sequence: ${state.diagnosticRecovery.sequence}`,
+      `- Source phase: ${state.diagnosticRecovery.sourcePhase}`,
+      `- Resume phase: ${state.diagnosticRecovery.resumePhase ?? 'none'}`,
+      `- Parent scope: ${state.diagnosticRecovery.parentScopeLabel}`,
+      `- Blocked reason: ${state.diagnosticRecovery.blockedReason ?? 'none'}`,
+      `- Question: ${state.diagnosticRecovery.question}`,
+      `- Target: ${state.diagnosticRecovery.target}`,
+      `- Requested baseline: ${state.diagnosticRecovery.requestedBaselineRef ?? 'defaulted'}`,
+      `- Effective baseline: ${state.diagnosticRecovery.effectiveBaselineRef ?? 'none'}`,
+      `- Baseline source: ${state.diagnosticRecovery.effectiveBaselineSource}`,
+      `- Analysis artifact: ${state.diagnosticRecovery.analysisArtifactPath}`,
+      `- Recovery plan artifact: ${state.diagnosticRecovery.recoveryPlanPath}`,
+    );
+    if (state.phase === 'diagnostic_recovery_adopt') {
+      lines.push('- Next operator step: neal --diagnostic-decision [state-file] --action <adopt|reference|cancel>');
+    }
+  }
+
+  if (state.diagnosticRecoveryHistory.length > 0) {
+    const latestRecovery = state.diagnosticRecoveryHistory.at(-1);
+    lines.push(
+      '',
+      '## Diagnostic Recovery History',
+      `- Sessions: ${state.diagnosticRecoveryHistory.length}`,
+      `- Latest decision: ${latestRecovery?.decision ?? 'none'}`,
+      `- Latest result phase: ${latestRecovery?.resultPhase ?? 'none'}`,
+      `- Latest adopted plan: ${latestRecovery?.adoptedPlanPath ?? 'none'}`,
+      `- Latest review artifact: ${latestRecovery?.reviewArtifactPath ?? 'none'}`,
+      `- Latest review rounds: ${latestRecovery?.reviewRoundCount ?? 0}`,
+      `- Latest review findings: ${latestRecovery?.reviewFindingCount ?? 0}`,
+      `- Latest rationale: ${latestRecovery?.rationale ?? 'none'}`,
+    );
   }
 
   lines.push('', '## Review Rounds');

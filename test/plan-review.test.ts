@@ -76,6 +76,34 @@ test('derived-plan prompts require the same canonical Neal-executable contract',
   assert.match(reviewerPrompt, /canonical Neal-executable plan shape/);
 });
 
+test('recovery-plan prompts keep review and response anchored to the active run', () => {
+  const reviewerPrompt = buildPlanReviewerPrompt({
+    planDoc: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md',
+    round: 1,
+    reviewMarkdownPath: '/tmp/REVIEW.md',
+    mode: 'recovery-plan',
+    parentPlanDoc: '/tmp/PLAN.md',
+    recoveryParentScopeLabel: '4',
+  });
+  const planResponsePrompt = buildCoderPlanResponsePrompt({
+    planDoc: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md',
+    openFindings: [],
+    reviewMode: 'recovery-plan',
+    parentPlanDoc: '/tmp/PLAN.md',
+    recoveryParentScopeLabel: '4',
+  });
+
+  assert.match(reviewerPrompt, /diagnostic recovery plan candidate at \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+  assert.match(reviewerPrompt, /parent objective 4/);
+  assert.match(reviewerPrompt, /candidate recovery plan, not as a brand-new top-level initiative/);
+  assert.match(reviewerPrompt, /same canonical `## Execution Shape` \/ `## Execution Queue` contract as a top-level plan/);
+
+  assert.match(planResponsePrompt, /Continue refining the diagnostic recovery plan candidate at \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md for parent objective 4/);
+  assert.match(planResponsePrompt, /Edit only the diagnostic recovery plan artifact/);
+  assert.match(planResponsePrompt, /adopt back into the active run safely/);
+  assert.match(planResponsePrompt, /same Neal-executable contract as a top-level plan/);
+});
+
 test('plan reviewer schema and prompt require executionShape confirmation', () => {
   const schema = buildPlanReviewerSchema();
   const prompt = buildPlanReviewerPrompt({

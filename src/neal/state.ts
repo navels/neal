@@ -5,6 +5,8 @@ import type {
   AgentConfig,
   AgentProvider,
   ConsultRound,
+  DiagnosticRecoveryState,
+  DiagnosticRecoveryRecord,
   ExecuteScopeProgressJustification,
   InteractiveBlockedRecoveryRecord,
   InteractiveBlockedRecoveryState,
@@ -86,6 +88,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     updatedAt: now,
     reviewMarkdownPath: init.reviewMarkdownPath,
     archivedReviewPath: null,
+    initialBaseCommit: baseCommit,
     baseCommit,
     finalCommit: null,
     coderSessionHandle: null,
@@ -116,6 +119,8 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     blockedFromPhase: null,
     interactiveBlockedRecovery: null,
     interactiveBlockedRecoveryHistory: [],
+    diagnosticRecovery: null,
+    diagnosticRecoveryHistory: [],
     status: 'running',
   };
 }
@@ -175,6 +180,85 @@ function hydrateReviewerMeaningfulProgressVerdict(value: unknown): ReviewerMeani
   return {
     action: verdict.action,
     rationale: verdict.rationale,
+  };
+}
+
+function hydrateDiagnosticRecovery(value: unknown): DiagnosticRecoveryState | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const recovery = value as Partial<DiagnosticRecoveryState>;
+  const sourcePhase =
+    recovery.sourcePhase === 'blocked' ||
+    recovery.sourcePhase === 'interactive_blocked_recovery' ||
+    recovery.sourcePhase === 'coder_scope'
+      ? recovery.sourcePhase
+      : null;
+  const effectiveBaselineSource =
+    recovery.effectiveBaselineSource === 'explicit' ||
+    recovery.effectiveBaselineSource === 'active_parent_base_commit' ||
+    recovery.effectiveBaselineSource === 'run_base_commit'
+      ? recovery.effectiveBaselineSource
+      : null;
+
+  if (
+    typeof recovery.sequence !== 'number' ||
+    typeof recovery.startedAt !== 'string' ||
+    sourcePhase === null ||
+    typeof recovery.parentScopeLabel !== 'string' ||
+    typeof recovery.question !== 'string' ||
+    typeof recovery.target !== 'string' ||
+    effectiveBaselineSource === null ||
+    typeof recovery.analysisArtifactPath !== 'string' ||
+    typeof recovery.recoveryPlanPath !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    sequence: recovery.sequence,
+    startedAt: recovery.startedAt,
+    sourcePhase,
+    resumePhase: typeof recovery.resumePhase === 'string' ? (recovery.resumePhase as OrchestrationState['phase']) : null,
+    parentScopeLabel: recovery.parentScopeLabel,
+    blockedReason: typeof recovery.blockedReason === 'string' ? recovery.blockedReason : null,
+    question: recovery.question,
+    target: recovery.target,
+    requestedBaselineRef: typeof recovery.requestedBaselineRef === 'string' ? recovery.requestedBaselineRef : null,
+    effectiveBaselineRef: typeof recovery.effectiveBaselineRef === 'string' ? recovery.effectiveBaselineRef : null,
+    effectiveBaselineSource,
+    analysisArtifactPath: recovery.analysisArtifactPath,
+    recoveryPlanPath: recovery.recoveryPlanPath,
+  };
+}
+
+function hydrateDiagnosticRecoveryRecord(value: unknown): DiagnosticRecoveryRecord {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Invalid session state: malformed diagnostic recovery history');
+  }
+
+  const record = value as Partial<DiagnosticRecoveryRecord>;
+  const hydratedRecovery = hydrateDiagnosticRecovery(record);
+  if (!hydratedRecovery) {
+    throw new Error('Invalid session state: malformed diagnostic recovery history');
+  }
+
+  return {
+    ...hydratedRecovery,
+    resolvedAt: typeof record.resolvedAt === 'string' ? record.resolvedAt : new Date(0).toISOString(),
+    decision:
+      record.decision === 'adopt_recovery_plan' ||
+      record.decision === 'keep_as_reference' ||
+      record.decision === 'cancel'
+        ? record.decision
+        : 'cancel',
+    rationale: typeof record.rationale === 'string' ? record.rationale : null,
+    resultPhase: typeof record.resultPhase === 'string' ? record.resultPhase : 'blocked',
+    adoptedPlanPath: typeof record.adoptedPlanPath === 'string' ? record.adoptedPlanPath : null,
+    reviewArtifactPath: typeof record.reviewArtifactPath === 'string' ? record.reviewArtifactPath : null,
+    reviewRoundCount: typeof record.reviewRoundCount === 'number' ? record.reviewRoundCount : 0,
+    reviewFindingCount: typeof record.reviewFindingCount === 'number' ? record.reviewFindingCount : 0,
   };
 }
 
@@ -510,6 +594,10 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
     progressMarkdownPath,
     consultMarkdownPath,
     phase: parsed.phase,
+    initialBaseCommit:
+      typeof (parsed as { initialBaseCommit?: unknown }).initialBaseCommit === 'string'
+        ? (parsed as { initialBaseCommit: string }).initialBaseCommit
+        : parsed.baseCommit,
     coderSessionHandle:
       typeof (parsed as { coderSessionHandle?: unknown }).coderSessionHandle === 'string'
         ? (parsed as { coderSessionHandle: string }).coderSessionHandle
@@ -597,6 +685,10 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
       ? (parsed as { interactiveBlockedRecoveryHistory: unknown[] }).interactiveBlockedRecoveryHistory.map(
           hydrateInteractiveBlockedRecoveryRecord,
         )
+      : [],
+    diagnosticRecovery: hydrateDiagnosticRecovery((parsed as { diagnosticRecovery?: unknown }).diagnosticRecovery),
+    diagnosticRecoveryHistory: Array.isArray((parsed as { diagnosticRecoveryHistory?: unknown }).diagnosticRecoveryHistory)
+      ? (parsed as { diagnosticRecoveryHistory: unknown[] }).diagnosticRecoveryHistory.map(hydrateDiagnosticRecoveryRecord)
       : [],
   };
 }

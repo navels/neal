@@ -27,6 +27,14 @@ const PROVIDER_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> = {
   },
 };
 
+const providerCapabilityOverrides = new Map<AgentProvider, Partial<ProviderCapabilities>>();
+
+function getProviderCapabilities(provider: AgentProvider) {
+  const base = PROVIDER_CAPABILITIES[provider];
+  const override = providerCapabilityOverrides.get(provider);
+  return override ? { ...base, ...override } : base;
+}
+
 function listSupportedProvidersForRole(role: keyof AgentConfig) {
   return Object.entries(PROVIDER_CAPABILITIES)
     .filter(([, capabilities]) => (role === 'coder' ? capabilities.createCoderAdapter : capabilities.createStructuredAdvisorAdapter))
@@ -35,11 +43,11 @@ function listSupportedProvidersForRole(role: keyof AgentConfig) {
 }
 
 export function assertSupportedAgentConfig(agentConfig: AgentConfig) {
-  if (!PROVIDER_CAPABILITIES[agentConfig.coder.provider].createCoderAdapter) {
+  if (!getProviderCapabilities(agentConfig.coder.provider).createCoderAdapter) {
     throw new Error(`Unsupported coder provider: ${agentConfig.coder.provider}. Supported today: ${listSupportedProvidersForRole('coder')}`);
   }
 
-  if (!PROVIDER_CAPABILITIES[agentConfig.reviewer.provider].createStructuredAdvisorAdapter) {
+  if (!getProviderCapabilities(agentConfig.reviewer.provider).createStructuredAdvisorAdapter) {
     throw new Error(
       `Unsupported reviewer provider: ${agentConfig.reviewer.provider}. Supported today: ${listSupportedProvidersForRole('reviewer')}`,
     );
@@ -47,7 +55,7 @@ export function assertSupportedAgentConfig(agentConfig: AgentConfig) {
 }
 
 export function getCoderAdapter(config: AgentRoleConfig): CoderAdapter {
-  const createCoderAdapter = PROVIDER_CAPABILITIES[config.provider].createCoderAdapter;
+  const createCoderAdapter = getProviderCapabilities(config.provider).createCoderAdapter;
   if (createCoderAdapter) {
     return createCoderAdapter(config);
   }
@@ -56,10 +64,21 @@ export function getCoderAdapter(config: AgentRoleConfig): CoderAdapter {
 }
 
 export function getStructuredAdvisorAdapter(config: AgentRoleConfig): StructuredAdvisorAdapter {
-  const createStructuredAdvisorAdapter = PROVIDER_CAPABILITIES[config.provider].createStructuredAdvisorAdapter;
+  const createStructuredAdvisorAdapter = getProviderCapabilities(config.provider).createStructuredAdvisorAdapter;
   if (createStructuredAdvisorAdapter) {
     return createStructuredAdvisorAdapter(config);
   }
 
   throw new Error(`Unsupported reviewer provider: ${config.provider}. Supported today: ${listSupportedProvidersForRole('reviewer')}`);
+}
+
+export function setProviderCapabilitiesOverrideForTesting(
+  provider: AgentProvider,
+  override: Partial<ProviderCapabilities>,
+) {
+  providerCapabilityOverrides.set(provider, override);
+}
+
+export function clearProviderCapabilitiesOverridesForTesting() {
+  providerCapabilityOverrides.clear();
 }

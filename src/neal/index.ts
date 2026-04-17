@@ -12,6 +12,8 @@ import {
   InteractiveBlockedRecoveryPendingTurnError,
   loadOrInitialize,
   recordInteractiveBlockedRecoveryGuidance,
+  resolveDiagnosticRecovery,
+  startDiagnosticRecovery,
   runOnePass,
 } from './orchestrator.js';
 import { buildUsageLines, parseNewRunArgs } from './cli.js';
@@ -334,6 +336,166 @@ async function main() {
           recoveryTurns: nextState.interactiveBlockedRecovery?.turns.length ?? 0,
           terminalDirectivePending: nextState.interactiveBlockedRecovery?.pendingDirective?.terminalOnly ?? false,
           nextStep: `Run \`neal --resume ${loaded.statePath}\` to process the recovery guidance.`,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    return;
+  }
+
+  if (args[0] === '--diagnose') {
+    let statePath = resolve('.neal/session.json');
+    let question: string | null = null;
+    let target: string | null = null;
+    let baseline: string | null = null;
+    let index = 1;
+
+    if (args[index] && !args[index].startsWith('--')) {
+      statePath = resolve(args[index]);
+      index += 1;
+    }
+
+    while (index < args.length) {
+      const flag = args[index];
+      const value = args[index + 1];
+      switch (flag) {
+        case '--question':
+          if (!value) {
+            throw new Error('--diagnose requires a value for --question');
+          }
+          question = value;
+          index += 2;
+          break;
+        case '--target':
+          if (!value) {
+            throw new Error('--diagnose requires a value for --target');
+          }
+          target = value;
+          index += 2;
+          break;
+        case '--baseline':
+          if (!value) {
+            throw new Error('--diagnose requires a value for --baseline');
+          }
+          baseline = value;
+          index += 2;
+          break;
+        default:
+          throw new Error(`Unknown argument: ${flag}`);
+      }
+    }
+
+    if (!question) {
+      throw new Error('neal --diagnose requires --question "<diagnostic question>"');
+    }
+    if (!target) {
+      throw new Error('neal --diagnose requires --target "<files-or-component>"');
+    }
+
+    await access(statePath);
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
+    assertSupportedAgentConfig(loaded.state.agentConfig);
+    const nextState = await startDiagnosticRecovery(
+      loaded.statePath,
+      {
+        question,
+        target,
+        baselineRef: baseline,
+      },
+      loaded.logger,
+    );
+    writeDiagnostic(`[neal] diagnostic recovery initialized; inspect with: neal --resume ${loaded.statePath}\n`);
+    process.stdout.write(
+      JSON.stringify(
+        {
+          ok: true,
+          phase: nextState.phase,
+          status: nextState.status,
+          statePath: loaded.statePath,
+          runDir: nextState.runDir,
+          diagnosticRecovery: nextState.diagnosticRecovery,
+          nextStep: `Run \`neal --resume ${loaded.statePath}\` to inspect the diagnostic-recovery session.`,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    return;
+  }
+
+  if (args[0] === '--diagnostic-decision') {
+    let statePath = resolve('.neal/session.json');
+    let action: 'adopt_recovery_plan' | 'keep_as_reference' | 'cancel' | null = null;
+    let rationale: string | null = null;
+    let index = 1;
+
+    if (args[index] && !args[index].startsWith('--')) {
+      statePath = resolve(args[index]);
+      index += 1;
+    }
+
+    while (index < args.length) {
+      const flag = args[index];
+      const value = args[index + 1];
+      switch (flag) {
+        case '--action':
+          if (!value) {
+            throw new Error('--diagnostic-decision requires a value for --action');
+          }
+          if (value === 'adopt') {
+            action = 'adopt_recovery_plan';
+          } else if (value === 'reference') {
+            action = 'keep_as_reference';
+          } else if (value === 'cancel') {
+            action = 'cancel';
+          } else {
+            throw new Error('--diagnostic-decision --action must be one of: adopt, reference, cancel');
+          }
+          index += 2;
+          break;
+        case '--rationale':
+          if (!value) {
+            throw new Error('--diagnostic-decision requires a value for --rationale');
+          }
+          rationale = value;
+          index += 2;
+          break;
+        default:
+          throw new Error(`Unknown argument: ${flag}`);
+      }
+    }
+
+    if (!action) {
+      throw new Error('neal --diagnostic-decision requires --action <adopt|reference|cancel>');
+    }
+
+    await access(statePath);
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
+    assertSupportedAgentConfig(loaded.state.agentConfig);
+    const nextState = await resolveDiagnosticRecovery(
+      loaded.statePath,
+      {
+        decision: action,
+        rationale,
+      },
+      loaded.logger,
+    );
+    const nextStep =
+      action === 'adopt_recovery_plan'
+        ? `Run \`neal --resume ${loaded.statePath}\` to start executing the adopted recovery plan.`
+        : `The original run remains paused; inspect with \`neal --resume ${loaded.statePath}\` or start another diagnostic recovery later with \`neal --diagnose ${loaded.statePath} ...\`.`;
+    writeDiagnostic(`[neal] diagnostic recovery decision recorded: ${action}\n`);
+    process.stdout.write(
+      JSON.stringify(
+        {
+          ok: true,
+          phase: nextState.phase,
+          status: nextState.status,
+          statePath: loaded.statePath,
+          runDir: nextState.runDir,
+          diagnosticRecoveryHistory: nextState.diagnosticRecoveryHistory.at(-1) ?? null,
+          nextStep,
         },
         null,
         2,

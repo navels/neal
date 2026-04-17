@@ -25,6 +25,31 @@ type InteractiveBlockedRecoveryHistorySummary = {
   lastResultPhase: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resultPhase'] | null;
 };
 
+type DiagnosticRecoverySummary = {
+  sequence: number;
+  sourcePhase: NonNullable<OrchestrationState['diagnosticRecovery']>['sourcePhase'];
+  resumePhase: NonNullable<OrchestrationState['diagnosticRecovery']>['resumePhase'];
+  parentScopeLabel: string;
+  blockedReason: string | null;
+  question: string;
+  target: string;
+  requestedBaselineRef: string | null;
+  effectiveBaselineRef: string | null;
+  effectiveBaselineSource: NonNullable<OrchestrationState['diagnosticRecovery']>['effectiveBaselineSource'];
+  analysisArtifactPath: string;
+  recoveryPlanPath: string;
+};
+
+type DiagnosticRecoveryHistorySummary = {
+  sessions: number;
+  lastDecision: OrchestrationState['diagnosticRecoveryHistory'][number]['decision'] | null;
+  lastResultPhase: OrchestrationState['diagnosticRecoveryHistory'][number]['resultPhase'] | null;
+  lastAdoptedPlanPath: string | null;
+  lastReviewArtifactPath: string | null;
+  lastReviewRoundCount: number;
+  lastReviewFindingCount: number;
+};
+
 type MeaningfulProgressSummary = {
   parentObjective: string;
   currentScopeProgressJustification: OrchestrationState['currentScopeProgressJustification'];
@@ -58,6 +83,8 @@ type PlanProgressState = {
     derivedPlanDepth: number;
   } | null;
   meaningfulProgress: MeaningfulProgressSummary | null;
+  diagnosticRecovery: DiagnosticRecoverySummary | null;
+  diagnosticRecoveryHistory: DiagnosticRecoveryHistorySummary | null;
   interactiveBlockedRecovery: InteractiveBlockedRecoverySummary | null;
   interactiveBlockedRecoveryHistory: InteractiveBlockedRecoveryHistorySummary | null;
   completedScopes: OrchestrationState['completedScopes'];
@@ -106,6 +133,34 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
             currentScopeProgressJustification: state.currentScopeProgressJustification,
             currentScopeMeaningfulProgressVerdict: state.currentScopeMeaningfulProgressVerdict,
             recentAcceptedScopeHistory,
+          }
+        : null,
+    diagnosticRecovery: state.diagnosticRecovery
+      ? {
+          sequence: state.diagnosticRecovery.sequence,
+          sourcePhase: state.diagnosticRecovery.sourcePhase,
+          resumePhase: state.diagnosticRecovery.resumePhase,
+          parentScopeLabel: state.diagnosticRecovery.parentScopeLabel,
+          blockedReason: state.diagnosticRecovery.blockedReason,
+          question: state.diagnosticRecovery.question,
+          target: state.diagnosticRecovery.target,
+          requestedBaselineRef: state.diagnosticRecovery.requestedBaselineRef,
+          effectiveBaselineRef: state.diagnosticRecovery.effectiveBaselineRef,
+          effectiveBaselineSource: state.diagnosticRecovery.effectiveBaselineSource,
+          analysisArtifactPath: state.diagnosticRecovery.analysisArtifactPath,
+          recoveryPlanPath: state.diagnosticRecovery.recoveryPlanPath,
+        }
+      : null,
+    diagnosticRecoveryHistory:
+      state.diagnosticRecoveryHistory.length > 0
+        ? {
+            sessions: state.diagnosticRecoveryHistory.length,
+            lastDecision: state.diagnosticRecoveryHistory.at(-1)?.decision ?? null,
+            lastResultPhase: state.diagnosticRecoveryHistory.at(-1)?.resultPhase ?? null,
+            lastAdoptedPlanPath: state.diagnosticRecoveryHistory.at(-1)?.adoptedPlanPath ?? null,
+            lastReviewArtifactPath: state.diagnosticRecoveryHistory.at(-1)?.reviewArtifactPath ?? null,
+            lastReviewRoundCount: state.diagnosticRecoveryHistory.at(-1)?.reviewRoundCount ?? 0,
+            lastReviewFindingCount: state.diagnosticRecoveryHistory.at(-1)?.reviewFindingCount ?? 0,
           }
         : null,
     interactiveBlockedRecovery: state.interactiveBlockedRecovery
@@ -220,6 +275,42 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Handled turns: ${progress.interactiveBlockedRecovery.handledTurns}`,
       `- Remaining turns: ${progress.interactiveBlockedRecovery.remainingTurns}`,
       `- Pending terminal directive: ${progress.interactiveBlockedRecovery.pendingDirective ?? 'none'}`,
+    );
+  }
+
+  if (progress.diagnosticRecovery) {
+    lines.push(
+      '',
+      '## Diagnostic Recovery',
+      `- Sequence: ${progress.diagnosticRecovery.sequence}`,
+      `- Source phase: ${progress.diagnosticRecovery.sourcePhase}`,
+      `- Resume phase: ${progress.diagnosticRecovery.resumePhase ?? 'none'}`,
+      `- Parent scope: ${progress.diagnosticRecovery.parentScopeLabel}`,
+      `- Blocked reason: ${progress.diagnosticRecovery.blockedReason ?? 'none'}`,
+      `- Question: ${progress.diagnosticRecovery.question}`,
+      `- Target: ${progress.diagnosticRecovery.target}`,
+      `- Requested baseline: ${progress.diagnosticRecovery.requestedBaselineRef ?? 'defaulted'}`,
+      `- Effective baseline: ${progress.diagnosticRecovery.effectiveBaselineRef ?? 'none'}`,
+      `- Baseline source: ${progress.diagnosticRecovery.effectiveBaselineSource}`,
+      `- Analysis artifact: ${progress.diagnosticRecovery.analysisArtifactPath}`,
+      `- Recovery plan artifact: ${progress.diagnosticRecovery.recoveryPlanPath}`,
+    );
+    if (state.phase === 'diagnostic_recovery_adopt') {
+      lines.push('- Next operator step: neal --diagnostic-decision [state-file] --action <adopt|reference|cancel>');
+    }
+  }
+
+  if (progress.diagnosticRecoveryHistory) {
+    lines.push(
+      '',
+      '## Diagnostic Recovery History',
+      `- Sessions: ${progress.diagnosticRecoveryHistory.sessions}`,
+      `- Latest decision: ${progress.diagnosticRecoveryHistory.lastDecision ?? 'none'}`,
+      `- Latest result phase: ${progress.diagnosticRecoveryHistory.lastResultPhase ?? 'none'}`,
+      `- Latest adopted plan: ${progress.diagnosticRecoveryHistory.lastAdoptedPlanPath ?? 'none'}`,
+      `- Latest review artifact: ${progress.diagnosticRecoveryHistory.lastReviewArtifactPath ?? 'none'}`,
+      `- Latest review rounds: ${progress.diagnosticRecoveryHistory.lastReviewRoundCount}`,
+      `- Latest review findings: ${progress.diagnosticRecoveryHistory.lastReviewFindingCount}`,
     );
   }
 

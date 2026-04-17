@@ -51,13 +51,18 @@ export function shouldNotifyDerivedPlanAcceptance(previousState: OrchestrationSt
 
 export function transitionPlanReviewWithoutOpenFindings(
   state: OrchestrationState,
-  derivedPlanReview: boolean,
+  reviewMode: 'plan' | 'derived-plan' | 'recovery-plan',
 ): OrchestrationState {
   return {
     ...state,
-    phase: derivedPlanReview ? 'awaiting_derived_plan_execution' : 'done',
-    status: derivedPlanReview ? 'running' : 'done',
-    derivedPlanStatus: derivedPlanReview ? 'accepted' : state.derivedPlanStatus,
+    phase:
+      reviewMode === 'derived-plan'
+        ? 'awaiting_derived_plan_execution'
+        : reviewMode === 'recovery-plan'
+          ? 'diagnostic_recovery_adopt'
+          : 'done',
+    status: reviewMode === 'plan' ? 'done' : 'running',
+    derivedPlanStatus: reviewMode === 'derived-plan' ? 'accepted' : state.derivedPlanStatus,
   };
 }
 

@@ -11,6 +11,11 @@ export type OrchestrationPhase =
   | 'reviewer_consult'
   | 'coder_consult_response'
   | 'interactive_blocked_recovery'
+  | 'diagnostic_recovery_collect'
+  | 'diagnostic_recovery_analyze'
+  | 'diagnostic_recovery_author_plan'
+  | 'diagnostic_recovery_review'
+  | 'diagnostic_recovery_adopt'
   | 'final_squash'
   | 'done'
   | 'blocked';
@@ -157,7 +162,17 @@ export type InteractiveBlockedRecoveryDirective = {
 
 export type InteractiveBlockedRecoveryState = {
   enteredAt: string;
-  sourcePhase: Exclude<OrchestrationPhase, 'interactive_blocked_recovery' | 'done' | 'blocked'>;
+  sourcePhase: Exclude<
+    OrchestrationPhase,
+    | 'interactive_blocked_recovery'
+    | 'diagnostic_recovery_collect'
+    | 'diagnostic_recovery_analyze'
+    | 'diagnostic_recovery_author_plan'
+    | 'diagnostic_recovery_review'
+    | 'diagnostic_recovery_adopt'
+    | 'done'
+    | 'blocked'
+  >;
   blockedReason: string;
   maxTurns: number;
   lastHandledTurn: number;
@@ -169,6 +184,37 @@ export type InteractiveBlockedRecoveryRecord = InteractiveBlockedRecoveryState &
   resolvedAt: string;
   resolvedByAction: InteractiveBlockedRecoveryAction;
   resultPhase: OrchestrationPhase;
+};
+
+export type DiagnosticRecoveryBaselineSource = 'explicit' | 'active_parent_base_commit' | 'run_base_commit';
+
+export type DiagnosticRecoveryState = {
+  sequence: number;
+  startedAt: string;
+  sourcePhase: 'blocked' | 'interactive_blocked_recovery' | 'coder_scope';
+  resumePhase: OrchestrationPhase | null;
+  parentScopeLabel: string;
+  blockedReason: string | null;
+  question: string;
+  target: string;
+  requestedBaselineRef: string | null;
+  effectiveBaselineRef: string | null;
+  effectiveBaselineSource: DiagnosticRecoveryBaselineSource;
+  analysisArtifactPath: string;
+  recoveryPlanPath: string;
+};
+
+export type DiagnosticRecoveryDecision = 'adopt_recovery_plan' | 'keep_as_reference' | 'cancel';
+
+export type DiagnosticRecoveryRecord = DiagnosticRecoveryState & {
+  resolvedAt: string;
+  decision: DiagnosticRecoveryDecision;
+  rationale: string | null;
+  resultPhase: OrchestrationPhase;
+  adoptedPlanPath: string | null;
+  reviewArtifactPath: string | null;
+  reviewRoundCount: number;
+  reviewFindingCount: number;
 };
 
 export type ProgressScope = {
@@ -203,6 +249,7 @@ export type OrchestrationState = {
   updatedAt: string;
   reviewMarkdownPath: string;
   archivedReviewPath: string | null;
+  initialBaseCommit: string | null;
   baseCommit: string | null;
   finalCommit: string | null;
   coderSessionHandle: string | null;
@@ -233,6 +280,8 @@ export type OrchestrationState = {
   blockedFromPhase: OrchestrationPhase | null;
   interactiveBlockedRecovery: InteractiveBlockedRecoveryState | null;
   interactiveBlockedRecoveryHistory: InteractiveBlockedRecoveryRecord[];
+  diagnosticRecovery: DiagnosticRecoveryState | null;
+  diagnosticRecoveryHistory: DiagnosticRecoveryRecord[];
   status: 'running' | 'done' | 'blocked' | 'failed';
 };
 

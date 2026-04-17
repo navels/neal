@@ -24,6 +24,8 @@ import {
   buildCoderPlanResponsePrompt,
   buildCoderResponsePrompt,
   buildConsultReviewerPrompt,
+  buildDiagnosticAnalysisPrompt,
+  buildRecoveryPlanPrompt,
   buildPlanReviewerPrompt,
   buildPlanningPrompt,
   buildReviewerPrompt,
@@ -201,9 +203,10 @@ export async function runPlanReviewerRound(args: {
   planDoc: string;
   round: number;
   reviewMarkdownPath: string;
-  mode?: 'plan' | 'derived-plan';
+  mode?: 'plan' | 'derived-plan' | 'recovery-plan';
   parentPlanDoc?: string;
   derivedFromScopeNumber?: number | null;
+  recoveryParentScopeLabel?: string | null;
   logger?: RunLogger;
 }): Promise<{
   sessionHandle: string | null;
@@ -344,6 +347,126 @@ export async function runCoderPlanRound(args: {
     sessionHandle,
     finalResponse,
     marker,
+  };
+}
+
+export async function runDiagnosticAnalysisRound(args: {
+  coder: AgentRoleConfig;
+  cwd: string;
+  planDoc: string;
+  progressMarkdownPath: string;
+  question: string;
+  target: string;
+  analysisArtifactPath: string;
+  baselineRef: string | null;
+  baselineSource: string;
+  blockedReason: string | null;
+  sessionHandle?: string | null;
+  onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
+  logger?: RunLogger;
+}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null; artifactBody: string }> {
+  const coder = getCoderAdapter(args.coder);
+  const progressText = await safeReadText(args.progressMarkdownPath);
+  let finalResponse: string;
+  let sessionHandle: string | null;
+  try {
+    const result = await coder.runPrompt({
+      cwd: args.cwd,
+      prompt: buildDiagnosticAnalysisPrompt({
+        planDoc: args.planDoc,
+        progressText,
+        question: args.question,
+        target: args.target,
+        analysisArtifactPath: args.analysisArtifactPath,
+        baselineRef: args.baselineRef,
+        baselineSource: args.baselineSource,
+        blockedReason: args.blockedReason,
+      }),
+      resumeHandle: args.sessionHandle,
+      onSessionStarted: args.onSessionStarted,
+      logger: args.logger,
+    });
+    finalResponse = result.finalResponse;
+    sessionHandle = result.sessionHandle;
+  } catch (error) {
+    throw translateCoderProviderError(error);
+  }
+
+  const marker = extractMarker(finalResponse);
+  const artifactBody =
+    marker === null
+      ? finalResponse.trim()
+      : finalResponse
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== marker)
+          .join('\n')
+          .trim();
+
+  return {
+    sessionHandle,
+    finalResponse,
+    marker,
+    artifactBody,
+  };
+}
+
+export async function runRecoveryPlanRound(args: {
+  coder: AgentRoleConfig;
+  cwd: string;
+  planDoc: string;
+  progressMarkdownPath: string;
+  question: string;
+  target: string;
+  analysisArtifactPath: string;
+  recoveryPlanPath: string;
+  baselineRef: string | null;
+  baselineSource: string;
+  sessionHandle?: string | null;
+  onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
+  logger?: RunLogger;
+}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null; artifactBody: string }> {
+  const coder = getCoderAdapter(args.coder);
+  const progressText = await safeReadText(args.progressMarkdownPath);
+  let finalResponse: string;
+  let sessionHandle: string | null;
+  try {
+    const result = await coder.runPrompt({
+      cwd: args.cwd,
+      prompt: buildRecoveryPlanPrompt({
+        planDoc: args.planDoc,
+        progressText,
+        question: args.question,
+        target: args.target,
+        analysisArtifactPath: args.analysisArtifactPath,
+        recoveryPlanPath: args.recoveryPlanPath,
+        baselineRef: args.baselineRef,
+        baselineSource: args.baselineSource,
+      }),
+      resumeHandle: args.sessionHandle,
+      onSessionStarted: args.onSessionStarted,
+      logger: args.logger,
+    });
+    finalResponse = result.finalResponse;
+    sessionHandle = result.sessionHandle;
+  } catch (error) {
+    throw translateCoderProviderError(error);
+  }
+
+  const marker = extractMarker(finalResponse);
+  const artifactBody =
+    marker === null
+      ? finalResponse.trim()
+      : finalResponse
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== marker)
+          .join('\n')
+          .trim();
+
+  return {
+    sessionHandle,
+    finalResponse,
+    marker,
+    artifactBody,
   };
 }
 
@@ -497,9 +620,10 @@ export async function runCoderPlanResponseRound(args: {
   openFindings: Pick<ReviewFinding, 'id' | 'source' | 'claim' | 'requiredAction' | 'severity' | 'files' | 'roundSummary'>[];
   mode?: 'blocking' | 'optional';
   sessionHandle: string;
-  reviewMode?: 'plan' | 'derived-plan';
+  reviewMode?: 'plan' | 'derived-plan' | 'recovery-plan';
   parentPlanDoc?: string;
   derivedFromScopeNumber?: number | null;
+  recoveryParentScopeLabel?: string | null;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; payload: CoderResponsePayload }> {
   const coder = getCoderAdapter(args.coder);

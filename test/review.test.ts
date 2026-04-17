@@ -4,7 +4,7 @@ import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildReviewerPrompt } from '../src/neal/agents.js';
+import { buildDiagnosticAnalysisPrompt, buildRecoveryPlanPrompt, buildReviewerPrompt } from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { renderConsultMarkdown } from '../src/neal/consult.js';
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
@@ -142,6 +142,46 @@ test('execute reviewer prompt includes coder justification and recent parent-obj
   assert.match(prompt, /meaningfulProgressAction/);
   assert.match(prompt, /Scope 3 reviewer verdict contract/);
   assert.match(prompt, /Touched-file concentration: src\/shared\.ts \(3\/3 scopes\)/);
+});
+
+test('diagnostic analysis prompt carries explicit baseline and artifact-writing contract', () => {
+  const prompt = buildDiagnosticAnalysisPrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: '## Current Scope\n- Status: blocked\n',
+    question: 'Why is this scope strategically non-convergent?',
+    target: 'src/neal/orchestrator.ts',
+    analysisArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_1_ANALYSIS.md',
+    baselineRef: 'abc123',
+    baselineSource: 'explicit',
+    blockedReason: 'Need a cleaner baseline',
+  });
+
+  assert.match(prompt, /Write the markdown body that Neal will save to \/tmp\/DIAGNOSTIC_RECOVERY_1_ANALYSIS\.md/);
+  assert.match(prompt, /git show abc123:<path>/);
+  assert.match(prompt, /Do not checkout or mutate that baseline/);
+  assert.match(prompt, /Why is this scope strategically non-convergent\?/);
+  assert.match(prompt, /## Recovery Implications/);
+  assert.match(prompt, /AUTONOMY_DONE or AUTONOMY_BLOCKED/);
+});
+
+test('recovery plan prompt carries analysis input and Neal-executable contract', () => {
+  const prompt = buildRecoveryPlanPrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: '## Diagnostic Recovery\n- Sequence: 1\n',
+    question: 'Why is this scope strategically non-convergent?',
+    target: 'src/neal/orchestrator.ts',
+    analysisArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_1_ANALYSIS.md',
+    recoveryPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md',
+    baselineRef: 'abc123',
+    baselineSource: 'explicit',
+  });
+
+  assert.match(prompt, /Read the diagnostic analysis at \/tmp\/DIAGNOSTIC_RECOVERY_1_ANALYSIS\.md before you write the plan/);
+  assert.match(prompt, /Write the markdown body that Neal will save to \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+  assert.match(prompt, /preserve the ordinary Neal-executable plan contract/);
+  assert.match(prompt, /## Execution Shape/);
+  assert.match(prompt, /## Execution Queue/);
+  assert.match(prompt, /AUTONOMY_DONE or AUTONOMY_BLOCKED/);
 });
 
 test('progress artifact renders current meaningful-progress context and bounded recent history', async () => {
@@ -412,4 +452,86 @@ test('review artifact renders derived-parent meaningful-progress history and ver
   assert.match(markdown, /Scope 6\.2/);
   assert.doesNotMatch(markdown, /Scope 6\n/);
   assert.match(markdown, /Touched-file concentration: src\/shared\.ts \(2\/2 scopes\)/);
+});
+
+test('review artifact labels diagnostic recovery plans as recovery candidates', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need deeper diagnosis',
+      question: 'Why did scope 4 stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'base-commit-4',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_1_ANALYSIS.md',
+      recoveryPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md',
+    },
+  });
+
+  const markdown = renderReviewMarkdown(state);
+
+  assert.match(markdown, /- Review target: \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+  assert.match(markdown, /- Review target kind: diagnostic recovery plan candidate/);
+  assert.match(markdown, /## Diagnostic Recovery/);
+  assert.match(markdown, /- Recovery plan artifact: \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+  assert.match(markdown, /- Next operator step: neal --diagnostic-decision \[state-file\] --action <adopt\|reference\|cancel>/);
+});
+
+test('progress and review artifacts render diagnostic recovery decision history after adoption', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 4,
+    phase: 'awaiting_derived_plan_execution',
+    derivedPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.normalized.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 4,
+    diagnosticRecoveryHistory: [
+      {
+        sequence: 1,
+        startedAt: '2026-04-17T00:00:00.000Z',
+        sourcePhase: 'blocked',
+        resumePhase: 'reviewer_scope',
+        parentScopeLabel: '4',
+        blockedReason: 'Need broader diagnostic recovery',
+        question: 'Why did the current scope stop converging?',
+        target: 'src/neal/orchestrator.ts',
+        requestedBaselineRef: null,
+        effectiveBaselineRef: 'scope-base-commit',
+        effectiveBaselineSource: 'active_parent_base_commit',
+        analysisArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_1_ANALYSIS.md',
+        recoveryPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md',
+        resolvedAt: '2026-04-17T00:30:00.000Z',
+        decision: 'adopt_recovery_plan',
+        rationale: 'The reviewed recovery plan is narrow enough to replace the failing parent objective.',
+        resultPhase: 'awaiting_derived_plan_execution',
+        adoptedPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.normalized.md',
+        reviewArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_1_REVIEW.md',
+        reviewRoundCount: 2,
+        reviewFindingCount: 1,
+      },
+    ],
+  });
+
+  const progressMarkdown = renderPlanProgressMarkdown(state);
+  assert.match(progressMarkdown, /## Diagnostic Recovery History/);
+  assert.match(progressMarkdown, /Latest decision: adopt_recovery_plan/);
+  assert.match(progressMarkdown, /Latest adopted plan: \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.normalized\.md/);
+  assert.match(progressMarkdown, /Latest review artifact: \/tmp\/DIAGNOSTIC_RECOVERY_1_REVIEW\.md/);
+  assert.match(progressMarkdown, /Latest review rounds: 2/);
+  assert.match(progressMarkdown, /Latest review findings: 1/);
+
+  const reviewMarkdown = renderReviewMarkdown(state);
+  assert.match(reviewMarkdown, /## Diagnostic Recovery History/);
+  assert.match(reviewMarkdown, /Latest decision: adopt_recovery_plan/);
+  assert.match(reviewMarkdown, /Latest review artifact: \/tmp\/DIAGNOSTIC_RECOVERY_1_REVIEW\.md/);
+  assert.match(
+    reviewMarkdown,
+    /Latest rationale: The reviewed recovery plan is narrow enough to replace the failing parent objective\./,
+  );
 });

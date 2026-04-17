@@ -24,6 +24,8 @@ export function buildUsageLines() {
     '   or: neal --plan <plan-doc>',
     '   or: neal --resume [state-file]',
     '   or: neal --recover [state-file] --message <guidance>  # then run neal --resume',
+    '   or: neal --diagnose [state-file] --question "<diagnostic question>" --target "<files-or-component>" [--baseline <ref>]',
+    '   or: neal --diagnostic-decision [state-file] --action <adopt|reference|cancel> [--rationale "<note>"]',
     '   or: neal --resume-coder [state-file]',
     '   or: neal --resume-reviewer [state-file]',
     '   or: neal --summaries [runs-dir]',

@@ -16,7 +16,10 @@ import {
   loadOrInitialize,
   resolveExecuteReviewDisposition,
   recordInteractiveBlockedRecoveryGuidance,
+  resolveDiagnosticRecovery,
   runFinalSquashPhase,
+  runOnePass,
+  startDiagnosticRecovery,
 } from '../src/neal/orchestrator.js';
 import {
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
@@ -25,6 +28,9 @@ import {
   stripExecuteScopeProgressPayload,
 } from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
+import { createRunLogger } from '../src/neal/logger.js';
+import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
+import type { CoderRunPromptArgs, StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -109,6 +115,15 @@ async function runNealCliResult(...args: string[]) {
   return execFileAsync('pnpm', ['exec', 'tsx', 'src/neal/index.ts', ...args], {
     cwd: process.cwd(),
   });
+}
+
+async function readRunEvents(runDir: string) {
+  const eventsPath = join(runDir, 'events.ndjson');
+  const content = await readFile(eventsPath, 'utf8');
+  return content
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
 }
 
 async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) {
@@ -465,6 +480,1487 @@ test('neal --recover rejects recording more guidance while a recovery turn is st
   assert.equal(result.recoveryTurns, 1);
   assert.match(result.message, /unhandled operator guidance/);
   assert.match(result.nextStep, /neal --resume/);
+});
+
+test('startDiagnosticRecovery persists execute-run diagnostic recovery state from a blocked run', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'reviewer_scope',
+    baseCommit: 'scope-base-commit',
+    initialBaseCommit: 'run-base-commit',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'run-base-commit',
+        finalCommit: 'commit-1',
+        commitSubject: 'scope 1',
+        changedFiles: ['src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: null,
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '4',
+        marker: 'AUTONOMY_BLOCKED',
+        result: 'blocked',
+        baseCommit: 'scope-base-commit',
+        finalCommit: null,
+        commitSubject: null,
+        changedFiles: [],
+        reviewRounds: 1,
+        findings: 1,
+        archivedReviewPath: null,
+        blocker: 'Need broader diagnostic recovery',
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const nextState = await startDiagnosticRecovery(statePath, {
+    question: 'Why did the current scope stop converging?',
+    target: 'src/neal/orchestrator.ts',
+  });
+
+  assert.equal(nextState.phase, 'diagnostic_recovery_analyze');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.diagnosticRecovery?.sourcePhase, 'blocked');
+  assert.equal(nextState.diagnosticRecovery?.resumePhase, 'reviewer_scope');
+  assert.equal(nextState.diagnosticRecovery?.blockedReason, 'Need broader diagnostic recovery');
+  assert.equal(nextState.diagnosticRecovery?.effectiveBaselineRef, 'scope-base-commit');
+  assert.equal(nextState.diagnosticRecovery?.effectiveBaselineSource, 'active_parent_base_commit');
+  assert.match(nextState.diagnosticRecovery?.analysisArtifactPath ?? '', /DIAGNOSTIC_RECOVERY_1_ANALYSIS\.md$/);
+  assert.match(nextState.diagnosticRecovery?.recoveryPlanPath ?? '', /DIAGNOSTIC_RECOVERY_1_PLAN\.md$/);
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.phase, 'diagnostic_recovery_analyze');
+  assert.equal(reloadedState.diagnosticRecovery?.question, 'Why did the current scope stop converging?');
+  assert.equal(reloadedState.diagnosticRecovery?.target, 'src/neal/orchestrator.ts');
+
+  const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+  assert.match(progressMarkdown, /## Diagnostic Recovery/);
+  assert.match(progressMarkdown, /Why did the current scope stop converging\?/);
+  assert.match(progressMarkdown, /scope-base-commit/);
+});
+
+test('startDiagnosticRecovery rejects active execute sessions that are not paused or blocked', async () => {
+  const { statePath } = await createResumeFixture({
+    currentScopeNumber: 1,
+    phase: 'coder_scope',
+    status: 'running',
+    completedScopes: [],
+  });
+
+  await assert.rejects(
+    () =>
+      startDiagnosticRecovery(statePath, {
+        question: 'Why is this diverging?',
+        target: 'src/neal/orchestrator.ts',
+      }),
+    /Diagnostic recovery may start only from a paused execute scope, a blocked run, or interactive blocked recovery/,
+  );
+});
+
+test('resume preserves diagnostic recovery sessions for inspection without manual state edits', async () => {
+  const { cwd, statePath } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_analyze',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    initialBaseCommit: 'run-base-commit',
+    diagnosticRecovery: {
+      sequence: 2,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need deeper diagnosis',
+      question: 'What failure mode are we missing?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'run-base-commit',
+      effectiveBaselineSource: 'run_base_commit',
+      analysisArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_2_ANALYSIS.md',
+      recoveryPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_2_PLAN.md',
+    },
+  });
+
+  const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(state.phase, 'diagnostic_recovery_analyze');
+  assert.equal(state.status, 'running');
+  assert.equal(state.diagnosticRecovery?.sequence, 2);
+  assert.equal(state.diagnosticRecovery?.question, 'What failure mode are we missing?');
+});
+
+test('diagnostic recovery analyze phase writes the analysis artifact before continuing into recovery-plan review', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_analyze',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  let promptCount = 0;
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          promptCount += 1;
+          if (promptCount === 1) {
+            return {
+              sessionHandle: 'diagnostic-session-1',
+              finalResponse: [
+                '# Diagnostic Analysis',
+                '',
+                '## Request Context',
+                '- Question: Why did the current scope stop converging?',
+                '',
+                '## Findings',
+                '- The current scope keeps revisiting the same orchestration hotspot.',
+                '',
+                '## Recovery Implications',
+                '- The next phase should author a narrower recovery plan.',
+                '',
+                'AUTONOMY_DONE',
+              ].join('\n'),
+            };
+          }
+          return {
+            sessionHandle: 'diagnostic-session-2',
+            finalResponse: [
+              '## Problem Statement',
+              '',
+              'The current scope keeps revisiting the same orchestration hotspot.',
+              '',
+              '## Goal',
+              '',
+              'Split the recovery work into a narrower plan before adoption.',
+              '',
+              '## Execution Shape',
+              '',
+              'executionShape: one_shot',
+              '',
+              'AUTONOMY_DONE',
+            ].join('\n'),
+          };
+        },
+      };
+    },
+  });
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-session-diagnostic-1',
+            structured: {
+              summary: 'Recovery plan is ready for operator adoption review.',
+              executionShape: 'one_shot',
+              findings: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.coderSessionHandle, 'diagnostic-session-2');
+    assert.equal(nextState.reviewerSessionHandle, 'reviewer-session-diagnostic-1');
+    assert.equal(nextState.lastScopeMarker, 'AUTONOMY_DONE');
+
+    const artifact = await readFile(state.diagnosticRecovery!.analysisArtifactPath, 'utf8');
+    assert.match(artifact, /# Diagnostic Analysis/);
+    assert.match(artifact, /The current scope keeps revisiting the same orchestration hotspot/);
+    assert.doesNotMatch(artifact, /AUTONOMY_DONE/);
+
+    const recoveryPlan = await readFile(state.diagnosticRecovery!.recoveryPlanPath, 'utf8');
+    assert.match(recoveryPlan, /## Problem Statement/);
+    assert.match(recoveryPlan, /executionShape: one_shot/);
+
+    const reloadedState = await loadState(statePath);
+    assert.equal(reloadedState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(reloadedState.diagnosticRecovery?.analysisArtifactPath, state.diagnosticRecovery?.analysisArtifactPath);
+
+    const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /## Diagnostic Recovery/);
+    assert.match(progressMarkdown, /DIAGNOSTIC_RECOVERY_1_ANALYSIS\.md/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery analyze phase accepts an empty blocked response without crashing', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_analyze',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          return {
+            sessionHandle: 'diagnostic-session-2',
+            finalResponse: 'AUTONOMY_BLOCKED\n',
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'blocked');
+    assert.equal(nextState.status, 'blocked');
+    assert.equal(nextState.coderSessionHandle, 'diagnostic-session-2');
+    assert.equal(nextState.lastScopeMarker, 'AUTONOMY_BLOCKED');
+    assert.equal(nextState.blockedFromPhase, 'diagnostic_recovery_analyze');
+
+    await assert.rejects(readFile(state.diagnosticRecovery!.analysisArtifactPath, 'utf8'));
+
+    const reloadedState = await loadState(statePath);
+    assert.equal(reloadedState.phase, 'blocked');
+    assert.equal(reloadedState.status, 'blocked');
+
+    const resumed = await loadOrInitialize(null, state.cwd, getDefaultAgentConfig(), statePath, 'execute');
+    assert.equal(resumed.state.phase, 'diagnostic_recovery_analyze');
+    assert.equal(resumed.state.status, 'running');
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery author-plan phase writes the recovery plan artifact and advances to recovery review', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_author_plan',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  const analysisArtifactPath = join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md');
+  await writeFile(
+    analysisArtifactPath,
+    [
+      '# Diagnostic Analysis',
+      '',
+      '## Request Context',
+      '- Question: Why did the current scope stop converging?',
+      '',
+      '## Findings',
+      '- The current approach keeps widening the orchestration surface.',
+      '',
+      '## Recovery Implications',
+      '- The next plan should split artifact generation from adoption.',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath,
+      recoveryPlanPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          return {
+            sessionHandle: 'recovery-plan-session-1',
+            finalResponse: [
+              '## Problem Statement',
+              '',
+              'The current scope keeps revisiting the same orchestration hotspot without isolating recovery work.',
+              '',
+              '## Goal',
+              '',
+              'Produce a narrow recovery path that separates artifact generation from later adoption.',
+              '',
+              '## Execution Shape',
+              '',
+              'executionShape: one_shot',
+              '',
+              'AUTONOMY_DONE',
+            ].join('\n'),
+          };
+        },
+      };
+    },
+  });
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-session-diagnostic-2',
+            structured: {
+              summary: 'Recovery plan is executable and ready for operator review.',
+              executionShape: 'one_shot',
+              findings: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.coderSessionHandle, 'recovery-plan-session-1');
+    assert.equal(nextState.reviewerSessionHandle, 'reviewer-session-diagnostic-2');
+    assert.equal(nextState.lastScopeMarker, 'AUTONOMY_DONE');
+
+    const artifact = await readFile(state.diagnosticRecovery!.recoveryPlanPath, 'utf8');
+    assert.match(artifact, /## Problem Statement/);
+    assert.match(artifact, /executionShape: one_shot/);
+    assert.doesNotMatch(artifact, /AUTONOMY_DONE/);
+
+    const reloadedState = await loadState(statePath);
+    assert.equal(reloadedState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(reloadedState.diagnosticRecovery?.recoveryPlanPath, state.diagnosticRecovery?.recoveryPlanPath);
+
+    const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /## Diagnostic Recovery/);
+    assert.match(progressMarkdown, /DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery author-plan phase accepts an empty blocked response without crashing', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_author_plan',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  const analysisArtifactPath = join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md');
+  await writeFile(analysisArtifactPath, '# Diagnostic Analysis\n', 'utf8');
+
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath,
+      recoveryPlanPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          return {
+            sessionHandle: 'recovery-plan-session-2',
+            finalResponse: 'AUTONOMY_BLOCKED\n',
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'blocked');
+    assert.equal(nextState.status, 'blocked');
+    assert.equal(nextState.coderSessionHandle, 'recovery-plan-session-2');
+    assert.equal(nextState.lastScopeMarker, 'AUTONOMY_BLOCKED');
+    assert.equal(nextState.blockedFromPhase, 'diagnostic_recovery_author_plan');
+
+    await assert.rejects(readFile(state.diagnosticRecovery!.recoveryPlanPath, 'utf8'));
+
+    const reloadedState = await loadState(statePath);
+    assert.equal(reloadedState.phase, 'blocked');
+    assert.equal(reloadedState.status, 'blocked');
+
+    const resumed = await loadOrInitialize(null, state.cwd, getDefaultAgentConfig(), statePath, 'execute');
+    assert.equal(resumed.state.phase, 'diagnostic_recovery_author_plan');
+    assert.equal(resumed.state.status, 'running');
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery can be cancelled directly from a blocked diagnostic-analysis state', async () => {
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'diagnostic_recovery_analyze',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    lastScopeMarker: 'AUTONOMY_BLOCKED',
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  const nextState = await resolveDiagnosticRecovery(statePath, {
+    decision: 'cancel',
+    rationale: 'Cancel the stuck diagnostic-analysis attempt and return to the original blocked run.',
+  });
+
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.status, 'blocked');
+  assert.equal(nextState.blockedFromPhase, 'reviewer_scope');
+  assert.equal(nextState.diagnosticRecovery, null);
+  assert.equal(nextState.diagnosticRecoveryHistory.at(-1)?.decision, 'cancel');
+  assert.equal(nextState.diagnosticRecoveryHistory.at(-1)?.resultPhase, 'blocked');
+});
+
+test('diagnostic recovery review with blocking findings at the round limit blocks cleanly without entering interactive blocked recovery', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_review',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    maxRounds: 1,
+  });
+  const recoveryPlanPath = join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md');
+  await writeFile(
+    recoveryPlanPath,
+    ['## Problem Statement', '', 'Problem.', '', '## Goal', '', 'Goal.', '', '## Execution Shape', '', 'executionShape: one_shot', ''].join('\n'),
+    'utf8',
+  );
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath,
+    },
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-session-recovery-blocked',
+            structured: {
+              summary: 'Recovery plan still needs revision.',
+              executionShape: 'one_shot',
+              findings: [
+                {
+                  severity: 'blocking',
+                  files: [recoveryPlanPath],
+                  claim: 'The recovery plan remains too broad.',
+                  requiredAction: 'Narrow the plan before adoption.',
+                },
+              ],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'blocked');
+    assert.equal(nextState.status, 'blocked');
+    assert.equal(nextState.blockedFromPhase, 'diagnostic_recovery_review');
+    assert.equal(nextState.diagnosticRecovery?.recoveryPlanPath, recoveryPlanPath);
+    assert.equal(nextState.interactiveBlockedRecovery, null);
+    assert.equal(nextState.findings.length, 1);
+
+    const resolved = await resolveDiagnosticRecovery(statePath, {
+      decision: 'cancel',
+      rationale: 'The reviewed recovery plan is not suitable to adopt.',
+    });
+    assert.equal(resolved.phase, 'blocked');
+    assert.equal(resolved.status, 'blocked');
+    assert.equal(resolved.diagnosticRecovery, null);
+    assert.equal(resolved.diagnosticRecoveryHistory.at(-1)?.reviewArtifactPath?.endsWith('DIAGNOSTIC_RECOVERY_1_REVIEW.md'), true);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery review reuses ordinary plan review against the recorded recovery-plan artifact', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_review',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  const recoveryPlanPath = join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md');
+  await writeFile(
+    recoveryPlanPath,
+    [
+      '## Problem Statement',
+      '',
+      'The current scope keeps revisiting the same orchestration hotspot.',
+      '',
+      '## Goal',
+      '',
+      'Split the recovery work into a narrower adoption-safe plan.',
+      '',
+      '## Execution Shape',
+      '',
+      'executionShape: one_shot',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath,
+    },
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-session-recovery-1',
+            structured: {
+              summary: 'Recovery plan is executable and ready for operator adoption review.',
+              executionShape: 'one_shot',
+              findings: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.executionShape, 'one_shot');
+    assert.equal(nextState.reviewerSessionHandle, 'reviewer-session-recovery-1');
+    assert.equal(nextState.rounds.length, 1);
+    assert.equal(nextState.rounds[0]?.reviewedPlanPath, recoveryPlanPath);
+
+    const reviewMarkdown = await readFile(state.reviewMarkdownPath, 'utf8');
+    assert.match(reviewMarkdown, /- Review target: .*DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+    assert.match(reviewMarkdown, /- Review target kind: diagnostic recovery plan candidate/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery review preserves recovery-plan context across blocking response rounds', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_review',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    coderSessionHandle: 'recovery-plan-session-seeded',
+  });
+  const recoveryPlanPath = join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md');
+  await writeFile(
+    recoveryPlanPath,
+    [
+      '## Problem Statement',
+      '',
+      'The current scope keeps revisiting the same orchestration hotspot.',
+      '',
+      '## Goal',
+      '',
+      'Split the recovery work into a narrower adoption-safe plan.',
+      '',
+      '## Execution Shape',
+      '',
+      'executionShape: one_shot',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const state = await saveState(statePath, {
+    ...initialState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath,
+    },
+  });
+
+  const reviewerPrompts: string[] = [];
+  const coderPrompts: string[] = [];
+  let reviewRound = 0;
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          reviewerPrompts.push(args.prompt);
+          reviewRound += 1;
+          if (reviewRound === 1) {
+            return {
+              sessionHandle: 'reviewer-session-recovery-blocking',
+              structured: {
+                summary: 'Recovery plan needs one blocking revision before adoption.',
+                executionShape: 'one_shot',
+                findings: [
+                  {
+                    severity: 'blocking',
+                    files: [recoveryPlanPath],
+                    claim: 'Clarify how the adoption boundary stays limited to the active parent objective.',
+                    requiredAction: 'Add explicit adoption-boundary language to the recovery plan.',
+                  },
+                ],
+              } as TStructured,
+            };
+          }
+
+          return {
+            sessionHandle: 'reviewer-session-recovery-pass',
+            structured: {
+              summary: 'Recovery plan is ready for operator adoption review.',
+              executionShape: 'one_shot',
+              findings: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt(args: CoderRunPromptArgs) {
+          coderPrompts.push(args.prompt);
+          return {
+            sessionHandle: 'recovery-plan-session-followup',
+            finalResponse: JSON.stringify({
+              outcome: 'responded',
+              summary: 'Added explicit adoption-boundary language.',
+              blocker: '',
+              responses: [
+                {
+                  id: 'R1-F1',
+                  decision: 'fixed',
+                  summary: 'Clarified that adoption replaces only the active parent objective context.',
+                },
+              ],
+            }),
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.reviewerSessionHandle, 'reviewer-session-recovery-pass');
+    assert.equal(nextState.coderSessionHandle, 'recovery-plan-session-followup');
+    assert.equal(nextState.rounds.length, 2);
+    assert.equal(nextState.rounds[0]?.reviewedPlanPath, recoveryPlanPath);
+    assert.equal(nextState.rounds[1]?.reviewedPlanPath, recoveryPlanPath);
+
+    assert.equal(coderPrompts.length, 1);
+    assert.match(coderPrompts[0] ?? '', /diagnostic recovery plan candidate at .*DIAGNOSTIC_RECOVERY_1_PLAN\.md for parent objective 4/);
+    assert.match(coderPrompts[0] ?? '', /Edit only the diagnostic recovery plan artifact/);
+
+    assert.equal(reviewerPrompts.length, 2);
+    assert.match(reviewerPrompts[0] ?? '', /diagnostic recovery plan candidate at .*DIAGNOSTIC_RECOVERY_1_PLAN\.md for parent objective 4/);
+    assert.match(reviewerPrompts[1] ?? '', /diagnostic recovery plan candidate at .*DIAGNOSTIC_RECOVERY_1_PLAN\.md for parent objective 4/);
+
+    const reviewMarkdown = await readFile(state.reviewMarkdownPath, 'utf8');
+    assert.match(reviewMarkdown, /- Review target: .*DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+    assert.match(reviewMarkdown, /### Round 2/);
+
+    const reloadedState = await loadState(statePath);
+    assert.equal(reloadedState.phase, 'diagnostic_recovery_adopt');
+    assert.equal(reloadedState.rounds.length, 2);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('diagnostic recovery adoption routes the reviewed recovery plan through derived-plan execution state and clears stale carry-over state', async () => {
+  const recoveryPlanPath = '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.normalized.md';
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    lastScopeMarker: 'AUTONOMY_BLOCKED',
+    splitPlanCountForCurrentScope: 3,
+    derivedPlanDepth: 1,
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Need operator guidance',
+      maxTurns: 3,
+      lastHandledTurn: 1,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-17T00:01:00.000Z',
+          operatorGuidance: 'Try diagnostic recovery.',
+          disposition: null,
+        },
+      ],
+      pendingDirective: null,
+    },
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-recovery-pass',
+        reviewedPlanPath: recoveryPlanPath,
+        normalizationApplied: true,
+        normalizationOperations: ['execution-shape-normalized'],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: 'abc123', head: 'abc123' },
+        openBlockingCanonicalCount: 0,
+        findings: [],
+      },
+    ],
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  const nextState = await resolveDiagnosticRecovery(statePath, {
+    decision: 'adopt_recovery_plan',
+    rationale: 'The reviewed recovery plan is narrow enough to replace the failing parent objective.',
+  });
+
+  assert.equal(nextState.phase, 'awaiting_derived_plan_execution');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.derivedPlanPath, recoveryPlanPath);
+  assert.equal(nextState.derivedPlanStatus, 'accepted');
+  assert.equal(nextState.derivedFromScopeNumber, 4);
+  assert.equal(nextState.lastScopeMarker, null);
+  assert.equal(nextState.splitPlanCountForCurrentScope, 0);
+  assert.equal(nextState.derivedPlanDepth, 0);
+  assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.diagnosticRecovery, null);
+  assert.equal(nextState.diagnosticRecoveryHistory.length, 1);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.decision, 'adopt_recovery_plan');
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.resultPhase, 'awaiting_derived_plan_execution');
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.adoptedPlanPath, recoveryPlanPath);
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.phase, 'awaiting_derived_plan_execution');
+  assert.equal(reloadedState.diagnosticRecoveryHistory[0]?.decision, 'adopt_recovery_plan');
+});
+
+test('diagnostic recovery adoption rejects unreviewed recovery plans', async () => {
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      resolveDiagnosticRecovery(statePath, {
+        decision: 'adopt_recovery_plan',
+      }),
+    /Cannot adopt diagnostic recovery without a reviewed recovery plan artifact/,
+  );
+});
+
+test('diagnostic recovery adoption rejects reviewed plans with open blocking findings', async () => {
+  const recoveryPlanPath = join(tmpdir(), 'DIAGNOSTIC_RECOVERY_1_PLAN.normalized.md');
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-recovery-pass',
+        reviewedPlanPath: recoveryPlanPath,
+        normalizationApplied: true,
+        normalizationOperations: ['execution-shape-normalized'],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: 'abc123', head: 'abc123' },
+        openBlockingCanonicalCount: 1,
+        findings: ['R1-F1'],
+      },
+    ],
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'recovery-scope-too-broad',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: [recoveryPlanPath],
+        claim: 'The recovery plan remains too broad.',
+        requiredAction: 'Narrow the plan before adoption.',
+        status: 'open',
+        roundSummary: 'Recovery plan still needs revision.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'reviewer_scope',
+      parentScopeLabel: '4',
+      blockedReason: 'Need broader diagnostic recovery',
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      resolveDiagnosticRecovery(statePath, {
+        decision: 'adopt_recovery_plan',
+      }),
+    /Cannot adopt diagnostic recovery while recovery-plan review still has open blocking findings/,
+  );
+});
+
+test('diagnostic recovery can be kept as reference only while returning the run to an ordinary paused state', async () => {
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    coderSessionHandle: 'stale-coder-session',
+    reviewerSessionHandle: 'reviewer-session-recovery-pass',
+    consultRounds: [
+      {
+        number: 1,
+        sourcePhase: 'coder_scope',
+        coderSessionHandle: 'coder-session-recovery-1',
+        reviewerSessionHandle: 'reviewer-session-recovery-1',
+        request: {
+          summary: 'Need recovery review clarification',
+          blocker: 'Recovery review findings need interpretation',
+          question: 'Should this plan remain reference-only?',
+          attempts: ['Ran the diagnostic recovery review'],
+          relevantFiles: ['src/neal/orchestrator.ts'],
+          verificationContext: ['pnpm typecheck'],
+        },
+        response: null,
+        disposition: null,
+      },
+    ],
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-recovery-pass',
+        reviewedPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: 'abc123', head: 'abc123' },
+        openBlockingCanonicalCount: 1,
+        findings: ['R1-F1'],
+      },
+    ],
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'recovery-adoption-boundary',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: [join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md')],
+        claim: 'Clarify the adoption boundary.',
+        requiredAction: 'Constrain the recovery plan to the active parent objective.',
+        status: 'open',
+        roundSummary: 'Recovery plan needs one more change.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+    diagnosticRecovery: {
+      sequence: 1,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      resumePhase: 'coder_scope',
+      parentScopeLabel: '4',
+      blockedReason: null,
+      question: 'Why did the current scope stop converging?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+    },
+  });
+
+  const nextState = await resolveDiagnosticRecovery(statePath, {
+    decision: 'keep_as_reference',
+    rationale: 'Keep the recovery artifacts for later, but do not replace the current scope yet.',
+  });
+
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.blockedFromPhase, null);
+  assert.equal(nextState.coderSessionHandle, null);
+  assert.equal(nextState.reviewerSessionHandle, null);
+  assert.equal(nextState.lastScopeMarker, null);
+  assert.equal(nextState.diagnosticRecovery, null);
+  assert.deepEqual(nextState.rounds, []);
+  assert.deepEqual(nextState.findings, []);
+  assert.deepEqual(nextState.consultRounds, []);
+  assert.equal(nextState.diagnosticRecoveryHistory.length, 1);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.decision, 'keep_as_reference');
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.resultPhase, 'coder_scope');
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.adoptedPlanPath, null);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.reviewArtifactPath?.endsWith('DIAGNOSTIC_RECOVERY_1_REVIEW.md'), true);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.reviewRoundCount, 1);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.reviewFindingCount, 1);
+});
+
+test('diagnostic recovery started from interactive blocked recovery restores the original interactive recovery context on keep_as_reference', async () => {
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    status: 'running',
+    blockedFromPhase: 'interactive_blocked_recovery',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-recovery-pass',
+        reviewedPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_3_PLAN.md'),
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: 'abc123', head: 'abc123' },
+        openBlockingCanonicalCount: 0,
+        findings: [],
+      },
+    ],
+    diagnosticRecovery: {
+      sequence: 3,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'interactive_blocked_recovery',
+      resumePhase: 'interactive_blocked_recovery',
+      parentScopeLabel: '4',
+      blockedReason: 'Need a more structural diagnosis',
+      question: 'What recovery plan would break the current churn pattern?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_3_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_3_PLAN.md'),
+    },
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Scope is strategically non-convergent',
+      maxTurns: 3,
+      lastHandledTurn: 1,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-17T00:01:00.000Z',
+          operatorGuidance: 'Pause and pursue diagnostic recovery.',
+          disposition: {
+            recordedAt: '2026-04-17T00:02:00.000Z',
+            sessionHandle: 'coder-session-ibr',
+            action: 'stay_blocked',
+            summary: 'Diagnostic recovery is the right next step.',
+            rationale: 'The current loop is not converging.',
+            blocker: 'Need a new plan shape.',
+            replacementPlan: '',
+            resultingPhase: 'interactive_blocked_recovery',
+          },
+        },
+      ],
+      pendingDirective: null,
+    },
+  });
+
+  const nextState = await resolveDiagnosticRecovery(statePath, {
+    decision: 'keep_as_reference',
+    rationale: 'Keep the reviewed recovery plan as reference and return to the interactive recovery loop.',
+  });
+
+  assert.equal(nextState.phase, 'interactive_blocked_recovery');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.blockedFromPhase, 'reviewer_scope');
+  assert.equal(nextState.interactiveBlockedRecovery?.sourcePhase, 'reviewer_scope');
+  assert.equal(nextState.interactiveBlockedRecovery?.blockedReason, 'Scope is strategically non-convergent');
+  assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.equal(nextState.interactiveBlockedRecovery?.turns[0]?.operatorGuidance, 'Pause and pursue diagnostic recovery.');
+  assert.equal(nextState.diagnosticRecovery, null);
+  assert.equal(nextState.diagnosticRecoveryHistory.at(-1)?.decision, 'keep_as_reference');
+  assert.equal(nextState.diagnosticRecoveryHistory.at(-1)?.resultPhase, 'interactive_blocked_recovery');
+});
+
+test('diagnostic recovery cancel clears the pending intervention while preserving an auditable history entry', async () => {
+  const { statePath, state: baseState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'diagnostic_recovery_adopt',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+  });
+  await saveState(statePath, {
+    ...baseState,
+    lastScopeMarker: 'AUTONOMY_BLOCKED',
+    consultRounds: [
+      {
+        number: 1,
+        sourcePhase: 'coder_scope',
+        coderSessionHandle: 'coder-session-recovery-2',
+        reviewerSessionHandle: 'reviewer-session-recovery-2',
+        request: {
+          summary: 'Need recovery cancellation clarification',
+          blocker: 'The operator may want to cancel the intervention entirely',
+          question: 'Should the intervention be cancelled?',
+          attempts: ['Reviewed the candidate recovery plan'],
+          relevantFiles: ['src/neal/orchestrator.ts'],
+          verificationContext: ['pnpm exec tsx --test test/orchestrator.test.ts'],
+        },
+        response: null,
+        disposition: null,
+      },
+    ],
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-recovery-pass',
+        reviewedPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_2_PLAN.md'),
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: 'abc123', head: 'abc123' },
+        openBlockingCanonicalCount: 1,
+        findings: ['R1-F1'],
+      },
+    ],
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'recovery-scope-too-broad',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: [join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_2_PLAN.md')],
+        claim: 'The recovery plan remains too broad.',
+        requiredAction: 'Narrow the plan before adoption.',
+        status: 'open',
+        roundSummary: 'Recovery plan still needs revision.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+    diagnosticRecovery: {
+      sequence: 2,
+      startedAt: '2026-04-17T00:00:00.000Z',
+      sourcePhase: 'blocked',
+      resumePhase: 'coder_scope',
+      parentScopeLabel: '4',
+      blockedReason: null,
+      question: 'Is there a better way to re-enter this scope?',
+      target: 'src/neal/orchestrator.ts',
+      requestedBaselineRef: null,
+      effectiveBaselineRef: 'scope-base-commit',
+      effectiveBaselineSource: 'active_parent_base_commit',
+      analysisArtifactPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_2_ANALYSIS.md'),
+      recoveryPlanPath: join(baseState.runDir, 'DIAGNOSTIC_RECOVERY_2_PLAN.md'),
+    },
+  });
+
+  const nextState = await resolveDiagnosticRecovery(statePath, {
+    decision: 'cancel',
+  });
+
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.status, 'blocked');
+  assert.equal(nextState.blockedFromPhase, 'coder_scope');
+  assert.equal(nextState.lastScopeMarker, 'AUTONOMY_BLOCKED');
+  assert.equal(nextState.diagnosticRecovery, null);
+  assert.deepEqual(nextState.rounds, []);
+  assert.deepEqual(nextState.findings, []);
+  assert.deepEqual(nextState.consultRounds, []);
+  assert.equal(nextState.diagnosticRecoveryHistory.length, 1);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.decision, 'cancel');
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.resultPhase, 'blocked');
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.reviewArtifactPath?.endsWith('DIAGNOSTIC_RECOVERY_2_REVIEW.md'), true);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.reviewRoundCount, 1);
+  assert.equal(nextState.diagnosticRecoveryHistory[0]?.reviewFindingCount, 1);
+});
+
+test('diagnostic recovery end-to-end logs auditable events and allocates collision-safe repeated artifact paths', async () => {
+  const { statePath, state: initialState } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'reviewer_scope',
+    completedScopes: [
+      {
+        number: '4',
+        marker: 'AUTONOMY_BLOCKED',
+        result: 'blocked',
+        baseCommit: 'scope-base-commit',
+        finalCommit: null,
+        commitSubject: null,
+        changedFiles: [],
+        reviewRounds: 1,
+        findings: 1,
+        archivedReviewPath: null,
+        blocker: 'Need a cleaner baseline before more scope work.',
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  const logger = await createRunLogger({
+    cwd: initialState.cwd,
+    stateDir: join(initialState.cwd, '.neal'),
+    planDoc: initialState.planDoc,
+    topLevelMode: initialState.topLevelMode,
+    runDir: initialState.runDir,
+  });
+
+  let coderPromptCount = 0;
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          coderPromptCount += 1;
+          if (coderPromptCount === 1) {
+            return {
+              sessionHandle: 'diagnostic-analysis-session-1',
+              finalResponse: [
+                '# Diagnostic Analysis',
+                '',
+                '## Request Context',
+                '- Question: Why did the current scope stop converging?',
+                '',
+                '## Findings',
+                '- The scope keeps revisiting the same orchestration hotspot without resetting the hypothesis chain.',
+                '',
+                '## Recovery Implications',
+                '- Recovery should isolate artifact generation from later adoption.',
+                '',
+                'AUTONOMY_DONE',
+              ].join('\n'),
+            };
+          }
+
+          return {
+            sessionHandle: 'diagnostic-plan-session-1',
+            finalResponse: [
+              '## Problem Statement',
+              '',
+              'The current scope keeps revisiting the same orchestration hotspot without isolating recovery work.',
+              '',
+              '## Goal',
+              '',
+              'Create a bounded recovery path that preserves the active run while generating replacement context.',
+              '',
+              '## Execution Shape',
+              '',
+              'executionShape: one_shot',
+              '',
+              'AUTONOMY_DONE',
+            ].join('\n'),
+          };
+        },
+      };
+    },
+  });
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'diagnostic-review-session-1',
+            structured: {
+              summary: 'Recovery plan is ready for operator review.',
+              executionShape: 'one_shot',
+              findings: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const startedState = await startDiagnosticRecovery(
+      statePath,
+      {
+        question: 'Why did the current scope stop converging?',
+        target: 'src/neal/orchestrator.ts',
+      },
+      logger,
+    );
+    assert.equal(startedState.phase, 'diagnostic_recovery_analyze');
+    assert.match(startedState.diagnosticRecovery?.analysisArtifactPath ?? '', /DIAGNOSTIC_RECOVERY_1_ANALYSIS\.md$/);
+    assert.match(startedState.diagnosticRecovery?.recoveryPlanPath ?? '', /DIAGNOSTIC_RECOVERY_1_PLAN\.md$/);
+
+    const afterRecoveryFlow = await runOnePass(startedState, statePath, logger);
+    assert.equal(afterRecoveryFlow.phase, 'diagnostic_recovery_adopt');
+
+    const reviewMarkdown = await readFile(initialState.reviewMarkdownPath, 'utf8');
+    assert.match(reviewMarkdown, /- Review target: .*DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+    assert.match(reviewMarkdown, /- Review target kind: diagnostic recovery plan candidate/);
+
+    const referencedState = await resolveDiagnosticRecovery(
+      statePath,
+      {
+        decision: 'keep_as_reference',
+        rationale: 'Keep this recovery candidate for reference while the operator decides how to resume.',
+      },
+      logger,
+    );
+    assert.equal(referencedState.phase, 'blocked');
+    assert.equal(referencedState.diagnosticRecoveryHistory.length, 1);
+    assert.equal(referencedState.diagnosticRecoveryHistory[0]?.decision, 'keep_as_reference');
+
+    const secondStart = await startDiagnosticRecovery(
+      statePath,
+      {
+        question: 'What would a cleaner baseline change about the failure analysis?',
+        target: 'src/neal/orchestrator.ts',
+        baselineRef: 'feature/clean-baseline',
+      },
+      logger,
+    );
+    assert.equal(secondStart.phase, 'diagnostic_recovery_analyze');
+    assert.equal(secondStart.diagnosticRecovery?.sequence, 2);
+    assert.match(secondStart.diagnosticRecovery?.analysisArtifactPath ?? '', /DIAGNOSTIC_RECOVERY_2_ANALYSIS\.md$/);
+    assert.match(secondStart.diagnosticRecovery?.recoveryPlanPath ?? '', /DIAGNOSTIC_RECOVERY_2_PLAN\.md$/);
+    assert.equal(secondStart.diagnosticRecovery?.effectiveBaselineRef, 'feature/clean-baseline');
+    assert.equal(secondStart.diagnosticRecovery?.effectiveBaselineSource, 'explicit');
+
+    const progressMarkdown = await readFile(initialState.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /## Diagnostic Recovery/);
+    assert.match(progressMarkdown, /Sequence: 2/);
+    assert.match(progressMarkdown, /feature\/clean-baseline/);
+    assert.match(progressMarkdown, /## Diagnostic Recovery History/);
+    assert.match(progressMarkdown, /Sessions: 1/);
+    assert.match(progressMarkdown, /Latest decision: keep_as_reference/);
+
+    const analysisArtifact = await readFile(join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'), 'utf8');
+    assert.match(analysisArtifact, /# Diagnostic Analysis/);
+    const recoveryPlanArtifact = await readFile(join(initialState.runDir, 'DIAGNOSTIC_RECOVERY_1_PLAN.md'), 'utf8');
+    assert.match(recoveryPlanArtifact, /executionShape: one_shot/);
+
+    const events = await readRunEvents(initialState.runDir);
+    const eventTypes = events.map((event) => event.type);
+    assert.deepEqual(
+      eventTypes.filter((type) => type === 'diagnostic_recovery.started'),
+      ['diagnostic_recovery.started', 'diagnostic_recovery.started'],
+    );
+    assert.equal(eventTypes.includes('diagnostic_recovery.resolved'), true);
+
+    const firstStartEvent = events.find(
+      (event) =>
+        event.type === 'diagnostic_recovery.started' &&
+        String(event.data?.analysisArtifactPath ?? '').endsWith('DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+    );
+    assert.equal(firstStartEvent?.data?.effectiveBaselineRef, 'scope-base-commit');
+
+    const resolvedEvent = events.find((event) => event.type === 'diagnostic_recovery.resolved');
+    assert.equal(resolvedEvent?.data?.decision, 'keep_as_reference');
+    assert.equal(resolvedEvent?.data?.resultPhase, 'blocked');
+
+    const secondStartEvent = events.find(
+      (event) =>
+        event.type === 'diagnostic_recovery.started' &&
+        String(event.data?.analysisArtifactPath ?? '').endsWith('DIAGNOSTIC_RECOVERY_2_ANALYSIS.md'),
+    );
+    assert.equal(secondStartEvent?.data?.effectiveBaselineRef, 'feature/clean-baseline');
+
+    assert.equal(
+      events.some(
+        (event) =>
+          event.type === 'phase.complete' &&
+          event.data?.phase === 'diagnostic_recovery_analyze' &&
+          String(event.data?.analysisArtifactPath ?? '').endsWith('DIAGNOSTIC_RECOVERY_1_ANALYSIS.md'),
+      ),
+      true,
+    );
+    assert.equal(
+      events.some(
+        (event) =>
+          event.type === 'phase.complete' &&
+          event.data?.phase === 'diagnostic_recovery_author_plan' &&
+          String(event.data?.recoveryPlanPath ?? '').endsWith('DIAGNOSTIC_RECOVERY_1_PLAN.md'),
+      ),
+      true,
+    );
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
 });
 
 test('neal --recover records a terminal-only directive when interactive blocked recovery hits its turn cap', async () => {
