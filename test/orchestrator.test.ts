@@ -87,6 +87,13 @@ async function runGit(cwd: string, ...args: string[]) {
   return stdout.trim();
 }
 
+async function runNealCli(...args: string[]) {
+  const { stdout } = await execFileAsync('pnpm', ['exec', 'tsx', 'src/neal/index.ts', ...args], {
+    cwd: process.cwd(),
+  });
+  return stdout;
+}
+
 async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) {
   const root = await mkdtemp(join(tmpdir(), 'neal-final-squash-'));
   const cwd = join(root, 'repo');
@@ -336,6 +343,152 @@ test('recordInteractiveBlockedRecoveryGuidance persists operator recovery input 
   const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
   assert.match(progressMarkdown, /## Interactive Blocked Recovery/);
   assert.match(progressMarkdown, /Recorded turns: 1/);
+});
+
+test('neal --recover records operator guidance without manual session edits', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 3,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings did not converge',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [],
+    },
+  });
+
+  const stdout = await runNealCli(
+    '--recover',
+    statePath,
+    '--message',
+    'Replace this scope with a narrower plan and keep the last accepted commit.',
+  );
+  const result = JSON.parse(stdout) as {
+    ok: boolean;
+    phase: string;
+    status: string;
+    statePath: string;
+    runDir: string;
+    recoveryTurns: number;
+  };
+
+  assert.equal(result.ok, true);
+  assert.equal(result.phase, 'interactive_blocked_recovery');
+  assert.equal(result.status, 'running');
+  assert.equal(result.statePath, statePath);
+  assert.equal(result.runDir, state.runDir);
+  assert.equal(result.recoveryTurns, 1);
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.equal(
+    reloadedState.interactiveBlockedRecovery?.turns[0]?.operatorGuidance,
+    'Replace this scope with a narrower plan and keep the last accepted commit.',
+  );
+
+  const consultMarkdown = await readFile(state.consultMarkdownPath, 'utf8');
+  assert.match(consultMarkdown, /## Interactive Blocked Recovery/);
+  assert.match(consultMarkdown, /Replace this scope with a narrower plan and keep the last accepted commit\./);
+
+  const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+  assert.match(progressMarkdown, /## Interactive Blocked Recovery/);
+  assert.match(progressMarkdown, /Recorded turns: 1/);
+});
+
+test('interactive blocked recovery can stay blocked, resume after interruption, and then continue the scope', async () => {
+  const { cwd, statePath, state } = await createResumeFixture({
+    currentScopeNumber: 5,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    coderSessionHandle: 'coder-session-5',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [],
+    },
+  });
+
+  const afterFirstGuidance = await recordInteractiveBlockedRecoveryGuidance(
+    statePath,
+    'Do not replace the scope yet; first confirm whether the reviewer feedback can be applied directly.',
+  );
+  assert.equal(afterFirstGuidance.interactiveBlockedRecovery?.turns.length, 1);
+
+  const stillBlockedState = await applyInteractiveBlockedRecoveryDisposition(
+    afterFirstGuidance,
+    statePath,
+    {
+      action: 'stay_blocked',
+      summary: 'More operator input is needed.',
+      rationale: 'The guidance still leaves the actual remediation path ambiguous.',
+      blocker: 'Need a concrete yes/no on whether the reviewer findings should be applied as-is in this scope.',
+      replacementPlan: '',
+    },
+    'coder-session-5b',
+  );
+
+  assert.equal(stillBlockedState.phase, 'interactive_blocked_recovery');
+  assert.equal(stillBlockedState.interactiveBlockedRecovery?.lastHandledTurn, 1);
+  assert.equal(stillBlockedState.interactiveBlockedRecoveryHistory.length, 0);
+
+  const resumed = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(resumed.state.phase, 'interactive_blocked_recovery');
+  assert.equal(resumed.state.status, 'running');
+  assert.equal(resumed.state.interactiveBlockedRecovery?.lastHandledTurn, 1);
+  assert.equal(resumed.state.interactiveBlockedRecovery?.turns.length, 1);
+
+  const afterSecondGuidance = await recordInteractiveBlockedRecoveryGuidance(
+    statePath,
+    'Apply the reviewer feedback directly and continue this scope.',
+  );
+  assert.equal(afterSecondGuidance.interactiveBlockedRecovery?.turns.length, 2);
+
+  const finalState = await applyInteractiveBlockedRecoveryDisposition(
+    afterSecondGuidance,
+    statePath,
+    {
+      action: 'resume_current_scope',
+      summary: 'The scope can continue.',
+      rationale: 'The operator clarified that the reviewer feedback should be applied directly.',
+      blocker: '',
+      replacementPlan: '',
+    },
+    'coder-session-5c',
+  );
+
+  assert.equal(finalState.phase, 'coder_response');
+  assert.equal(finalState.status, 'running');
+  assert.equal(finalState.blockedFromPhase, null);
+  assert.equal(finalState.interactiveBlockedRecovery, null);
+  assert.equal(finalState.interactiveBlockedRecoveryHistory.length, 1);
+  assert.equal(finalState.interactiveBlockedRecoveryHistory[0]?.resolvedByAction, 'resume_current_scope');
+  assert.equal(finalState.interactiveBlockedRecoveryHistory[0]?.resultPhase, 'coder_response');
+  assert.equal(finalState.interactiveBlockedRecoveryHistory[0]?.turns.length, 2);
+  assert.equal(finalState.interactiveBlockedRecoveryHistory[0]?.turns[0]?.disposition?.action, 'stay_blocked');
+  assert.equal(finalState.interactiveBlockedRecoveryHistory[0]?.turns[1]?.disposition?.action, 'resume_current_scope');
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.phase, 'coder_response');
+  assert.equal(reloadedState.interactiveBlockedRecovery, null);
+  assert.equal(reloadedState.interactiveBlockedRecoveryHistory[0]?.turns.length, 2);
+
+  const consultMarkdown = await readFile(state.consultMarkdownPath, 'utf8');
+  assert.match(consultMarkdown, /## Interactive Blocked Recovery History 1/);
+  assert.match(consultMarkdown, /Recovery turn 1 coder action: stay_blocked/);
+  assert.match(consultMarkdown, /Recovery turn 2 coder action: resume_current_scope/);
+
+  const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+  assert.match(progressMarkdown, /## Interactive Blocked Recovery History/);
+  assert.match(progressMarkdown, /Sessions: 1/);
+  assert.match(progressMarkdown, /Latest action: resume_current_scope/);
 });
 
 test('interactive blocked recovery resumes through the next ordinary coder path', async () => {
