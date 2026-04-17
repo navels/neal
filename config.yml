@@ -1,17 +1,42 @@
-neal:
-  phase_heartbeat_ms: 60000
-  max_review_rounds: 20
-  review_stuck_window: 3
-  inactivity_timeout_ms: 600000
-  api_retry_limit: 10
-  interactive_blocked_recovery_max_turns: 3
-  notify_bin: /Users/lee.nave/bin/notify
+# Neal runtime configuration template.
+# This file is intentionally fully commented out:
+# - uncomment any setting you want to override for this repository
+# - leave settings commented to use Neal's built-in defaults
+# - put machine-local overrides such as `notify_bin` in ~/.config/neal/config.yml
 
-providers:
-  openai-codex:
-    inactivity_timeout_ms: 600000
-  anthropic-claude:
-    inactivity_timeout_ms: 600000
-    api_retry_limit: 10
-    max_turns: 100
-    continuation_limit: 2
+# neal:
+#   # Milliseconds between wrapper heartbeat messages on stderr.
+#   # Set to 0 to disable heartbeats entirely.
+#   phase_heartbeat_ms: 60000
+#
+#   # Maximum reviewer rounds before Neal blocks on non-converging review.
+#   max_review_rounds: 20
+#
+#   # Consecutive rounds with no reduction in open blocking findings before
+#   # Neal treats review as stuck and blocks early.
+#   review_stuck_window: 3
+#
+#   # Milliseconds of inactivity before a coder or reviewer turn times out.
+#   inactivity_timeout_ms: 600000
+#
+#   # Maximum retry attempts for transient API/internal provider failures.
+#   api_retry_limit: 10
+#
+#   # Maximum operator guidance turns allowed during interactive blocked recovery
+#   # before Neal requires a terminal disposition.
+#   interactive_blocked_recovery_max_turns: 3
+#
+#   # Local notification command override.
+#   # Neal already falls back to ~/bin/notify by default, so this key is omitted
+#   # from the checked-in repo config on purpose. Set it in
+#   # ~/.config/neal/config.yml if your local notify command differs.
+#   # notify_bin: /absolute/path/to/notify
+#
+# providers:
+#   anthropic-claude:
+#     # Maximum turns allowed in a single Claude reviewer session.
+#     max_turns: 100
+#
+#     # Maximum number of times Neal will continue the same Claude reviewer
+#     # session after it hits the provider's max-turns limit.
+#     continuation_limit: 2

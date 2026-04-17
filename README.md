@@ -46,29 +46,29 @@ pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relativ
 3. repo `config.yml`
 4. built-in defaults
 
-The preferred shared runtime shape lives under `neal.*`:
+The supported runtime shape lives under `neal.*`:
 
 ```yaml
-neal:
-  phase_heartbeat_ms: 60000
-  max_review_rounds: 20
-  review_stuck_window: 3
-  inactivity_timeout_ms: 600000
-  api_retry_limit: 10
-  interactive_blocked_recovery_max_turns: 3
-  notify_bin: /Users/you/bin/notify
-
-providers:
-  openai-codex:
-    inactivity_timeout_ms: 600000
-  anthropic-claude:
-    inactivity_timeout_ms: 600000
-    api_retry_limit: 10
-    max_turns: 100
-    continuation_limit: 2
+# config.yml is a commented template in this repo.
+# Uncomment any setting you want to override locally for that repository.
+#
+# neal:
+#   phase_heartbeat_ms: 60000
+#   max_review_rounds: 20
+#   review_stuck_window: 3
+#   inactivity_timeout_ms: 600000
+#   api_retry_limit: 10
+#   interactive_blocked_recovery_max_turns: 3
+#
+# providers:
+#   anthropic-claude:
+#     max_turns: 100
+#     continuation_limit: 2
 ```
 
-In this slice, `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout, retry budget, blocked-recovery cap, heartbeat cadence, review loop limits, and notification command now live under `neal.*`.
+In this slice, `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout, retry budget, blocked-recovery cap, heartbeat cadence, review loop limits, and notification command all live under `neal.*`.
+
+The checked-in [`config.yml`](/Users/lee.nave/code/personal/codex-chunked/config.yml) is a fully commented template showing the supported keys, their defaults, and what each one does. Machine-local overrides such as `neal.notify_bin` belong in `~/.config/neal/config.yml`; when that key is omitted, `neal` falls back to its built-in `~/bin/notify` default.
 
 ## Sandbox E2E
 
@@ -163,7 +163,7 @@ Plan authors should describe execution in terms of scopes:
 
 ## Notifications
 
-The tool no longer depends on the `work-autonomously` skill. By default it runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`. The checked-in default is `~/bin/notify`.
+The tool no longer depends on the `work-autonomously` skill. By default it runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`. If you do not set that key, `neal` falls back to `~/bin/notify`, which is why the checked-in repo config omits it.
 
 ## Retry Behavior
 

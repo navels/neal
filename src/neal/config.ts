@@ -14,12 +14,7 @@ export type NealConfigFile = {
     notify_bin?: string | null;
   };
   providers?: {
-    'openai-codex'?: {
-      inactivity_timeout_ms?: number | null;
-    };
     'anthropic-claude'?: {
-      inactivity_timeout_ms?: number | null;
-      api_retry_limit?: number | null;
       max_turns?: number | null;
       continuation_limit?: number | null;
     };
@@ -37,12 +32,7 @@ type NealResolvedConfig = {
     notify_bin: string;
   };
   providers: {
-    'openai-codex': {
-      inactivity_timeout_ms?: number | null;
-    };
     'anthropic-claude': {
-      inactivity_timeout_ms?: number | null;
-      api_retry_limit?: number | null;
       max_turns: number;
       continuation_limit: number;
     };
@@ -60,7 +50,6 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     notify_bin: resolve(homedir(), 'bin/notify'),
   },
   providers: {
-    'openai-codex': {},
     'anthropic-claude': {
       max_turns: 100,
       continuation_limit: 2,
@@ -113,10 +102,6 @@ function mergeConfig(base: NealConfigFile, override: NealConfigFile | null): Nea
     },
     providers: {
       ...base.providers,
-      'openai-codex': {
-        ...base.providers?.['openai-codex'],
-        ...override.providers?.['openai-codex'],
-      },
       'anthropic-claude': {
         ...base.providers?.['anthropic-claude'],
         ...override.providers?.['anthropic-claude'],

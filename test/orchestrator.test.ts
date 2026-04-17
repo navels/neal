@@ -106,9 +106,10 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
   const runDir = join(stateDir, 'runs', 'test-run');
   const planDoc = join(cwd, 'PLAN.md');
   const trackedFile = join(cwd, 'scope.txt');
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
 
   await mkdir(runDir, { recursive: true });
-  await writeRepoConfig(cwd);
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
   await writeFile(planDoc, '# Plan\n', 'utf8');
   await writeFile(trackedFile, 'base\n', 'utf8');
 
@@ -158,8 +159,6 @@ async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) 
     createdCommits: createdCommitsOverride ?? [createdCommit],
   });
 
-  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
-
   return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
 }
 
@@ -170,9 +169,10 @@ async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationSta
   const runDir = join(stateDir, 'runs', 'test-run');
   const planDoc = join(cwd, 'PLAN.md');
   const trackedFile = join(cwd, 'scope.txt');
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
 
   await mkdir(runDir, { recursive: true });
-  await writeRepoConfig(cwd);
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
   await writeFile(planDoc, '# Plan\n', 'utf8');
   await writeFile(trackedFile, 'base\n', 'utf8');
 
@@ -219,8 +219,6 @@ async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationSta
     ...overrides,
     createdCommits: createdCommitsOverride ?? [createdCommit],
   });
-
-  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
 
   return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
 }
@@ -1401,7 +1399,6 @@ test('final squash advances to the next derived sub-scope without rolling up the
     derivedScopeIndex: 1,
     lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
   });
-  await writeRepoConfig(state.cwd, { notifyBin: notifyScriptPath });
 
   const nextState = await runFinalSquashPhase(state, statePath);
   assert.equal(nextState.phase, 'coder_scope');
@@ -1481,7 +1478,6 @@ test('final squash rolls the last derived sub-scope up into the parent scope and
     derivedScopeIndex: 2,
     lastScopeMarker: 'AUTONOMY_DONE',
   });
-  await writeRepoConfig(state.cwd, { notifyBin: notifyScriptPath });
 
   const nextState = await runFinalSquashPhase(state, statePath);
   assert.equal(nextState.phase, 'coder_scope');
@@ -1516,7 +1512,6 @@ test('final squash preserves an empty derived scope checkpoint commit without at
       derivedScopeIndex: 1,
       lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
     });
-  await writeRepoConfig(state.cwd, { notifyBin: notifyScriptPath });
 
   const nextState = await runFinalSquashPhase(state, statePath);
   assert.equal(nextState.phase, 'coder_scope');
@@ -1543,7 +1538,6 @@ test('final squash tolerates unrelated local changes when the run was started wi
   });
   const strayFile = join(cwd, 'FEEDBACK-DERIVED_PLAN.md');
   await writeFile(strayFile, 'local notes\n', 'utf8');
-  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
 
   const nextState = await runFinalSquashPhase(state, statePath);
   assert.equal(nextState.phase, 'done');
