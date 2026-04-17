@@ -16,7 +16,7 @@ export type CoderRunPromptResult = {
 
 export type StructuredAdvisorRoundArgs = {
   // Neal round category for prompts/logging; not provider-specific nomenclature.
-  label: 'review' | 'plan-review' | 'consult';
+  label: 'review' | 'plan-review' | 'consult' | 'final-completion';
   cwd: string;
   prompt: string;
   schema: Record<string, unknown>;

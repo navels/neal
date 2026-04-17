@@ -96,6 +96,48 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     }
   }
 
+  if (state.finalCompletionSummary) {
+    lines.push(
+      '',
+      '## Final Completion Summary',
+      `- Plan goal satisfied: ${state.finalCompletionSummary.planGoalSatisfied ? 'yes' : 'no'}`,
+      `- What changed overall: ${state.finalCompletionSummary.whatChangedOverall}`,
+      `- Verification summary: ${state.finalCompletionSummary.verificationSummary}`,
+    );
+
+    if (state.finalCompletionSummary.remainingKnownGaps.length > 0) {
+      lines.push('- Remaining known gaps:');
+      for (const gap of state.finalCompletionSummary.remainingKnownGaps) {
+        lines.push(`  - ${gap}`);
+      }
+    } else {
+      lines.push('- Remaining known gaps: none');
+    }
+  }
+
+  if (state.finalCompletionReviewVerdict) {
+    lines.push(
+      '',
+      '## Final Completion Review',
+      `- Reviewer action: ${state.finalCompletionReviewVerdict.action}`,
+      `- Resulting action: ${state.finalCompletionResolvedAction ?? state.finalCompletionReviewVerdict.action}`,
+      `- Reviewer summary: ${state.finalCompletionReviewVerdict.summary}`,
+      `- Reviewer rationale: ${state.finalCompletionReviewVerdict.rationale}`,
+      `- Continue-execution cycles used: ${state.finalCompletionContinueExecutionCount}`,
+      `- Continue-execution cap reached: ${state.finalCompletionContinueExecutionCapReached ? 'yes' : 'no'}`,
+    );
+
+    if (state.finalCompletionReviewVerdict.missingWork) {
+      lines.push(
+        `- Missing work summary: ${state.finalCompletionReviewVerdict.missingWork.summary}`,
+        `- Missing work required outcome: ${state.finalCompletionReviewVerdict.missingWork.requiredOutcome}`,
+        `- Missing work verification: ${state.finalCompletionReviewVerdict.missingWork.verification}`,
+      );
+    } else {
+      lines.push('- Missing work: none');
+    }
+  }
+
   if (state.diagnosticRecovery) {
     lines.push(
       '',

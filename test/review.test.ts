@@ -4,9 +4,17 @@ import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildDiagnosticAnalysisPrompt, buildRecoveryPlanPrompt, buildReviewerPrompt } from '../src/neal/agents.js';
+import {
+  buildDiagnosticAnalysisPrompt,
+  buildFinalCompletionReviewerPrompt,
+  buildFinalCompletionSummaryPrompt,
+  buildRecoveryPlanPrompt,
+  buildReviewerPrompt,
+} from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { renderConsultMarkdown } from '../src/neal/consult.js';
+import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
+import { getFinalCompletionReviewArtifactPath, renderFinalCompletionReviewMarkdown } from '../src/neal/final-completion-review.js';
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
 import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -162,6 +170,348 @@ test('diagnostic analysis prompt carries explicit baseline and artifact-writing 
   assert.match(prompt, /Why is this scope strategically non-convergent\?/);
   assert.match(prompt, /## Recovery Implications/);
   assert.match(prompt, /AUTONOMY_DONE or AUTONOMY_BLOCKED/);
+});
+
+test('final completion packet summarizes whole-plan completion context', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 3,
+    executionShape: 'multi_scope',
+    createdCommits: ['scope-3-commit'],
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-1',
+        finalCommit: 'final-1',
+        commitSubject: 'implement scope 1',
+        changedFiles: ['src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-1.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-2',
+        finalCommit: 'final-2',
+        commitSubject: 'implement scope 2',
+        changedFiles: ['src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-2.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  await writeFile(
+    join(state.runDir, 'events.ndjson'),
+    [
+      JSON.stringify({ type: 'coder.command_execution', data: { command: 'pnpm typecheck' } }),
+      JSON.stringify({ type: 'coder.command_execution', data: { command: 'pnpm exec tsx --test test/review.test.ts' } }),
+      JSON.stringify({ type: 'coder.command_execution', data: { command: 'git status --short' } }),
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: {
+      finalCommit: 'final-3',
+      commitSubject: 'finish scope 3',
+      changedFiles: ['src/c.ts'],
+      archivedReviewPath: '/tmp/review-3.md',
+      marker: 'AUTONOMY_DONE',
+    },
+  });
+
+  assert.equal(packet.executionShape, 'multi_scope');
+  assert.equal(packet.currentScopeLabel, '3');
+  assert.equal(packet.acceptedScopeCount, 3);
+  assert.equal(packet.verificationOnlyCompletion, false);
+  assert.deepEqual(packet.terminalChangedFiles, ['src/c.ts']);
+  assert.deepEqual(packet.planChangedFiles, ['src/a.ts', 'src/b.ts', 'src/c.ts']);
+  assert.match(packet.completedScopeSummary, /Scope 1: accepted/);
+  assert.match(packet.completedScopeSummary, /Scope 3: accepted \(AUTONOMY_DONE\)/);
+  assert.match(packet.terminalChangedFilesSummary, /src\/c\.ts/);
+  assert.match(packet.planChangedFilesSummary, /src\/a\.ts/);
+  assert.match(packet.verificationSummary, /pnpm typecheck/);
+  assert.match(packet.verificationSummary, /Command exit statuses are not persisted separately/);
+  assert.deepEqual(packet.lastNonEmptyImplementationScope, {
+    number: '3',
+    finalCommit: 'final-3',
+    commitSubject: 'finish scope 3',
+    changedFiles: ['src/c.ts'],
+    archivedReviewPath: '/tmp/review-3.md',
+  });
+});
+
+test('final completion packet models a verification-only terminal scope explicitly', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 4,
+    executionShape: 'multi_scope',
+    createdCommits: [],
+    completedScopes: [
+      {
+        number: '3',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-3',
+        finalCommit: 'final-3',
+        commitSubject: 'implement scope 3',
+        changedFiles: ['src/existing.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-3.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  await writeFile(
+    join(state.runDir, 'events.ndjson'),
+    `${JSON.stringify({ type: 'coder.command_execution', data: { command: 'pnpm typecheck' } })}\n`,
+    'utf8',
+  );
+
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: {
+      finalCommit: 'head-4',
+      commitSubject: 'verification-only finish',
+      changedFiles: [],
+      archivedReviewPath: '/tmp/review-4.md',
+      marker: 'AUTONOMY_DONE',
+    },
+  });
+
+  assert.equal(packet.verificationOnlyCompletion, true);
+  assert.equal(packet.terminalChangedFilesSummary, 'none');
+  assert.deepEqual(packet.planChangedFiles, ['src/existing.ts']);
+  assert.match(packet.verificationSummary, /pnpm typecheck/);
+  assert.deepEqual(packet.lastNonEmptyImplementationScope, {
+    number: '3',
+    finalCommit: 'final-3',
+    commitSubject: 'implement scope 3',
+    changedFiles: ['src/existing.ts'],
+    archivedReviewPath: '/tmp/review-3.md',
+  });
+});
+
+test('final completion summary prompt requests compact whole-plan completion JSON', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 3,
+    executionShape: 'multi_scope',
+    createdCommits: ['scope-3-commit'],
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-1',
+        finalCommit: 'final-1',
+        commitSubject: 'implement scope 1',
+        changedFiles: ['src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-1.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  await writeFile(
+    join(state.runDir, 'events.ndjson'),
+    `${JSON.stringify({ type: 'coder.command_execution', data: { command: 'pnpm typecheck' } })}\n`,
+    'utf8',
+  );
+
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: {
+      finalCommit: 'final-3',
+      commitSubject: 'finish scope 3',
+      changedFiles: ['src/b.ts'],
+      archivedReviewPath: '/tmp/review-3.md',
+      marker: 'AUTONOMY_DONE',
+    },
+  });
+  const prompt = buildFinalCompletionSummaryPrompt({
+    planDoc: '/tmp/PLAN.md',
+    packet,
+  });
+
+  assert.match(prompt, /Return only JSON that matches the required schema/);
+  assert.match(prompt, /planGoalSatisfied/);
+  assert.match(prompt, /whatChangedOverall/);
+  assert.match(prompt, /verificationOnlyCompletion/);
+  assert.match(prompt, /completedScopeSummary/);
+  assert.match(prompt, /Do not include markdown fences or prose outside the JSON object/);
+});
+
+test('final completion reviewer prompt requires a structured whole-plan verdict', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 3,
+    executionShape: 'multi_scope',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-1',
+        finalCommit: 'final-1',
+        commitSubject: 'implement scope 1',
+        changedFiles: ['src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-1.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: {
+      finalCommit: 'final-3',
+      commitSubject: 'finish scope 3',
+      changedFiles: ['src/b.ts'],
+      archivedReviewPath: '/tmp/review-3.md',
+      marker: 'AUTONOMY_DONE',
+    },
+  });
+  const prompt = buildFinalCompletionReviewerPrompt({
+    planDoc: '/tmp/PLAN.md',
+    packet,
+    summary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Implemented the completion packet and coder summary contract.',
+      verificationSummary: 'Ran review tests and typecheck.',
+      remainingKnownGaps: ['Reviewer completion verdict is still needed.'],
+    },
+  });
+
+  assert.match(prompt, /whole-plan final completion review/i);
+  assert.match(prompt, /accept_complete/);
+  assert.match(prompt, /continue_execution/);
+  assert.match(prompt, /block_for_operator/);
+  assert.match(prompt, /missingWork/);
+  assert.match(prompt, /requiredOutcome/);
+  assert.match(prompt, /verificationOnlyCompletion/);
+  assert.match(prompt, /continueExecutionCount/);
+  assert.match(prompt, /continueExecutionMax/);
+});
+
+test('final completion review artifact records coder summary, reviewer verdict, and resulting action', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 6,
+    phase: 'blocked',
+    status: 'blocked',
+    executionShape: 'multi_scope',
+    finalCommit: 'final-6',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionContinueExecutionCount: 2,
+    finalCompletionContinueExecutionCapReached: true,
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Completed the planned scopes, but one final gap remained.',
+      verificationSummary: 'Ran orchestrator, review, and plan-review coverage.',
+      remainingKnownGaps: ['One operator decision is still required.'],
+    },
+    finalCompletionReviewVerdict: {
+      action: 'continue_execution',
+      summary: 'Another repair scope would normally be required.',
+      rationale: 'The requested completion state still has one concrete missing repair.',
+      missingWork: {
+        summary: 'Add the remaining audit-trail regression case.',
+        requiredOutcome: 'Cover the final-completion operator-block path.',
+        verification: 'Run orchestrator tests and typecheck.',
+      },
+    },
+    finalCompletionResolvedAction: 'block_for_operator',
+    reviewerSessionHandle: 'reviewer-final-6',
+  });
+
+  const markdown = renderFinalCompletionReviewMarkdown(state);
+  assert.match(markdown, /# Final Completion Review/);
+  assert.match(markdown, /- What changed overall: Completed the planned scopes, but one final gap remained\./);
+  assert.match(markdown, /- Reviewer action: continue_execution/);
+  assert.match(markdown, /- Resulting action: block_for_operator/);
+  assert.match(markdown, /- Missing work summary: Add the remaining audit-trail regression case\./);
+  assert.match(markdown, /Run blocked for operator guidance\./);
+  assert.equal(getFinalCompletionReviewArtifactPath(state.runDir), join(state.runDir, 'FINAL_COMPLETION_REVIEW.md'));
+});
+
+test('final completion packet rolls derived sub-scope history into the whole-plan summary', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 7,
+    executionShape: 'multi_scope',
+    completedScopes: [
+      {
+        number: '7.1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-7-1',
+        finalCommit: 'final-7-1',
+        commitSubject: 'derived scope 7.1',
+        changedFiles: ['src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-7.1.md',
+        blocker: null,
+        derivedFromParentScope: '7',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '7.2',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: 'base-7-2',
+        finalCommit: 'final-7-2',
+        commitSubject: 'derived scope 7.2',
+        changedFiles: ['src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-7.2.md',
+        blocker: null,
+        derivedFromParentScope: '7',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '7',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: 'base-7',
+        finalCommit: 'final-7',
+        commitSubject: 'rolled-up parent scope 7',
+        changedFiles: ['src/a.ts', 'src/b.ts'],
+        reviewRounds: 2,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-7.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_7.md',
+      },
+    ],
+  });
+
+  const packet = await buildFinalCompletionPacket({ state, terminalScope: null });
+  assert.equal(packet.acceptedScopeCount, 3);
+  assert.match(packet.completedScopeSummary, /Scope 7\.1: accepted \(AUTONOMY_SCOPE_DONE\).*parent 7/);
+  assert.match(packet.completedScopeSummary, /Scope 7\.2: accepted \(AUTONOMY_DONE\).*parent 7/);
+  assert.match(packet.completedScopeSummary, /Scope 7: accepted \(AUTONOMY_DONE\).*src\/a\.ts, src\/b\.ts/);
+  assert.deepEqual(packet.planChangedFiles, ['src/a.ts', 'src/b.ts']);
 });
 
 test('recovery plan prompt carries analysis input and Neal-executable contract', () => {

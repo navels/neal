@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, parse, resolve } from 'node:path';
 
 import {
+  getFinalCompletionContinueExecutionMax,
   getInteractiveBlockedRecoveryMaxTurns,
   getMaxReviewRounds,
   getPhaseHeartbeatMs,
@@ -14,6 +15,7 @@ import {
   ReviewerRoundError,
   runBlockedRecoveryCoderRound,
   runCoderConsultResponseRound,
+  runCoderFinalCompletionSummaryRound,
   runDiagnosticAnalysisRound,
   runRecoveryPlanRound,
   runCoderScopeRound,
@@ -22,9 +24,12 @@ import {
   runCoderResponseRound,
   runConsultReviewerRound,
   runPlanReviewerRound,
+  runReviewerFinalCompletionRound,
   runReviewerRound,
 } from './agents.js';
 import { writeConsultMarkdown } from './consult.js';
+import { buildFinalCompletionPacket } from './final-completion.js';
+import { getFinalCompletionReviewArtifactPath, writeFinalCompletionReviewMarkdown } from './final-completion-review.js';
 import {
   getChangedFilesForRange,
   getCommitMessage,
@@ -75,6 +80,7 @@ import type {
   DiagnosticRecoveryBaselineSource,
   DiagnosticRecoveryDecision,
   DiagnosticRecoveryState,
+  FinalCompletionReviewerAction,
   FindingStatus,
   InteractiveBlockedRecoveryState,
   OrchestrationState,
@@ -134,6 +140,19 @@ function printReviewResult(
     `${header} summary: ${summary}`,
     `${header} findings: ${blocking} blocking, ${nonBlocking} non-blocking`,
     formatReviewFindings(findings),
+  ].join('\n');
+  writeDiagnostic(`${message}\n`, logger);
+}
+
+function printFinalCompletionReviewResult(args: {
+  action: FinalCompletionReviewerAction;
+  summary: string;
+  rationale: string;
+}, logger?: RunLogger) {
+  const message = [
+    `[reviewer:final-completion] action: ${args.action}`,
+    `[reviewer:final-completion] summary: ${args.summary}`,
+    `[reviewer:final-completion] rationale: ${args.rationale}`,
   ].join('\n');
   writeDiagnostic(`${message}\n`, logger);
 }
@@ -411,6 +430,9 @@ async function writeExecutionArtifacts(state: OrchestrationState) {
   await writeReviewMarkdown(state.reviewMarkdownPath, state);
   await writeConsultMarkdown(state.consultMarkdownPath, state);
   await writePlanProgressArtifacts(state);
+  if (state.topLevelMode === 'execute' && (state.finalCompletionSummary || state.finalCompletionReviewVerdict)) {
+    await writeFinalCompletionReviewMarkdown(getFinalCompletionReviewArtifactPath(state.runDir), state);
+  }
 }
 
 function countConsultsForCurrentScope(state: OrchestrationState) {
@@ -565,6 +587,7 @@ function getInteractiveBlockedRecoverySourcePhase(
     case 'reviewer_consult':
     case 'coder_consult_response':
     case 'final_squash':
+    case 'final_completion_review':
       return phase;
     default:
       throw new Error(`Interactive blocked recovery does not support source phase: ${String(phase)}`);
@@ -1627,6 +1650,10 @@ async function scheduleCoderTimeoutRetry(
 }
 
 async function runCoderScopePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.baseCommit) {
+    throw new Error('Cannot run coder scope phase without baseCommit');
+  }
+
   await logger?.event('phase.start', { phase: 'coder_scope' });
   const beforeHead = await getHeadCommit(state.cwd);
   let workingState = state;
@@ -1664,15 +1691,25 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
   }
   const afterHead = await getHeadCommit(state.cwd);
   const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
+  const changedFilesSinceBase = await getChangedFilesForRange(state.cwd, state.baseCommit, afterHead);
   const completionProblem = getScopeCompletionProblem(codex.marker);
   const splitPlan = isSplitPlanMarker(codex.marker);
+  const verificationOnlyCompletion =
+    codex.marker === 'AUTONOMY_DONE' &&
+    createdCommits.length === 0 &&
+    changedFilesSinceBase.length === 0;
 
   const nextState = await saveState(statePath, {
     ...workingState,
     coderSessionHandle: codex.sessionHandle,
     lastScopeMarker: codex.marker as ScopeMarker | null,
     currentScopeProgressJustification: codex.progressJustification,
-    phase: codex.marker === 'AUTONOMY_BLOCKED' || splitPlan || completionProblem ? 'blocked' : 'reviewer_scope',
+    phase:
+      codex.marker === 'AUTONOMY_BLOCKED' || splitPlan || completionProblem
+        ? 'blocked'
+        : verificationOnlyCompletion
+          ? 'final_squash'
+          : 'reviewer_scope',
     status: codex.marker === 'AUTONOMY_BLOCKED' || splitPlan || completionProblem ? 'blocked' : 'running',
     blockedFromPhase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'coder_scope' : null,
     createdCommits: [...workingState.createdCommits, ...createdCommits],
@@ -1685,6 +1722,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
     marker: codex.marker,
     sessionHandle: codex.sessionHandle,
     createdCommits,
+    verificationOnlyCompletion,
     nextPhase: nextState.phase,
   });
   if (splitPlan) {
@@ -3154,24 +3192,120 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
     ...archivedReviewState,
     completedScopes,
   };
+  const provisionalNextState = computeNextScopeStateAfterSquash({
+    state,
+    finalCommit,
+    completedScopes,
+    archivedReviewPath,
+  });
+  const continueScopes = provisionalNextState.phase === 'coder_scope' && provisionalNextState.status === 'running';
+  let finalCompletionSummary = state.finalCompletionSummary;
+
+  if (!continueScopes && !finalCompletionSummary) {
+    const packet = await buildFinalCompletionPacket({
+      state: retrospectiveState,
+      terminalScope: {
+        finalCommit,
+        commitSubject: finalSubject,
+        changedFiles: changedFilesSinceBase,
+        archivedReviewPath,
+        marker: state.lastScopeMarker,
+      },
+    });
+    try {
+      const finalCompletion = await runCoderFinalCompletionSummaryRound({
+        coder: state.agentConfig.coder,
+        cwd: state.cwd,
+        planDoc: state.planDoc,
+        packet,
+        logger,
+      });
+      finalCompletionSummary = finalCompletion.summary;
+    } catch (error) {
+      if (error instanceof CoderRoundError) {
+        const failedState = await saveState(statePath, {
+          ...state,
+          finalCommit,
+          archivedReviewPath,
+          completedScopes,
+          coderSessionHandle: error.sessionHandle ?? state.coderSessionHandle,
+          status: 'failed',
+        });
+        await writeExecutionArtifacts(failedState);
+        await writeCheckpointRetrospective(
+          {
+            ...failedState,
+            finalCompletionSummary,
+          },
+          'failed',
+        );
+        await logger?.event('phase.error', {
+          phase: 'final_squash',
+          sessionHandle: error.sessionHandle ?? state.coderSessionHandle,
+          message: error.message,
+        });
+        if (shouldNotifyFailure(error)) {
+          await notifyBlocked(failedState, error.message, logger);
+        }
+      }
+      else {
+        const failedState = await saveState(statePath, {
+          ...state,
+          finalCommit,
+          archivedReviewPath,
+          completedScopes,
+          status: 'failed',
+        });
+        await writeExecutionArtifacts(failedState);
+        await writeCheckpointRetrospective(
+          {
+            ...failedState,
+            finalCompletionSummary,
+          },
+          'failed',
+        );
+        await logger?.event('phase.error', {
+          phase: 'final_squash',
+          sessionHandle: state.coderSessionHandle,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
+  }
+
   const nextState = await saveState(
     statePath,
-    computeNextScopeStateAfterSquash({
-      state,
-      finalCommit,
-      completedScopes,
-      archivedReviewPath,
-    }),
+    continueScopes
+      ? {
+          ...provisionalNextState,
+          finalCompletionSummary,
+        }
+      : {
+          ...provisionalNextState,
+          blockedFromPhase: null,
+          finalCompletionSummary,
+          finalCompletionReviewVerdict: null,
+          finalCompletionResolvedAction: null,
+          finalCompletionContinueExecutionCapReached: false,
+        },
   );
-  const continueScopes = nextState.phase === 'coder_scope' && nextState.status === 'running';
 
-  await writeFile(archivedReviewPath, renderReviewMarkdown(archivedReviewState), 'utf8');
-  await writeCheckpointRetrospective(retrospectiveState, continueScopes ? 'scope_accepted' : 'done');
+  await writeFile(
+    archivedReviewPath,
+    renderReviewMarkdown({ ...archivedReviewState, finalCompletionSummary, finalCompletionReviewVerdict: null }),
+    'utf8',
+  );
+  await writeCheckpointRetrospective(retrospectiveState, 'scope_accepted');
   if (continueScopes) {
     await writeExecutionArtifacts(nextState);
   } else {
     await writeReviewMarkdown(nextState.reviewMarkdownPath, { ...nextState, finalCommit, archivedReviewPath });
     await writePlanProgressArtifacts(nextState);
+    await writeFinalCompletionReviewMarkdown(
+      getFinalCompletionReviewArtifactPath(nextState.runDir),
+      { ...nextState, finalCommit, archivedReviewPath },
+    );
   }
   await logger?.event('phase.complete', {
     phase: 'final_squash',
@@ -3181,8 +3315,177 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
   });
   if (continueScopes) {
     await notifyScopeAccepted(state, finalSubject, logger);
-  } else {
+  }
+
+  return nextState;
+}
+
+function getTerminalCompletedScope(state: OrchestrationState) {
+  const currentScopeLabel = getCurrentScopeLabel(state);
+  return state.completedScopes.find((scope) => scope.number === currentScopeLabel) ?? null;
+}
+
+function getFinalCompletionReviewBlockReason(args: {
+  reviewerAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
+  effectiveAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
+  rationale: string;
+  continueExecutionCount: number;
+  continueExecutionLimit: number;
+  capReached: boolean;
+}) {
+  if (args.effectiveAction === 'continue_execution') {
+    return `final_completion_review: reviewer reopened execution. ${args.rationale}`;
+  }
+
+  if (args.reviewerAction === 'continue_execution' && args.capReached) {
+    return (
+      'final_completion_review: reviewer requested more execution, ' +
+      `but the continue_execution cap (${args.continueExecutionLimit}) is already exhausted ` +
+      `after ${args.continueExecutionCount} reopen cycle(s). ${args.rationale} ` +
+      'One available next step is `neal --diagnose`.'
+    );
+  }
+
+  return `final_completion_review: reviewer blocked completion for operator guidance. ${args.rationale} One available next step is \`neal --diagnose\`.`;
+}
+
+export async function runFinalCompletionReviewPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+  if (!state.finalCompletionSummary) {
+    throw new Error('Cannot run final completion review without a final completion summary');
+  }
+
+  await logger?.event('phase.start', { phase: 'final_completion_review' });
+  const terminalScope = getTerminalCompletedScope(state);
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: terminalScope
+      ? {
+          finalCommit: terminalScope.finalCommit,
+          commitSubject: terminalScope.commitSubject,
+          changedFiles: terminalScope.changedFiles,
+          archivedReviewPath: terminalScope.archivedReviewPath,
+          marker: terminalScope.marker,
+        }
+      : null,
+  });
+
+  let reviewerResult;
+  try {
+    reviewerResult = await runReviewerFinalCompletionRound({
+      reviewer: state.agentConfig.reviewer,
+      cwd: state.cwd,
+      planDoc: state.planDoc,
+      packet,
+      summary: state.finalCompletionSummary,
+      logger,
+    });
+  } catch (error) {
+    if (error instanceof ReviewerRoundError) {
+      const failedState = await saveState(statePath, {
+        ...state,
+        reviewerSessionHandle: error.sessionHandle,
+        status: 'failed',
+      });
+      await writeExecutionArtifacts(failedState);
+      await logger?.event('phase.error', {
+        phase: 'final_completion_review',
+        sessionHandle: error.sessionHandle,
+        subtype: error.subtype,
+        message: error.message,
+      });
+      if (shouldNotifyFailure(error)) {
+        await notifyBlocked(failedState, error.message, logger);
+      }
+    }
+    throw error;
+  }
+
+  printFinalCompletionReviewResult(reviewerResult.verdict, logger);
+
+  const continueExecutionLimit = Math.max(0, getFinalCompletionContinueExecutionMax(state.cwd));
+  const capReached =
+    reviewerResult.verdict.action === 'continue_execution' &&
+    state.finalCompletionContinueExecutionCount >= continueExecutionLimit;
+  const effectiveAction =
+    reviewerResult.verdict.action === 'continue_execution' && capReached
+      ? 'block_for_operator'
+      : reviewerResult.verdict.action;
+  const continueExecutionCount =
+    reviewerResult.verdict.action === 'continue_execution' && !capReached
+      ? state.finalCompletionContinueExecutionCount + 1
+      : state.finalCompletionContinueExecutionCount;
+
+  const baseState = {
+    ...state,
+    reviewerSessionHandle: reviewerResult.sessionHandle,
+    finalCompletionReviewVerdict: reviewerResult.verdict,
+    finalCompletionResolvedAction: effectiveAction,
+    finalCompletionContinueExecutionCount: continueExecutionCount,
+    finalCompletionContinueExecutionCapReached: capReached,
+  };
+
+  const nextState =
+    effectiveAction === 'accept_complete'
+      ? await saveState(statePath, {
+          ...baseState,
+          phase: 'done',
+          status: 'done',
+          blockedFromPhase: null,
+        })
+      : effectiveAction === 'continue_execution'
+        ? await saveState(statePath, {
+            ...baseState,
+            baseCommit: state.finalCommit,
+            finalCommit: null,
+            archivedReviewPath: null,
+            coderSessionHandle: null,
+            coderRetryCount: 0,
+            currentScopeNumber: state.currentScopeNumber + 1,
+            lastScopeMarker: null,
+            currentScopeProgressJustification: null,
+            currentScopeMeaningfulProgressVerdict: null,
+            finalCompletionSummary: null,
+            rounds: [],
+            consultRounds: [],
+            findings: [],
+            createdCommits: [],
+            blockedFromPhase: null,
+            phase: 'coder_scope',
+            status: 'running',
+          })
+        : await saveState(statePath, {
+            ...baseState,
+            phase: 'blocked',
+            status: 'blocked',
+            blockedFromPhase: 'final_completion_review',
+          });
+
+  await writeExecutionArtifacts(nextState);
+  await logger?.event('phase.complete', {
+    phase: 'final_completion_review',
+    action: reviewerResult.verdict.action,
+    resultingAction: effectiveAction,
+    continueExecutionCount,
+    continueExecutionLimit,
+    continueExecutionCapReached: capReached,
+    reviewerSessionHandle: reviewerResult.sessionHandle,
+    nextPhase: nextState.phase,
+  });
+
+  if (effectiveAction === 'accept_complete') {
+    const finalSubject = terminalScope?.commitSubject ?? 'Finalize scope work';
     await notifyComplete(nextState, finalSubject, logger);
+  } else if (effectiveAction === 'block_for_operator') {
+    const reason = getFinalCompletionReviewBlockReason({
+      reviewerAction:
+        reviewerResult.verdict.action === 'accept_complete' ? 'block_for_operator' : reviewerResult.verdict.action,
+      effectiveAction,
+      rationale: reviewerResult.verdict.rationale,
+      continueExecutionCount,
+      continueExecutionLimit,
+      capReached,
+    });
+    await notifyBlocked(nextState, reason, logger);
   }
 
   return nextState;
@@ -3206,6 +3509,7 @@ type RunnablePhase = Extract<
   | 'coder_consult_response'
   | 'interactive_blocked_recovery'
   | 'final_squash'
+  | 'final_completion_review'
 >;
 
 const RUNNABLE_PHASES = new Set<RunnablePhase>([
@@ -3225,6 +3529,7 @@ const RUNNABLE_PHASES = new Set<RunnablePhase>([
   'coder_consult_response',
   'interactive_blocked_recovery',
   'final_squash',
+  'final_completion_review',
 ]);
 
 function isRunnablePhase(phase: OrchestrationState['phase']): phase is RunnablePhase {
@@ -3319,17 +3624,18 @@ export async function runOnePass(
           return nextState;
         },
         final_squash: async () => runFinalSquashPhase(currentState, statePath, logger),
+        final_completion_review: async () => runFinalCompletionReviewPhase(currentState, statePath, logger),
       };
 
       currentState = await phaseHandlers[currentPhase]();
       await options?.onDisplayState?.(currentState, Date.now());
 
-      if (
-        currentPhase === 'final_squash' &&
+      const pausedAfterScopeBoundary =
         currentState.phase === 'coder_scope' &&
         currentState.status === 'running' &&
-        options?.shouldStopAfterCurrentScope?.()
-      ) {
+        (currentPhase === 'final_squash' || currentPhase === 'final_completion_review') &&
+        options?.shouldStopAfterCurrentScope?.();
+      if (pausedAfterScopeBoundary) {
         await logger?.event('run.paused_after_scope', {
           currentScopeNumber: currentState.currentScopeNumber,
           phase: currentState.phase,

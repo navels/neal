@@ -8,6 +8,8 @@ import type {
   DiagnosticRecoveryState,
   DiagnosticRecoveryRecord,
   ExecuteScopeProgressJustification,
+  FinalCompletionReviewerVerdict,
+  FinalCompletionSummary,
   InteractiveBlockedRecoveryRecord,
   InteractiveBlockedRecoveryState,
   OrchestrationState,
@@ -99,6 +101,11 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     lastScopeMarker: null,
     currentScopeProgressJustification: null,
     currentScopeMeaningfulProgressVerdict: null,
+    finalCompletionSummary: null,
+    finalCompletionReviewVerdict: null,
+    finalCompletionResolvedAction: null,
+    finalCompletionContinueExecutionCount: 0,
+    finalCompletionContinueExecutionCapReached: false,
     derivedPlanPath: null,
     derivedFromScopeNumber: null,
     derivedPlanStatus: null,
@@ -180,6 +187,66 @@ function hydrateReviewerMeaningfulProgressVerdict(value: unknown): ReviewerMeani
   return {
     action: verdict.action,
     rationale: verdict.rationale,
+  };
+}
+
+function hydrateFinalCompletionSummary(value: unknown): FinalCompletionSummary | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const summary = value as Partial<FinalCompletionSummary>;
+  if (
+    typeof summary.planGoalSatisfied !== 'boolean' ||
+    typeof summary.whatChangedOverall !== 'string' ||
+    typeof summary.verificationSummary !== 'string' ||
+    !isStringArray(summary.remainingKnownGaps)
+  ) {
+    return null;
+  }
+
+  return {
+    planGoalSatisfied: summary.planGoalSatisfied,
+    whatChangedOverall: summary.whatChangedOverall,
+    verificationSummary: summary.verificationSummary,
+    remainingKnownGaps: summary.remainingKnownGaps,
+  };
+}
+
+function hydrateFinalCompletionReviewerVerdict(value: unknown): FinalCompletionReviewerVerdict | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const verdict = value as Partial<FinalCompletionReviewerVerdict>;
+  if (
+    (verdict.action !== 'accept_complete' &&
+      verdict.action !== 'continue_execution' &&
+      verdict.action !== 'block_for_operator') ||
+    typeof verdict.summary !== 'string' ||
+    typeof verdict.rationale !== 'string'
+  ) {
+    return null;
+  }
+
+  const missingWork =
+    verdict.missingWork &&
+    typeof verdict.missingWork === 'object' &&
+    typeof verdict.missingWork.summary === 'string' &&
+    typeof verdict.missingWork.requiredOutcome === 'string' &&
+    typeof verdict.missingWork.verification === 'string'
+      ? {
+          summary: verdict.missingWork.summary,
+          requiredOutcome: verdict.missingWork.requiredOutcome,
+          verification: verdict.missingWork.verification,
+        }
+      : null;
+
+  return {
+    action: verdict.action,
+    summary: verdict.summary,
+    rationale: verdict.rationale,
+    missingWork,
   };
 }
 
@@ -401,7 +468,8 @@ function hydrateInteractiveBlockedRecovery(value: unknown): InteractiveBlockedRe
     recovery.sourcePhase === 'coder_optional_response' ||
     recovery.sourcePhase === 'reviewer_consult' ||
     recovery.sourcePhase === 'coder_consult_response' ||
-    recovery.sourcePhase === 'final_squash'
+    recovery.sourcePhase === 'final_squash' ||
+    recovery.sourcePhase === 'final_completion_review'
       ? recovery.sourcePhase
       : 'coder_scope';
 
@@ -622,6 +690,29 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
     currentScopeMeaningfulProgressVerdict: hydrateReviewerMeaningfulProgressVerdict(
       (parsed as { currentScopeMeaningfulProgressVerdict?: unknown }).currentScopeMeaningfulProgressVerdict,
     ),
+    finalCompletionSummary: hydrateFinalCompletionSummary(
+      (parsed as { finalCompletionSummary?: unknown }).finalCompletionSummary,
+    ),
+    finalCompletionReviewVerdict: hydrateFinalCompletionReviewerVerdict(
+      (parsed as { finalCompletionReviewVerdict?: unknown }).finalCompletionReviewVerdict,
+    ),
+    finalCompletionResolvedAction:
+      (parsed as { finalCompletionResolvedAction?: unknown }).finalCompletionResolvedAction === 'accept_complete' ||
+      (parsed as { finalCompletionResolvedAction?: unknown }).finalCompletionResolvedAction === 'continue_execution' ||
+      (parsed as { finalCompletionResolvedAction?: unknown }).finalCompletionResolvedAction === 'block_for_operator'
+        ? (parsed as { finalCompletionResolvedAction: OrchestrationState['finalCompletionResolvedAction'] })
+            .finalCompletionResolvedAction
+        : null,
+    finalCompletionContinueExecutionCount:
+      typeof (parsed as { finalCompletionContinueExecutionCount?: unknown }).finalCompletionContinueExecutionCount ===
+      'number'
+        ? Math.max(0, (parsed as { finalCompletionContinueExecutionCount: number }).finalCompletionContinueExecutionCount)
+        : 0,
+    finalCompletionContinueExecutionCapReached:
+      typeof (parsed as { finalCompletionContinueExecutionCapReached?: unknown }).finalCompletionContinueExecutionCapReached ===
+      'boolean'
+        ? (parsed as { finalCompletionContinueExecutionCapReached: boolean }).finalCompletionContinueExecutionCapReached
+        : false,
     consultRounds: Array.isArray(parsed.consultRounds) ? parsed.consultRounds.map(hydrateConsultRound) : [],
     lastScopeMarker:
       (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_SCOPE_DONE' ||

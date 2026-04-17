@@ -71,6 +71,11 @@ type PlanProgressState = {
   createdAt: string;
   updatedAt: string;
   finalCommit: string | null;
+  finalCompletionSummary: OrchestrationState['finalCompletionSummary'];
+  finalCompletionReviewVerdict: OrchestrationState['finalCompletionReviewVerdict'];
+  finalCompletionResolvedAction: OrchestrationState['finalCompletionResolvedAction'];
+  finalCompletionContinueExecutionCount: number;
+  finalCompletionContinueExecutionCapReached: boolean;
   currentScope: {
     number: string;
     parentScope: string | null;
@@ -112,6 +117,11 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
     createdAt: state.createdAt,
     updatedAt: state.updatedAt,
     finalCommit: state.finalCommit,
+    finalCompletionSummary: state.finalCompletionSummary,
+    finalCompletionReviewVerdict: state.finalCompletionReviewVerdict,
+    finalCompletionResolvedAction: state.finalCompletionResolvedAction,
+    finalCompletionContinueExecutionCount: state.finalCompletionContinueExecutionCount,
+    finalCompletionContinueExecutionCapReached: state.finalCompletionContinueExecutionCapReached,
     currentScope:
       state.status === 'done'
         ? null
@@ -263,6 +273,48 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
         progress.meaningfulProgress?.parentObjective ?? String(state.currentScopeNumber),
       ),
     );
+  }
+
+  if (progress.finalCompletionSummary) {
+    lines.push(
+      '',
+      '## Final Completion Summary',
+      `- Plan goal satisfied: ${progress.finalCompletionSummary.planGoalSatisfied ? 'yes' : 'no'}`,
+      `- What changed overall: ${progress.finalCompletionSummary.whatChangedOverall}`,
+      `- Verification summary: ${progress.finalCompletionSummary.verificationSummary}`,
+    );
+
+    if (progress.finalCompletionSummary.remainingKnownGaps.length > 0) {
+      lines.push('- Remaining known gaps:');
+      for (const gap of progress.finalCompletionSummary.remainingKnownGaps) {
+        lines.push(`  - ${gap}`);
+      }
+    } else {
+      lines.push('- Remaining known gaps: none');
+    }
+  }
+
+  if (progress.finalCompletionReviewVerdict) {
+    lines.push(
+      '',
+      '## Final Completion Review',
+      `- Reviewer action: ${progress.finalCompletionReviewVerdict.action}`,
+      `- Resulting action: ${progress.finalCompletionResolvedAction ?? progress.finalCompletionReviewVerdict.action}`,
+      `- Reviewer summary: ${progress.finalCompletionReviewVerdict.summary}`,
+      `- Reviewer rationale: ${progress.finalCompletionReviewVerdict.rationale}`,
+      `- Continue-execution cycles used: ${progress.finalCompletionContinueExecutionCount}`,
+      `- Continue-execution cap reached: ${progress.finalCompletionContinueExecutionCapReached ? 'yes' : 'no'}`,
+    );
+
+    if (progress.finalCompletionReviewVerdict.missingWork) {
+      lines.push(
+        '- Missing work summary: ' + progress.finalCompletionReviewVerdict.missingWork.summary,
+        '- Missing work required outcome: ' + progress.finalCompletionReviewVerdict.missingWork.requiredOutcome,
+        '- Missing work verification: ' + progress.finalCompletionReviewVerdict.missingWork.verification,
+      );
+    } else {
+      lines.push('- Missing work: none');
+    }
   }
 
   if (progress.interactiveBlockedRecovery) {

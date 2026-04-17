@@ -11,6 +11,7 @@ export type NealConfigFile = {
     inactivity_timeout_ms?: number | null;
     api_retry_limit?: number | null;
     interactive_blocked_recovery_max_turns?: number | null;
+    final_completion_continue_execution_max?: number | null;
     notify_bin?: string | null;
   };
   providers?: {
@@ -29,6 +30,7 @@ type NealResolvedConfig = {
     inactivity_timeout_ms: number;
     api_retry_limit: number;
     interactive_blocked_recovery_max_turns: number;
+    final_completion_continue_execution_max: number;
     notify_bin: string;
   };
   providers: {
@@ -47,6 +49,7 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     inactivity_timeout_ms: 600_000,
     api_retry_limit: 10,
     interactive_blocked_recovery_max_turns: 3,
+    final_completion_continue_execution_max: 2,
     notify_bin: resolve(homedir(), 'bin/notify'),
   },
   providers: {
@@ -197,6 +200,14 @@ export function getInteractiveBlockedRecoveryMaxTurns(cwd = process.cwd()) {
   return (
     parseNumberValue(config.neal?.interactive_blocked_recovery_max_turns) ??
     DEFAULT_CONFIG.neal.interactive_blocked_recovery_max_turns
+  );
+}
+
+export function getFinalCompletionContinueExecutionMax(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parseNumberValue(config.neal?.final_completion_continue_execution_max) ??
+    DEFAULT_CONFIG.neal.final_completion_continue_execution_max
   );
 }
 

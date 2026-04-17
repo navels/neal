@@ -6,6 +6,8 @@ import type {
   CoderConsultRequest,
   ExecuteScopeProgressJustification,
   ExecutionShape,
+  FinalCompletionPacket,
+  FinalCompletionSummary,
   ReviewFinding,
   ReviewerConsultResponse,
 } from '../types.js';
@@ -112,6 +114,56 @@ export function buildScopePrompt(planDoc: string, progressText: string) {
   ].join('\n');
 }
 
+export function buildFinalCompletionSummaryPrompt(args: {
+  planDoc: string;
+  packet: FinalCompletionPacket;
+}) {
+  const lastImplementationScope = args.packet.lastNonEmptyImplementationScope
+    ? JSON.stringify(args.packet.lastNonEmptyImplementationScope, null, 2)
+    : 'null';
+
+  return [
+    `Summarize whether the execute-mode plan at ${args.planDoc} is complete as a whole.`,
+    '',
+    'Before writing the summary, review the current repository state, the plan document, and the completion packet below.',
+    'Return only JSON that matches the required schema.',
+    'Keep the response compact and auditable rather than essay-style.',
+    'Use `planGoalSatisfied` to state whether the plan goal is satisfied overall.',
+    'Use `whatChangedOverall` to summarize the completed work across the whole plan, not just the last scope.',
+    'Use `verificationSummary` to summarize the completion evidence that actually ran.',
+    'Use `remainingKnownGaps` for any known missing work, risks, or omissions that would make the plan not fully complete.',
+    'Do not contradict yourself:',
+    '- if `planGoalSatisfied` is `true`, `remainingKnownGaps` must be empty',
+    '- if `remainingKnownGaps` is non-empty, `planGoalSatisfied` must be `false`',
+    '',
+    'Whole-plan completion packet:',
+    JSON.stringify(
+      {
+        executionShape: args.packet.executionShape,
+        currentScopeLabel: args.packet.currentScopeLabel,
+        acceptedScopeCount: args.packet.acceptedScopeCount,
+        blockedScopeCount: args.packet.blockedScopeCount,
+        verificationOnlyCompletion: args.packet.verificationOnlyCompletion,
+        completedScopeSummary: args.packet.completedScopeSummary,
+        terminalChangedFilesSummary: args.packet.terminalChangedFilesSummary,
+        planChangedFilesSummary: args.packet.planChangedFilesSummary,
+        verificationSummary: args.packet.verificationSummary,
+        lastNonEmptyImplementationScope: args.packet.lastNonEmptyImplementationScope,
+        continueExecutionCount: args.packet.continueExecutionCount,
+        continueExecutionMax: args.packet.continueExecutionMax,
+      },
+      null,
+      2,
+    ),
+    '',
+    'If the completion is verification-only, say so directly in `whatChangedOverall` or `remainingKnownGaps` instead of pretending there was a terminal implementation diff.',
+    'Do not include markdown fences or prose outside the JSON object.',
+    '',
+    'Last non-empty implementation scope reference:',
+    lastImplementationScope,
+  ].join('\n');
+}
+
 export function buildReviewerPrompt(args: {
   planDoc: string;
   baseCommit: string;
@@ -171,6 +223,60 @@ export function buildReviewerPrompt(args: {
     changedFilesText,
     '',
     `Prior review history is available at ${args.reviewMarkdownPath} if you need earlier reviewer findings or coder responses, but review the current commit range directly.`,
+  ].join('\n');
+}
+
+export function buildFinalCompletionReviewerPrompt(args: {
+  planDoc: string;
+  packet: FinalCompletionPacket;
+  summary: FinalCompletionSummary;
+}) {
+  const completionSummary = args.summary;
+  const lastImplementationScope = args.packet.lastNonEmptyImplementationScope
+    ? JSON.stringify(args.packet.lastNonEmptyImplementationScope, null, 2)
+    : 'null';
+
+  return [
+    `Review whether the execute-mode plan at ${args.planDoc} is complete as a whole.`,
+    '',
+    'This is a whole-plan final completion review, not an ordinary last-scope review.',
+    'Compare the completed result against the original plan objectives and the whole-plan completion packet below.',
+    'Return only JSON that matches the required schema.',
+    'Use `accept_complete` only when the plan outcome is complete and coherent overall.',
+    'Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.',
+    'Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.',
+    'When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.',
+    'When you return any other action, `missingWork` must be null.',
+    '',
+    'Coder whole-plan completion summary:',
+    JSON.stringify(completionSummary, null, 2),
+    '',
+    'Whole-plan completion packet:',
+    JSON.stringify(
+      {
+        executionShape: args.packet.executionShape,
+        currentScopeLabel: args.packet.currentScopeLabel,
+        acceptedScopeCount: args.packet.acceptedScopeCount,
+        blockedScopeCount: args.packet.blockedScopeCount,
+        verificationOnlyCompletion: args.packet.verificationOnlyCompletion,
+        finalCommit: args.packet.finalCommit,
+        completedScopeSummary: args.packet.completedScopeSummary,
+        terminalChangedFilesSummary: args.packet.terminalChangedFilesSummary,
+        planChangedFilesSummary: args.packet.planChangedFilesSummary,
+        verificationSummary: args.packet.verificationSummary,
+        lastNonEmptyImplementationScope: args.packet.lastNonEmptyImplementationScope,
+        continueExecutionCount: args.packet.continueExecutionCount,
+        continueExecutionMax: args.packet.continueExecutionMax,
+      },
+      null,
+      2,
+    ),
+    '',
+    'If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.',
+    'Do not include markdown fences or prose outside the JSON object.',
+    '',
+    'Last non-empty implementation scope reference:',
+    lastImplementationScope,
   ].join('\n');
 }
 

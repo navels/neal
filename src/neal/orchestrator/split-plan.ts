@@ -111,7 +111,8 @@ type PersistSplitPlanRecoveryArgs = {
     | 'coder_plan_response'
     | 'coder_plan_optional_response'
     | 'awaiting_derived_plan_execution'
-    | 'final_squash';
+    | 'final_squash'
+    | 'final_completion_review';
   derivedPlanMarkdown: string;
   createdCommits: string[];
   logger?: RunLogger;

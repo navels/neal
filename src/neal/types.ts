@@ -17,6 +17,7 @@ export type OrchestrationPhase =
   | 'diagnostic_recovery_review'
   | 'diagnostic_recovery_adopt'
   | 'final_squash'
+  | 'final_completion_review'
   | 'done'
   | 'blocked';
 
@@ -83,6 +84,61 @@ export type ReviewerMeaningfulProgressAction = 'accept' | 'block_for_operator' |
 export type ReviewerMeaningfulProgressVerdict = {
   action: ReviewerMeaningfulProgressAction;
   rationale: string;
+};
+
+export type FinalCompletionSummary = {
+  planGoalSatisfied: boolean;
+  whatChangedOverall: string;
+  verificationSummary: string;
+  remainingKnownGaps: string[];
+};
+
+export type FinalCompletionMissingWork = {
+  summary: string;
+  requiredOutcome: string;
+  verification: string;
+};
+
+export type FinalCompletionReviewerAction = 'accept_complete' | 'continue_execution' | 'block_for_operator';
+
+export type FinalCompletionReviewerVerdict = {
+  action: FinalCompletionReviewerAction;
+  summary: string;
+  rationale: string;
+  missingWork: FinalCompletionMissingWork | null;
+};
+
+export type FinalCompletionTerminalScope = {
+  finalCommit: string | null;
+  commitSubject: string | null;
+  changedFiles: string[];
+  archivedReviewPath: string | null;
+  marker?: ScopeMarker | null;
+};
+
+export type FinalCompletionReferenceScope = Pick<
+  ProgressScope,
+  'number' | 'finalCommit' | 'commitSubject' | 'changedFiles' | 'archivedReviewPath'
+>;
+
+export type FinalCompletionPacket = {
+  planDoc: string;
+  executionShape: ExecutionShape | null;
+  currentScopeLabel: string;
+  finalCommit: string | null;
+  completedScopeSummary: string;
+  acceptedScopeCount: number;
+  blockedScopeCount: number;
+  verificationOnlyCompletion: boolean;
+  terminalChangedFiles: string[];
+  terminalChangedFilesSummary: string;
+  planChangedFiles: string[];
+  planChangedFilesSummary: string;
+  verificationCommands: string[];
+  verificationSummary: string;
+  lastNonEmptyImplementationScope: FinalCompletionReferenceScope | null;
+  continueExecutionCount: number;
+  continueExecutionMax: number;
 };
 
 export type CoderConsultRequest = {
@@ -260,6 +316,11 @@ export type OrchestrationState = {
   lastScopeMarker: ScopeMarker | null;
   currentScopeProgressJustification: ExecuteScopeProgressJustification | null;
   currentScopeMeaningfulProgressVerdict: ReviewerMeaningfulProgressVerdict | null;
+  finalCompletionSummary: FinalCompletionSummary | null;
+  finalCompletionReviewVerdict: FinalCompletionReviewerVerdict | null;
+  finalCompletionResolvedAction: FinalCompletionReviewerAction | null;
+  finalCompletionContinueExecutionCount: number;
+  finalCompletionContinueExecutionCapReached: boolean;
   derivedPlanPath: string | null;
   derivedFromScopeNumber: number | null;
   derivedPlanStatus: 'pending_review' | 'accepted' | 'rejected' | null;

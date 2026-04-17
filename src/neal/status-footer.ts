@@ -72,6 +72,10 @@ export function renderStatusFooterLine(args: FooterContext) {
     segments.push(`review round: ${state.rounds.length + 1}`);
   }
 
+  if (state.phase === 'final_completion_review') {
+    segments.push('completion review');
+  }
+
   if (state.phase === 'reviewer_consult' || state.phase === 'coder_consult_response') {
     const consultRound = state.consultRounds.at(-1)?.number;
     if (consultRound) {

@@ -17,6 +17,7 @@ import {
   resolveExecuteReviewDisposition,
   recordInteractiveBlockedRecoveryGuidance,
   resolveDiagnosticRecovery,
+  runFinalCompletionReviewPhase,
   runFinalSquashPhase,
   runOnePass,
   startDiagnosticRecovery,
@@ -24,13 +25,19 @@ import {
 import {
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
+  buildFinalCompletionReviewerSchema,
+  buildFinalCompletionSummarySchema,
   parseExecuteScopeProgressPayload,
+  parseFinalCompletionReviewerPayload,
+  parseFinalCompletionSummaryPayload,
   stripExecuteScopeProgressPayload,
 } from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
+import { getFinalCompletionReviewArtifactPath } from '../src/neal/final-completion-review.js';
 import { createRunLogger } from '../src/neal/logger.js';
 import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import type { CoderRunPromptArgs, StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
+import { OpenAICodexProviderError } from '../src/neal/providers/openai-codex.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -41,10 +48,14 @@ import type { ExecuteScopeProgressJustification, OrchestrationState, ReviewerMea
 const execFileAsync = promisify(execFile);
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator');
 
-async function writeRepoConfig(cwd: string, overrides?: { notifyBin?: string }) {
+async function writeRepoConfig(cwd: string, overrides?: { notifyBin?: string; finalCompletionContinueExecutionMax?: number }) {
+  const extraConfig =
+    typeof overrides?.finalCompletionContinueExecutionMax === 'number'
+      ? `  final_completion_continue_execution_max: ${overrides.finalCompletionContinueExecutionMax}\n`
+      : '';
   await writeFile(
     join(cwd, 'config.yml'),
-    `neal:\n  notify_bin: ${overrides?.notifyBin ?? '/usr/bin/true'}\n`,
+    `neal:\n  notify_bin: ${overrides?.notifyBin ?? '/usr/bin/true'}\n${extraConfig}`,
     'utf8',
   );
   clearConfigCache(cwd);
@@ -3051,16 +3062,666 @@ test('final squash tolerates unrelated local changes when the run was started wi
   const { statePath, state, notifyLogPath, notifyScriptPath, cwd } = await createFinalSquashFixture({
     ignoreLocalChanges: true,
     lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: true,
+      whatChangedOverall: 'Completed the terminal scope before finalization.',
+      verificationSummary: 'Pre-recorded summary for terminal final-squash coverage.',
+      remainingKnownGaps: [],
+    },
   });
   const strayFile = join(cwd, 'FEEDBACK-DERIVED_PLAN.md');
   await writeFile(strayFile, 'local notes\n', 'utf8');
 
   const nextState = await runFinalSquashPhase(state, statePath);
-  assert.equal(nextState.phase, 'done');
-  assert.equal(nextState.status, 'done');
+  assert.equal(nextState.phase, 'final_completion_review');
+  assert.equal(nextState.status, 'running');
   assert.equal(nextState.ignoreLocalChanges, true);
-  const notifyLog = await readFile(notifyLogPath, 'utf8');
-  assert.match(notifyLog, /plan complete/);
+  await assert.rejects(readFile(notifyLogPath, 'utf8'));
+});
+
+test('final squash routes terminal execution into final completion review instead of completing immediately', async () => {
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          return {
+            sessionHandle: 'coder-final-completion-1',
+            structured: {
+              planGoalSatisfied: true,
+              whatChangedOverall: 'Completed the terminal scope and assembled the whole-plan packet.',
+              verificationSummary: 'Ran final-squash coverage with the current repository state.',
+              remainingKnownGaps: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const { statePath, state, notifyLogPath } = await createFinalSquashFixture({
+      lastScopeMarker: 'AUTONOMY_DONE',
+    });
+
+    const nextState = await runFinalSquashPhase(state, statePath);
+    assert.equal(nextState.phase, 'final_completion_review');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.finalCompletionSummary?.planGoalSatisfied, true);
+    assert.equal(nextState.finalCommit !== null, true);
+    const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
+    assert.match(completionArtifact, /# Final Completion Review/);
+    assert.match(completionArtifact, /## Coder Completion Summary/);
+    assert.match(completionArtifact, /Completed the terminal scope and assembled the whole-plan packet\./);
+    assert.match(completionArtifact, /## Reviewer Verdict/);
+    assert.match(completionArtifact, /Pending\./);
+    await assert.rejects(readFile(notifyLogPath, 'utf8'));
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('runOnePass accepts whole-plan completion only after reviewer final completion verdict', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-accept-'));
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: 'final-5',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: true,
+      whatChangedOverall: 'Implemented the dedicated whole-plan completion gate.',
+      verificationSummary: 'Ran orchestrator and review tests.',
+      remainingKnownGaps: [],
+    },
+  });
+  await writeRepoConfig(fixtureState.cwd, { notifyBin: notifyScriptPath });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '5',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish scope 5',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          return {
+            sessionHandle: 'reviewer-final-completion-1',
+            structured: {
+              action: 'accept_complete',
+              summary: 'The plan outcome is complete and coherent.',
+              rationale: 'The completed scopes satisfy the plan objectives with no remaining known gaps.',
+              missingWork: null,
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'done');
+    assert.equal(nextState.status, 'done');
+    assert.equal(nextState.finalCompletionReviewVerdict?.action, 'accept_complete');
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /plan complete/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('runOnePass accepts one-shot whole-plan completion after final completion review', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-one-shot-accept-'));
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 1,
+    executionShape: 'one_shot',
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: true,
+      whatChangedOverall: 'Completed the one-shot plan and reached whole-plan acceptance.',
+      verificationSummary: 'Ran one-shot final-completion orchestrator coverage.',
+      remainingKnownGaps: [],
+    },
+  });
+  await writeRepoConfig(fixtureState.cwd, { notifyBin: notifyScriptPath });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    executionShape: 'one_shot',
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish one-shot plan',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          return {
+            sessionHandle: 'reviewer-final-completion-one-shot',
+            structured: {
+              action: 'accept_complete',
+              summary: 'The one-shot plan is complete as a whole.',
+              rationale: 'The one accepted scope satisfies the declared plan objective with no remaining gaps.',
+              missingWork: null,
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'done');
+    assert.equal(nextState.status, 'done');
+    assert.equal(nextState.executionShape, 'one_shot');
+    assert.equal(nextState.finalCompletionReviewVerdict?.action, 'accept_complete');
+    const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
+    assert.match(completionArtifact, /- Execution shape: one_shot/);
+    assert.match(completionArtifact, /Run completed cleanly\./);
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /plan complete/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('final squash persists the squashed checkpoint before failing the coder final-completion summary round', async () => {
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound() {
+          throw new OpenAICodexProviderError('final completion summary failed', 'coder-final-completion-failed');
+        },
+      };
+    },
+  });
+
+  try {
+    const { statePath, state } = await createFinalSquashFixture({
+      lastScopeMarker: 'AUTONOMY_DONE',
+    });
+
+    await assert.rejects(
+      () => runFinalSquashPhase(state, statePath),
+      /final completion summary failed/,
+    );
+
+    const failedState = await loadState(statePath);
+    assert.equal(failedState.phase, 'final_squash');
+    assert.equal(failedState.status, 'failed');
+    assert.equal(failedState.finalCommit !== null, true);
+    assert.equal(failedState.archivedReviewPath?.endsWith(`REVIEW-${failedState.finalCommit}.md`), true);
+    assert.equal(failedState.completedScopes.some((scope) => scope.finalCommit === failedState.finalCommit), true);
+    assert.equal(failedState.coderSessionHandle, 'coder-final-completion-failed');
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('runOnePass reopens execution as a new follow-on scope when final completion review returns continue_execution', async () => {
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 5,
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Added the coder completion summary contract but not the reviewer verdict gate.',
+      verificationSummary: 'Ran orchestrator and review tests.',
+      remainingKnownGaps: ['Reviewer final-completion verdict still needs execute-mode wiring.'],
+    },
+  });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    phase: 'final_completion_review',
+    status: 'running',
+    coderRetryCount: 1,
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '5',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish scope 5',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-final-completion-2',
+            structured: {
+              action: 'continue_execution',
+              summary: 'One follow-on scope is still required before the plan can complete.',
+              rationale: 'The execute state machine still finalizes automatically after final_squash.',
+              missingWork: {
+                summary: 'Add a dedicated final completion reviewer phase.',
+                requiredOutcome: 'Route terminal execution through an explicit reviewer verdict before AUTONOMY_DONE.',
+                verification: 'Run orchestrator and review tests plus typecheck.',
+              },
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runFinalCompletionReviewPhase(state, statePath);
+    assert.equal(nextState.phase, 'coder_scope');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.currentScopeNumber, 6);
+    assert.equal(nextState.baseCommit, createdCommit);
+    assert.equal(nextState.finalCommit, null);
+    assert.equal(nextState.finalCompletionSummary, null);
+    assert.equal(nextState.finalCompletionReviewVerdict?.action, 'continue_execution');
+    assert.equal(nextState.finalCompletionResolvedAction, 'continue_execution');
+    assert.equal(nextState.finalCompletionContinueExecutionCount, 1);
+    assert.equal(nextState.finalCompletionContinueExecutionCapReached, false);
+    assert.equal(nextState.coderRetryCount, 0);
+    const progressMarkdown = await readFile(nextState.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /## Final Completion Review/);
+    assert.match(progressMarkdown, /- Resulting action: continue_execution/);
+    assert.match(progressMarkdown, /Add a dedicated final completion reviewer phase/);
+    assert.match(progressMarkdown, /Route terminal execution through an explicit reviewer verdict before AUTONOMY_DONE/);
+    const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
+    assert.match(completionArtifact, /- Reviewer action: continue_execution/);
+    assert.match(completionArtifact, /Execution reopened with one explicit follow-on scope\./);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('runOnePass honors stop-after-current-scope on final completion continue_execution reopen', async () => {
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 5,
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Completed most of the plan, but one bounded follow-on scope is still required.',
+      verificationSummary: 'Ran final completion review coverage.',
+      remainingKnownGaps: ['One explicit follow-on repair remains.'],
+    },
+  });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '5',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish scope 5',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-final-completion-pause',
+            structured: {
+              action: 'continue_execution',
+              summary: 'One follow-on scope is still required before the plan can complete.',
+              rationale: 'The whole-plan review found one bounded remaining repair.',
+              missingWork: {
+                summary: 'Add the missing follow-on scope.',
+                requiredOutcome: 'Reopen execution for one explicit repair scope.',
+                verification: 'Run orchestrator tests plus typecheck.',
+              },
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath, undefined, {
+      shouldStopAfterCurrentScope() {
+        return true;
+      },
+    });
+    assert.equal(nextState.phase, 'coder_scope');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.currentScopeNumber, 6);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('final completion review blocks with an explicit diagnostic hint when continue_execution exceeds its cap', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-cap-'));
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 5,
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionContinueExecutionCount: 1,
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Implemented the first reopen cycle already.',
+      verificationSummary: 'Ran orchestrator and review tests.',
+      remainingKnownGaps: ['One more final-completion repair was requested.'],
+    },
+  });
+  await writeRepoConfig(fixtureState.cwd, {
+    notifyBin: notifyScriptPath,
+    finalCompletionContinueExecutionMax: 1,
+  });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '5',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish scope 5',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-final-completion-cap',
+            structured: {
+              action: 'continue_execution',
+              summary: 'Another bounded follow-on scope would normally be required.',
+              rationale: 'The completion strategy is still incomplete and needs additional repair work.',
+              missingWork: {
+                summary: 'Add one more final completion repair scope.',
+                requiredOutcome: 'Finish the remaining final-completion control-path wiring.',
+                verification: 'Run orchestrator and review tests plus typecheck.',
+              },
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runFinalCompletionReviewPhase(state, statePath);
+    assert.equal(nextState.phase, 'blocked');
+    assert.equal(nextState.status, 'blocked');
+    assert.equal(nextState.blockedFromPhase, 'final_completion_review');
+    assert.equal(nextState.finalCompletionReviewVerdict?.action, 'continue_execution');
+    assert.equal(nextState.finalCompletionResolvedAction, 'block_for_operator');
+    assert.equal(nextState.finalCompletionContinueExecutionCount, 1);
+    assert.equal(nextState.finalCompletionContinueExecutionCapReached, true);
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /continue_execution cap \(1\) is already exhausted/);
+    assert.match(notifyLog, /One available next step is `neal --diagnose`/);
+    const progressMarkdown = await readFile(nextState.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /- Reviewer action: continue_execution/);
+    assert.match(progressMarkdown, /- Resulting action: block_for_operator/);
+    assert.match(progressMarkdown, /- Continue-execution cap reached: yes/);
+    const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
+    assert.match(completionArtifact, /- Resulting action: block_for_operator/);
+    assert.match(completionArtifact, /Run blocked for operator guidance\./);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('final completion review supports a direct block_for_operator verdict', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-block-'));
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 2,
+    executionShape: 'one_shot',
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Completed the one-shot implementation but operator confirmation is still required.',
+      verificationSummary: 'Ran orchestrator coverage for one-shot final completion.',
+      remainingKnownGaps: ['The release decision is externally constrained.'],
+    },
+  });
+  await writeRepoConfig(fixtureState.cwd, { notifyBin: notifyScriptPath });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    executionShape: 'one_shot',
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish one-shot plan',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          return {
+            sessionHandle: 'reviewer-final-completion-block',
+            structured: {
+              action: 'block_for_operator',
+              summary: 'A human decision is still required before this plan can be considered complete.',
+              rationale: 'The remaining gap is external and should not reopen execution.',
+              missingWork: null,
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runFinalCompletionReviewPhase(state, statePath);
+    assert.equal(nextState.phase, 'blocked');
+    assert.equal(nextState.status, 'blocked');
+    assert.equal(nextState.blockedFromPhase, 'final_completion_review');
+    assert.equal(nextState.executionShape, 'one_shot');
+    assert.equal(nextState.finalCompletionReviewVerdict?.action, 'block_for_operator');
+    assert.equal(nextState.finalCompletionResolvedAction, 'block_for_operator');
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /blocked completion for operator guidance/);
+    assert.match(notifyLog, /One available next step is `neal --diagnose`/);
+    const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
+    assert.match(completionArtifact, /- Execution shape: one_shot/);
+    assert.match(completionArtifact, /- Reviewer action: block_for_operator/);
+    assert.match(completionArtifact, /Run blocked for operator guidance\./);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('verification-only terminal scope bypasses ordinary reviewer_scope and goes straight to final completion review', async () => {
+  const { statePath, state } = await createEmptyFinalSquashFixture({
+    currentScopeNumber: 4,
+    phase: 'coder_scope',
+    status: 'running',
+    lastScopeMarker: null,
+    createdCommits: [],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt(args: CoderRunPromptArgs) {
+          assert.match(args.prompt, /If this scope completes the entire plan, return AUTONOMY_DONE/);
+          return {
+            sessionHandle: 'coder-scope-session-final',
+            finalResponse: [
+              EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
+              JSON.stringify({
+                milestoneTargeted: 'Finish with verification-only completion.',
+                newEvidence: 'The required verification already passed.',
+                whyNotRedundant: 'No further code changes are needed for the terminal plan state.',
+                nextStepUnlocked: 'Neal can evaluate whole-plan completion directly.',
+              }),
+              EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
+              '',
+              'AUTONOMY_DONE',
+            ].join('\n'),
+          };
+        },
+      };
+    },
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          return {
+            sessionHandle: 'coder-final-completion-verify-only',
+            structured: {
+              planGoalSatisfied: true,
+              whatChangedOverall: 'No further implementation changes were required before final completion review.',
+              verificationSummary: 'Used the existing verification-only completion evidence.',
+              remainingKnownGaps: [],
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          return {
+            sessionHandle: 'reviewer-final-completion-verify-only',
+            structured: {
+              action: 'accept_complete',
+              summary: 'The verification-only terminal state still satisfies the plan as a whole.',
+              rationale: 'There was no remaining implementation diff to review, and the whole-plan packet is complete.',
+              missingWork: null,
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath);
+    assert.equal(nextState.phase, 'done');
+    assert.equal(nextState.status, 'done');
+    assert.equal(nextState.rounds.length, 0);
+    assert.equal(nextState.currentScopeMeaningfulProgressVerdict, null);
+    assert.equal(nextState.finalCompletionReviewVerdict?.action, 'accept_complete');
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
 });
 
 test('computeNextScopeStateAfterSquash rolls up the last derived sub-scope into the parent scope', async () => {
@@ -3637,6 +4298,132 @@ test('execute scope progress payload parser fails fast on missing required field
   assert.throws(() => parseExecuteScopeProgressPayload(malformed), /empty or missing newEvidence field/);
 });
 
+test('final completion summary schema requires the whole-plan completion fields', () => {
+  const schema = buildFinalCompletionSummarySchema();
+
+  assert.deepEqual(schema.required, [
+    'planGoalSatisfied',
+    'whatChangedOverall',
+    'verificationSummary',
+    'remainingKnownGaps',
+  ]);
+  assert.equal(schema.properties.planGoalSatisfied.type, 'boolean');
+  assert.equal(schema.properties.whatChangedOverall.type, 'string');
+  assert.equal(schema.properties.verificationSummary.type, 'string');
+  assert.equal(schema.properties.remainingKnownGaps.type, 'array');
+});
+
+test('final completion summary parser rejects contradictory completion claims', () => {
+  assert.deepEqual(
+    parseFinalCompletionSummaryPayload({
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Added the whole-plan completion packet assembly helper.',
+      verificationSummary: 'Ran targeted tests and typecheck.',
+      remainingKnownGaps: ['Final completion review is not wired into the execute state machine yet.'],
+    }),
+    {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Added the whole-plan completion packet assembly helper.',
+      verificationSummary: 'Ran targeted tests and typecheck.',
+      remainingKnownGaps: ['Final completion review is not wired into the execute state machine yet.'],
+    },
+  );
+
+  assert.throws(
+    () =>
+      parseFinalCompletionSummaryPayload({
+        planGoalSatisfied: true,
+        whatChangedOverall: 'Added final completion plumbing.',
+        verificationSummary: 'Ran pnpm typecheck.',
+        remainingKnownGaps: ['Still needs reviewer wiring.'],
+      }),
+    /planGoalSatisfied=true while remainingKnownGaps is non-empty/,
+  );
+
+  assert.throws(
+    () =>
+      parseFinalCompletionSummaryPayload({
+        planGoalSatisfied: false,
+        whatChangedOverall: 'Added final completion plumbing.',
+        verificationSummary: 'Ran pnpm typecheck.',
+        remainingKnownGaps: [],
+      }),
+    /planGoalSatisfied=false with an empty remainingKnownGaps array/,
+  );
+
+  assert.throws(
+    () =>
+      parseFinalCompletionSummaryPayload({
+        planGoalSatisfied: false,
+        whatChangedOverall: 'Added final completion plumbing.',
+        verificationSummary: 'Ran pnpm typecheck.',
+        remainingKnownGaps: ['  ', ''],
+      }),
+    /planGoalSatisfied=false with an empty remainingKnownGaps array/,
+  );
+});
+
+test('final completion reviewer schema requires verdict action and missing-work contract', () => {
+  const schema = buildFinalCompletionReviewerSchema();
+
+  assert.deepEqual(schema.required, ['action', 'summary', 'rationale', 'missingWork']);
+  assert.equal(schema.properties.action.type, 'string');
+  assert.equal(schema.properties.summary.type, 'string');
+  assert.equal(schema.properties.rationale.type, 'string');
+  assert.deepEqual(schema.properties.missingWork.type, ['object', 'null']);
+});
+
+test('final completion reviewer parser enforces continue_execution missing-work rules', () => {
+  assert.deepEqual(
+    parseFinalCompletionReviewerPayload({
+      action: 'continue_execution',
+      summary: 'One bounded follow-on scope is still required.',
+      rationale: 'The completion packet still shows a missing execute-mode transition.',
+      missingWork: {
+        summary: 'Add the final completion reviewer transition.',
+        requiredOutcome: 'Wire the reviewer verdict into the execute state machine before completion.',
+        verification: 'Run orchestrator and review tests plus typecheck.',
+      },
+    }),
+    {
+      action: 'continue_execution',
+      summary: 'One bounded follow-on scope is still required.',
+      rationale: 'The completion packet still shows a missing execute-mode transition.',
+      missingWork: {
+        summary: 'Add the final completion reviewer transition.',
+        requiredOutcome: 'Wire the reviewer verdict into the execute state machine before completion.',
+        verification: 'Run orchestrator and review tests plus typecheck.',
+      },
+    },
+  );
+
+  assert.throws(
+    () =>
+      parseFinalCompletionReviewerPayload({
+        action: 'continue_execution',
+        summary: 'Need more work.',
+        rationale: 'The plan is not complete yet.',
+        missingWork: null,
+      }),
+    /missingWork payload when action=continue_execution/,
+  );
+
+  assert.throws(
+    () =>
+      parseFinalCompletionReviewerPayload({
+        action: 'accept_complete',
+        summary: 'The plan is complete.',
+        rationale: 'The reviewer accepted the whole-plan result.',
+        missingWork: {
+          summary: 'should not be here',
+          requiredOutcome: 'n/a',
+          verification: 'n/a',
+        },
+      }),
+    /cannot include missingWork when action=accept_complete/,
+  );
+});
+
 test('state round-trip preserves current execute-scope progress justification', async () => {
   const justification: ExecuteScopeProgressJustification = {
     milestoneTargeted: 'Scope 2 payload contract',
@@ -3654,6 +4441,56 @@ test('state round-trip preserves current execute-scope progress justification', 
   const reloadedState = await loadState(statePath);
   assert.equal(reloadedState.cwd, cwd);
   assert.deepEqual(reloadedState.currentScopeProgressJustification, justification);
+});
+
+test('state round-trip preserves the final completion summary', async () => {
+  const { cwd, statePath } = await createResumeFixture({
+    phase: 'done',
+    status: 'done',
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Implemented the packet plumbing but not the reviewer gate.',
+      verificationSummary: 'Ran review and orchestrator tests.',
+      remainingKnownGaps: ['Reviewer final-completion verdict is not wired yet.'],
+    },
+  });
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.cwd, cwd);
+  assert.deepEqual(reloadedState.finalCompletionSummary, {
+    planGoalSatisfied: false,
+    whatChangedOverall: 'Implemented the packet plumbing but not the reviewer gate.',
+    verificationSummary: 'Ran review and orchestrator tests.',
+    remainingKnownGaps: ['Reviewer final-completion verdict is not wired yet.'],
+  });
+});
+
+test('state round-trip preserves final completion recovery metadata', async () => {
+  const { statePath } = await createResumeFixture({
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'final_completion_review',
+    finalCompletionReviewVerdict: {
+      action: 'continue_execution',
+      summary: 'One more follow-on scope was requested.',
+      rationale: 'The plan is close, but one execution repair remains.',
+      missingWork: {
+        summary: 'Add the missing final-completion branch.',
+        requiredOutcome: 'Wire the remaining reviewer decision into execute-mode completion.',
+        verification: 'Run orchestrator and review tests plus typecheck.',
+      },
+    },
+    finalCompletionResolvedAction: 'block_for_operator',
+    finalCompletionContinueExecutionCount: 2,
+    finalCompletionContinueExecutionCapReached: true,
+  });
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.finalCompletionResolvedAction, 'block_for_operator');
+  assert.equal(reloadedState.finalCompletionContinueExecutionCount, 2);
+  assert.equal(reloadedState.finalCompletionContinueExecutionCapReached, true);
+  assert.equal(reloadedState.finalCompletionReviewVerdict?.action, 'continue_execution');
+  assert.equal(reloadedState.finalCompletionReviewVerdict?.missingWork?.summary, 'Add the missing final-completion branch.');
 });
 
 test('state round-trip preserves current reviewer meaningful-progress verdict', async () => {

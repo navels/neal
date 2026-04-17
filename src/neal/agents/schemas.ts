@@ -3,6 +3,8 @@ import type {
   CoderConsultDisposition,
   ExecuteScopeProgressJustification,
   ExecutionShape,
+  FinalCompletionReviewerVerdict,
+  FinalCompletionSummary,
   ReviewerMeaningfulProgressAction,
 } from '../types.js';
 
@@ -41,6 +43,8 @@ export type CoderResponsePayload = {
 export type CoderConsultDispositionPayload = CoderConsultDisposition;
 export type CoderBlockedRecoveryDispositionPayload = CoderBlockedRecoveryDisposition;
 export type ExecuteScopeProgressPayload = ExecuteScopeProgressJustification;
+export type FinalCompletionSummaryPayload = FinalCompletionSummary;
+export type FinalCompletionReviewerPayload = FinalCompletionReviewerVerdict;
 
 export const EXECUTE_SCOPE_PROGRESS_PAYLOAD_START = 'NEAL_PROGRESS_JUSTIFICATION_JSON_START';
 export const EXECUTE_SCOPE_PROGRESS_PAYLOAD_END = 'NEAL_PROGRESS_JUSTIFICATION_JSON_END';
@@ -215,6 +219,46 @@ export function buildExecuteScopeProgressSchema() {
   } as const;
 }
 
+export function buildFinalCompletionSummarySchema() {
+  return {
+    type: 'object',
+    properties: {
+      planGoalSatisfied: { type: 'boolean' },
+      whatChangedOverall: { type: 'string' },
+      verificationSummary: { type: 'string' },
+      remainingKnownGaps: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+    },
+    required: ['planGoalSatisfied', 'whatChangedOverall', 'verificationSummary', 'remainingKnownGaps'],
+    additionalProperties: false,
+  } as const;
+}
+
+export function buildFinalCompletionReviewerSchema() {
+  return {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['accept_complete', 'continue_execution', 'block_for_operator'] },
+      summary: { type: 'string' },
+      rationale: { type: 'string' },
+      missingWork: {
+        type: ['object', 'null'],
+        properties: {
+          summary: { type: 'string' },
+          requiredOutcome: { type: 'string' },
+          verification: { type: 'string' },
+        },
+        required: ['summary', 'requiredOutcome', 'verification'],
+        additionalProperties: false,
+      },
+    },
+    required: ['action', 'summary', 'rationale', 'missingWork'],
+    additionalProperties: false,
+  } as const;
+}
+
 function parseJsonPayload<TPayload>(raw: string, label: string): TPayload {
   try {
     return JSON.parse(raw) as TPayload;
@@ -314,4 +358,83 @@ export function parseCoderBlockedRecoveryDispositionPayload(raw: string) {
   }
 
   return payload;
+}
+
+export function parseFinalCompletionSummaryPayload(payload: FinalCompletionSummaryPayload) {
+  const whatChangedOverall = payload.whatChangedOverall.trim();
+  const verificationSummary = payload.verificationSummary.trim();
+  const remainingKnownGaps = payload.remainingKnownGaps
+    .map((gap) => gap.trim())
+    .filter((gap) => gap.length > 0);
+
+  if (!whatChangedOverall) {
+    throw new Error('Final completion summary returned an empty whatChangedOverall field.');
+  }
+
+  if (!verificationSummary) {
+    throw new Error('Final completion summary returned an empty verificationSummary field.');
+  }
+
+  if (payload.planGoalSatisfied && remainingKnownGaps.length > 0) {
+    throw new Error('Final completion summary cannot set planGoalSatisfied=true while remainingKnownGaps is non-empty.');
+  }
+
+  if (!payload.planGoalSatisfied && remainingKnownGaps.length === 0) {
+    throw new Error('Final completion summary cannot set planGoalSatisfied=false with an empty remainingKnownGaps array.');
+  }
+
+  return {
+    planGoalSatisfied: payload.planGoalSatisfied,
+    whatChangedOverall,
+    verificationSummary,
+    remainingKnownGaps,
+  };
+}
+
+export function parseFinalCompletionReviewerPayload(payload: FinalCompletionReviewerPayload) {
+  const summary = payload.summary.trim();
+  const rationale = payload.rationale.trim();
+
+  if (!summary) {
+    throw new Error('Final completion reviewer verdict returned an empty summary field.');
+  }
+
+  if (!rationale) {
+    throw new Error('Final completion reviewer verdict returned an empty rationale field.');
+  }
+
+  const missingWork =
+    payload.missingWork === null
+      ? null
+      : {
+          summary: payload.missingWork.summary.trim(),
+          requiredOutcome: payload.missingWork.requiredOutcome.trim(),
+          verification: payload.missingWork.verification.trim(),
+        };
+
+  if (payload.action === 'continue_execution') {
+    if (
+      !missingWork ||
+      !missingWork.summary ||
+      !missingWork.requiredOutcome ||
+      !missingWork.verification
+    ) {
+      throw new Error(
+        'Final completion reviewer verdict must include a non-empty missingWork payload when action=continue_execution.',
+      );
+    }
+  }
+
+  if (payload.action !== 'continue_execution' && missingWork) {
+    throw new Error(
+      `Final completion reviewer verdict cannot include missingWork when action=${payload.action}.`,
+    );
+  }
+
+  return {
+    action: payload.action,
+    summary,
+    rationale,
+    missingWork,
+  };
 }

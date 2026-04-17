@@ -8,6 +8,9 @@ import type {
   AgentRoleConfig,
   CoderConsultRequest,
   ExecuteScopeProgressJustification,
+  FinalCompletionPacket,
+  FinalCompletionReviewerVerdict,
+  FinalCompletionSummary,
   ReviewFinding,
   ReviewerMeaningfulProgressVerdict,
   ReviewerConsultResponse,
@@ -25,6 +28,8 @@ import {
   buildCoderResponsePrompt,
   buildConsultReviewerPrompt,
   buildDiagnosticAnalysisPrompt,
+  buildFinalCompletionReviewerPrompt,
+  buildFinalCompletionSummaryPrompt,
   buildRecoveryPlanPrompt,
   buildPlanReviewerPrompt,
   buildPlanningPrompt,
@@ -37,12 +42,16 @@ import {
   buildCoderPlanResponseSchema,
   buildCoderResponseSchema,
   buildConsultReviewerSchema,
+  buildFinalCompletionSummarySchema,
+  buildFinalCompletionReviewerSchema,
   buildPlanReviewerSchema,
   buildReviewerSchema,
   parseCoderBlockedRecoveryDispositionPayload,
   parseCoderConsultDispositionPayload,
   parseCoderResponsePayload,
   parseExecuteScopeProgressPayload,
+  parseFinalCompletionReviewerPayload,
+  parseFinalCompletionSummaryPayload,
   stripExecuteScopeProgressPayload,
   type CoderBlockedRecoveryDispositionPayload,
   type CoderConsultDispositionPayload,
@@ -120,7 +129,7 @@ async function safeReadText(path: string) {
 
 async function runReviewerStructuredRound<TStructured>(args: {
   reviewer: AgentRoleConfig;
-  label: 'review' | 'plan-review' | 'consult';
+  label: 'review' | 'plan-review' | 'consult' | 'final-completion';
   cwd: string;
   prompt: string;
   schema: Record<string, unknown>;
@@ -259,6 +268,55 @@ export async function runConsultReviewerRound(args: {
   return {
     sessionHandle,
     response: structured,
+  };
+}
+
+export async function runCoderFinalCompletionSummaryRound(args: {
+  coder: AgentRoleConfig;
+  cwd: string;
+  planDoc: string;
+  packet: FinalCompletionPacket;
+  logger?: RunLogger;
+}): Promise<{ sessionHandle: string | null; summary: FinalCompletionSummary }> {
+  try {
+    const advisor = getStructuredAdvisorAdapter(args.coder);
+    const result = await advisor.runStructuredRound<FinalCompletionSummary>({
+      label: 'final-completion',
+      cwd: args.cwd,
+      prompt: buildFinalCompletionSummaryPrompt(args),
+      schema: buildFinalCompletionSummarySchema(),
+      logger: args.logger,
+    });
+
+    return {
+      sessionHandle: result.sessionHandle,
+      summary: parseFinalCompletionSummaryPayload(result.structured),
+    };
+  } catch (error) {
+    throw translateCoderProviderError(error);
+  }
+}
+
+export async function runReviewerFinalCompletionRound(args: {
+  reviewer: AgentRoleConfig;
+  cwd: string;
+  planDoc: string;
+  packet: FinalCompletionPacket;
+  summary: FinalCompletionSummary;
+  logger?: RunLogger;
+}): Promise<{ sessionHandle: string | null; verdict: FinalCompletionReviewerVerdict }> {
+  const { sessionHandle, structured } = await runReviewerStructuredRound<FinalCompletionReviewerVerdict>({
+    reviewer: args.reviewer,
+    label: 'final-completion',
+    cwd: args.cwd,
+    prompt: buildFinalCompletionReviewerPrompt(args),
+    schema: buildFinalCompletionReviewerSchema(),
+    logger: args.logger,
+  });
+
+  return {
+    sessionHandle,
+    verdict: parseFinalCompletionReviewerPayload(structured),
   };
 }
 
