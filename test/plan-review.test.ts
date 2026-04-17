@@ -28,6 +28,8 @@ test('planning prompt requires an explicit execution-shape declaration', () => {
   assert.match(prompt, /Declare that choice in the plan document with a literal `## Execution Shape` section/);
   assert.match(prompt, /executionShape: one_shot/);
   assert.match(prompt, /executionShape: multi_scope/);
+  assert.match(prompt, /Choose `multi_scope` when the work changes orchestration or state-machine behavior/);
+  assert.match(prompt, /Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope/);
 });
 
 test('derived-plan prompts require the same canonical Neal-executable contract', () => {
@@ -82,6 +84,9 @@ test('plan reviewer schema and prompt require executionShape confirmation', () =
   assert.equal(hasTopLevelRequiredProperty(schema, 'missingKey'), false);
   assert.match(prompt, /must declare exactly one execution shape/);
   assert.match(prompt, /echo it in the required `executionShape` field/);
+  assert.match(prompt, /scope granularity, verification concreteness, and resume safety/);
+  assert.match(prompt, /name the failing dimension directly/);
+  assert.match(prompt, /If the plan is already Neal-executable, confirm that quickly and return no manufactured findings/);
 });
 
 test('executionShape persists through state round-trip and wrapper artifacts', async () => {

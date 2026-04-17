@@ -50,6 +50,8 @@ export function buildPlanningPrompt(planDoc: string) {
     'Do not leave avoidable ambiguity in the plan when the repository already answers the question. Name concrete target functions, files, and exports when they are knowable from the repo.',
     'Do not ask the future executor to perform redundant edits. If an export already propagates through an existing barrel file, say to verify that behavior instead of adding a fake extra edit step.',
     'Make the final plan explicit about scope boundaries, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any repeated-scope selection rules.',
+    'Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.',
+    'Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.',
     ...getCanonicalPlanContractLines(),
     'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
     '',
@@ -162,6 +164,12 @@ export function buildPlanReviewerPrompt(args: {
     'The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot` or `multi_scope`.',
     'You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.',
     'Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.',
+    'Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.',
+    'When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.',
+    'Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.',
+    'Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.',
+    'Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.',
+    'A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.',
     mode === 'derived-plan'
       ? 'Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.'
       : 'Use blocking severity for missing information or plan structure that would prevent neal from executing safely.',
@@ -178,6 +186,7 @@ export function buildPlanReviewerPrompt(args: {
     mode === 'derived-plan'
       ? 'The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
       : 'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
+    'If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.',
     `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
     '',
     'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
