@@ -35,6 +35,7 @@ import {
   squashCommits,
 } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
+import { writeDiagnostic } from './diagnostic.js';
 import {
   flushDerivedPlanNotifications,
   notifyBlocked,
@@ -74,11 +75,6 @@ import type {
 const execFile = promisify(execFileCallback);
 export { flushDerivedPlanNotifications };
 export { adoptAcceptedDerivedPlan, computeNextScopeStateAfterSquash };
-
-function writeDiagnostic(message: string, logger?: RunLogger) {
-  process.stderr.write(message);
-  void logger?.stderr(message);
-}
 
 function formatReviewFindings(
   findings: Array<{
@@ -2457,6 +2453,7 @@ export async function runOnePass(
   options?: {
     shouldStopAfterCurrentScope?: () => boolean;
     onCoderSessionHandle?: (sessionHandle: string | null) => void;
+    onDisplayState?: (state: OrchestrationState, phaseStartedAt: number) => void | Promise<void>;
   },
 ) {
   let currentState = state;
@@ -2465,6 +2462,8 @@ export async function runOnePass(
     isRunnablePhase(currentState.phase) &&
     (currentState.phase !== 'interactive_blocked_recovery' || hasPendingInteractiveBlockedRecoveryTurn(currentState))
   ) {
+    const phaseStartedAt = Date.now();
+    await options?.onDisplayState?.(currentState, phaseStartedAt);
     const stopHeartbeat = startPhaseHeartbeat(currentState.phase, () => currentState, logger);
     try {
       const currentPhase = currentState.phase;
@@ -2527,6 +2526,7 @@ export async function runOnePass(
       };
 
       currentState = await phaseHandlers[currentPhase]();
+      await options?.onDisplayState?.(currentState, Date.now());
 
       if (
         currentPhase === 'final_squash' &&

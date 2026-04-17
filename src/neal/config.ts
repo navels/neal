@@ -59,6 +59,15 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
 
 const cachedConfig = new Map<string, NealConfigFile>();
 
+export function clearConfigCache(cwd?: string) {
+  if (cwd) {
+    cachedConfig.delete(resolve(cwd));
+    return;
+  }
+
+  cachedConfig.clear();
+}
+
 function parseNumberValue(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;

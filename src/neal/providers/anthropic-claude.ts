@@ -1,6 +1,7 @@
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
 import { getApiRetryLimit, getClaudeContinuationLimit, getClaudeMaxTurns, getInactivityTimeoutMs } from '../config.js';
+import { writeDiagnostic } from '../diagnostic.js';
 import type { RunLogger } from '../logger.js';
 import type {
   CoderAdapter,
@@ -26,11 +27,6 @@ export class AnthropicClaudeProviderError extends Error {
     this.sessionHandle = sessionHandle;
     this.subtype = subtype;
   }
-}
-
-function writeDiagnostic(message: string, logger?: RunLogger) {
-  process.stderr.write(message);
-  void logger?.stderr(message);
 }
 
 function flushClaudeText(label: string, state: ClaudeLogState, logger?: RunLogger) {

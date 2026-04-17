@@ -4,11 +4,14 @@ import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { clearConfigCache } from '../src/neal/config.js';
 import { renderConsultMarkdown } from '../src/neal/consult.js';
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
 import type { OrchestrationState } from '../src/neal/types.js';
+
+process.env.HOME = join(tmpdir(), 'neal-test-home-review');
 
 async function createState(overrides: Partial<OrchestrationState> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'neal-review-artifacts-'));
@@ -19,6 +22,7 @@ async function createState(overrides: Partial<OrchestrationState> = {}) {
 
   await mkdir(runDir, { recursive: true });
   await writeFile(join(cwd, 'config.yml'), 'neal:\n  notify_bin: /usr/bin/true\n', 'utf8');
+  clearConfigCache(cwd);
   await writeFile(planDoc, '# Plan\n', 'utf8');
 
   const state = await createInitialState(
@@ -103,6 +107,7 @@ test('interactive blocked recovery notification is distinct from a terminal bloc
   );
   await chmod(notifyScriptPath, 0o755);
   await writeFile(join(state.cwd, 'config.yml'), `neal:\n  notify_bin: ${notifyScriptPath}\n`, 'utf8');
+  clearConfigCache(state.cwd);
 
   await notifyInteractiveBlockedRecovery(state, 'Need operator guidance');
   const notifyLog = await readFile(notifyLogPath, 'utf8');

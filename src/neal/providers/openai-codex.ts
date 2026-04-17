@@ -1,6 +1,7 @@
 import { Codex, type Thread } from '@openai/codex-sdk';
 
 import { getInactivityTimeoutMs } from '../config.js';
+import { writeDiagnostic } from '../diagnostic.js';
 import type { RunLogger } from '../logger.js';
 import type {
   CoderAdapter,
@@ -19,11 +20,6 @@ export class OpenAICodexProviderError extends Error {
     this.name = 'OpenAICodexProviderError';
     this.sessionHandle = sessionHandle;
   }
-}
-
-function writeDiagnostic(message: string, logger?: RunLogger) {
-  process.stderr.write(message);
-  void logger?.stderr(message);
 }
 
 async function nextWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

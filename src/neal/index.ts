@@ -14,8 +14,10 @@ import {
   recordInteractiveBlockedRecoveryGuidance,
   runOnePass,
 } from './orchestrator.js';
+import { clearDiagnosticFooter, configureDiagnosticFooter, writeDiagnostic } from './diagnostic.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
+import { StatusFooter } from './status-footer.js';
 import { getDefaultAgentConfig, loadState } from './state.js';
 import { showSummaries } from './summaries.js';
 import { CoderRoundError, ReviewerRoundError } from './agents.js';
@@ -50,12 +52,16 @@ function isAgentProvider(value: string): value is AgentProvider {
 
 async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['state'], statePath: string, logger: RunLogger) {
   runLogger = logger;
+  const footer = new StatusFooter();
+  configureDiagnosticFooter(footer);
+  let displayedPhaseStartedAt = Date.now();
+  await footer.setState(state, displayedPhaseStartedAt);
   const stopController = createStopController();
   let lastCoderSessionHandle: string | null = state.coderSessionHandle;
   let shouldResumeLastThread = false;
 
   if (process.stdin.isTTY) {
-    process.stderr.write('[neal] press q to stop after the current scope\n');
+    writeDiagnostic('[neal] press q to stop after the current scope\n');
   }
 
   let finalState;
@@ -68,6 +74,10 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
         if (sessionHandle) {
           lastCoderSessionHandle = sessionHandle;
         }
+      },
+      onDisplayState(nextState, phaseStartedAt) {
+        displayedPhaseStartedAt = phaseStartedAt;
+        return footer.setState(nextState, phaseStartedAt);
       },
     });
     shouldResumeLastThread =
@@ -87,7 +97,8 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
       : false;
 
   if (waitingForOperatorGuidance) {
-    process.stderr.write(`[neal] waiting for operator guidance; use: neal --recover ${statePath} --message \"...\"\n`);
+    await footer.setState(finalState, displayedPhaseStartedAt);
+    writeDiagnostic(`[neal] waiting for operator guidance; use: neal --recover ${statePath} --message \"...\"\n`);
   }
 
   process.stdout.write(
@@ -119,9 +130,12 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
   );
 
   if (shouldResumeLastThread && lastCoderSessionHandle) {
-    process.stderr.write(`[neal] resuming ${lastCoderSessionHandle}\n`);
+    writeDiagnostic(`[neal] resuming ${lastCoderSessionHandle}\n`);
+    clearDiagnosticFooter();
     await resumeLastCoderSession(finalState.agentConfig.coder.provider, lastCoderSessionHandle);
   }
+
+  clearDiagnosticFooter();
 }
 
 async function createInlineExecutePlanDoc(cwd: string, prompt: string) {
@@ -194,8 +208,9 @@ function getSessionLaunchCommand(provider: AgentProvider, sessionHandle: string)
 }
 
 async function openSession(target: SessionLaunchTarget) {
+  clearDiagnosticFooter();
   const launch = getSessionLaunchCommand(target.provider, target.sessionHandle);
-  process.stderr.write(`[neal] opening ${target.role} session via ${launch.command} ${launch.args.join(' ')}\n`);
+  writeDiagnostic(`[neal] opening ${target.role} session via ${launch.command} ${launch.args.join(' ')}\n`);
   await spawnLaunchCommand(launch);
 }
 
@@ -234,12 +249,13 @@ function createStopController() {
   const onKeypress = (_input: string, key: readline.Key) => {
     if (key.ctrl && key.name === 'c') {
       cleanup();
+      clearDiagnosticFooter();
       process.exit(130);
     }
 
     if (key.name === 'q') {
       stopRequested = !stopRequested;
-      process.stderr.write(
+      writeDiagnostic(
         stopRequested
           ? '\n[neal] stop requested after the current scope\n'
           : '\n[neal] stop request cleared; continuing after the current scope\n',
@@ -337,7 +353,7 @@ async function main() {
       }
       throw error;
     }
-    process.stderr.write(`[neal] recovery guidance recorded; run: neal --resume ${loaded.statePath}\n`);
+    writeDiagnostic(`[neal] recovery guidance recorded; run: neal --resume ${loaded.statePath}\n`);
     process.stdout.write(
       JSON.stringify(
         {
@@ -468,6 +484,7 @@ async function main() {
 let runLogger: RunLogger | undefined;
 
 void main().catch((error: unknown) => {
+  clearDiagnosticFooter();
   const message = error instanceof Error ? error.message : String(error);
   void runLogger?.event('run.failed', {
     message,
@@ -481,11 +498,11 @@ void main().catch((error: unknown) => {
     void runLogger?.stderr(`[fatal] ${message}\n`);
   }
   if (error instanceof CoderRoundError && error.sessionHandle) {
-    process.stderr.write(`[neal] ${message} (coder session: ${error.sessionHandle})\n`);
+    writeDiagnostic(`[neal] ${message} (coder session: ${error.sessionHandle})\n`);
   } else if (error instanceof ReviewerRoundError && error.sessionHandle) {
-    process.stderr.write(`[neal] ${message} (reviewer session: ${error.sessionHandle})\n`);
+    writeDiagnostic(`[neal] ${message} (reviewer session: ${error.sessionHandle})\n`);
   } else {
-    process.stderr.write(`[neal] ${message}\n`);
+    writeDiagnostic(`[neal] ${message}\n`);
   }
   process.exit(1);
 });

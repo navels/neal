@@ -16,6 +16,7 @@ import {
   recordInteractiveBlockedRecoveryGuidance,
   runFinalSquashPhase,
 } from '../src/neal/orchestrator.js';
+import { clearConfigCache } from '../src/neal/config.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -23,6 +24,7 @@ import { createInitialState, getDefaultAgentConfig, loadState, saveState } from 
 import type { OrchestrationState } from '../src/neal/types.js';
 
 const execFileAsync = promisify(execFile);
+process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator');
 
 async function writeRepoConfig(cwd: string, overrides?: { notifyBin?: string }) {
   await writeFile(
@@ -30,6 +32,7 @@ async function writeRepoConfig(cwd: string, overrides?: { notifyBin?: string }) 
     `neal:\n  notify_bin: ${overrides?.notifyBin ?? '/usr/bin/true'}\n`,
     'utf8',
   );
+  clearConfigCache(cwd);
 }
 
 async function createResumeFixture(overrides: Partial<OrchestrationState>) {
