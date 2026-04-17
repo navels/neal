@@ -57,7 +57,14 @@ import { validatePlanDocument } from './plan-validation.js';
 import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
-import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, hasAcceptedDerivedPlan, isExecutingDerivedPlan } from './scopes.js';
+import {
+  getCurrentScopeLabel,
+  getExecutionPlanPath,
+  getParentScopeLabel,
+  hasAcceptedDerivedPlan,
+  isExecutingDerivedPlan,
+  renderRecentAcceptedScopesSummary,
+} from './scopes.js';
 import { createInitialState, getSessionStatePath, loadState, saveState } from './state.js';
 import type {
   AgentConfig,
@@ -69,6 +76,7 @@ import type {
   OrchestratorInit,
   ReviewFinding,
   ReviewFindingSource,
+  ReviewerMeaningfulProgressAction,
   ScopeMarker,
 } from './types.js';
 
@@ -123,6 +131,94 @@ function printReviewResult(
     formatReviewFindings(findings),
   ].join('\n');
   writeDiagnostic(`${message}\n`, logger);
+}
+
+export function resolveExecuteReviewDisposition(args: {
+  hasBlockingFindings: boolean;
+  hasOpenNonBlockingFindings: boolean;
+  reachedMaxRounds: boolean;
+  shouldBlockForConvergence: boolean;
+  meaningfulProgressAction: ReviewerMeaningfulProgressAction;
+}) {
+  if (args.shouldBlockForConvergence) {
+    return {
+      phase: 'blocked' as const,
+      status: 'blocked' as const,
+      blockedFromPhase: 'reviewer_scope' as const,
+    };
+  }
+
+  if (args.hasBlockingFindings) {
+    // Blocking findings take precedence over a non-accept meaningful-progress verdict
+    // until the normal review loop has converged or exhausted its round budget.
+    return {
+      phase: args.reachedMaxRounds ? ('blocked' as const) : ('coder_response' as const),
+      status: args.reachedMaxRounds ? ('blocked' as const) : ('running' as const),
+      blockedFromPhase: args.reachedMaxRounds ? ('reviewer_scope' as const) : null,
+    };
+  }
+
+  if (args.meaningfulProgressAction !== 'accept') {
+    return {
+      phase: 'blocked' as const,
+      status: 'blocked' as const,
+      blockedFromPhase: 'reviewer_scope' as const,
+    };
+  }
+
+  if (args.hasOpenNonBlockingFindings) {
+    return {
+      phase: 'coder_optional_response' as const,
+      status: 'running' as const,
+      blockedFromPhase: null,
+    };
+  }
+
+  return {
+    phase: 'final_squash' as const,
+    status: 'running' as const,
+    blockedFromPhase: null,
+  };
+}
+
+export function getExecuteReviewBlockReason(args: {
+  cwd: string;
+  reopenedCanonical: string | null;
+  stalledBlockingCount: boolean;
+  reachedMaxRounds: boolean;
+  maxRounds: number;
+  meaningfulProgressAction: ReviewerMeaningfulProgressAction;
+  meaningfulProgressRationale: string;
+  parentScopeLabel: string;
+}) {
+  if (args.reopenedCanonical) {
+    return `review_stuck: blocking finding ${args.reopenedCanonical} reopened across multiple reviewer rounds`;
+  }
+
+  if (args.stalledBlockingCount) {
+    return `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow(args.cwd)} consecutive reviewer rounds`;
+  }
+
+  if (args.reachedMaxRounds) {
+    return `reached max review rounds (${args.maxRounds}) with blocking findings still open`;
+  }
+
+  if (args.meaningfulProgressAction === 'block_for_operator') {
+    return (
+      `meaningful_progress: reviewer requested operator guidance before accepting parent objective ` +
+      `${args.parentScopeLabel}. ${args.meaningfulProgressRationale}`
+    );
+  }
+
+  if (args.meaningfulProgressAction === 'replace_plan') {
+    return (
+      `meaningful_progress: reviewer requested replacing the current scope for parent objective ` +
+      `${args.parentScopeLabel} rather than retrying it. ${args.meaningfulProgressRationale} ` +
+      `One available next step: neal --diagnose`
+    );
+  }
+
+  return null;
 }
 
 type ReviewFindingInput = Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>;
@@ -1114,6 +1210,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
     ...workingState,
     coderSessionHandle: codex.sessionHandle,
     lastScopeMarker: codex.marker as ScopeMarker | null,
+    currentScopeProgressJustification: codex.progressJustification,
     phase: codex.marker === 'AUTONOMY_BLOCKED' || splitPlan || completionProblem ? 'blocked' : 'reviewer_scope',
     status: codex.marker === 'AUTONOMY_BLOCKED' || splitPlan || completionProblem ? 'blocked' : 'running',
     blockedFromPhase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem ? 'coder_scope' : null,
@@ -1135,7 +1232,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
       statePath,
       {
         sourcePhase: 'coder_scope',
-        derivedPlanMarkdown: stripTrailingMarker(codex.finalResponse, 'AUTONOMY_SPLIT_PLAN'),
+        derivedPlanMarkdown: stripTrailingMarker(codex.responseWithoutProgressPayload, 'AUTONOMY_SPLIT_PLAN'),
         createdCommits,
         logger,
       },
@@ -1159,7 +1256,7 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
             state: nextState,
             sourcePhase: 'coder_scope',
             blocker: reason,
-            summary: codex.finalResponse.replace(/\s*AUTONOMY_BLOCKED\s*$/m, '').trim(),
+            summary: codex.responseWithoutProgressPayload.replace(/\s*AUTONOMY_BLOCKED\s*$/m, '').trim(),
             relevantFiles: createdCommits.length > 0 ? await getChangedFilesForRange(state.cwd, beforeHead, afterHead) : [],
           }),
         ],
@@ -1314,15 +1411,20 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   if (!state.baseCommit) {
     throw new Error('Cannot run reviewer round without baseCommit');
   }
+  if (!state.currentScopeProgressJustification) {
+    throw new Error('Cannot run execute reviewer round without a coder progress justification');
+  }
 
   await logger?.event('phase.start', { phase: 'reviewer_scope', round: state.rounds.length + 1 });
   const headCommit = await getHeadCommit(state.cwd);
   const round = state.rounds.length + 1;
+  const parentScopeLabel = getParentScopeLabel(state);
   const previousHeadCommit = state.rounds.at(-1)?.commitRange.head ?? null;
   const commits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
   const diffStat = await getDiffStatForRange(state.cwd, state.baseCommit, headCommit);
   const diff = await getDiffForRange(state.cwd, state.baseCommit, headCommit);
   const changedFiles = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
+  const recentHistorySummary = renderRecentAcceptedScopesSummary(state, parentScopeLabel);
   let claude;
   try {
     claude = await runReviewerRound({
@@ -1338,6 +1440,9 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
       changedFiles,
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
+      parentScopeLabel,
+      progressJustification: state.currentScopeProgressJustification,
+      recentHistorySummary,
       logger,
     });
   } catch (error) {
@@ -1363,6 +1468,10 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   }
 
   printReviewResult('review', claude.summary, claude.findings, logger);
+  writeDiagnostic(
+    `[reviewer:review] meaningful progress: ${claude.meaningfulProgress.action} - ${claude.meaningfulProgress.rationale}\n`,
+    logger,
+  );
 
   let nextCanonicalIndex = getNextCanonicalIndex(state.findings);
   const findings = claude.findings.map((finding, index) => {
@@ -1384,33 +1493,31 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
   const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount, state.cwd);
   const reopenedCanonical = getReopenedCanonical(mergedFindings);
   const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
-  const blockReason = reopenedCanonical
-    ? `review_stuck: blocking finding ${reopenedCanonical} reopened across multiple reviewer rounds`
-    : stalledBlockingCount
-      ? `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow(state.cwd)} consecutive reviewer rounds`
-      : reachedMaxRounds && hasBlockingFindings
-        ? `reached max review rounds (${state.maxRounds}) with blocking findings still open`
-        : null;
+  const disposition = resolveExecuteReviewDisposition({
+    hasBlockingFindings,
+    hasOpenNonBlockingFindings,
+    reachedMaxRounds,
+    shouldBlockForConvergence,
+    meaningfulProgressAction: claude.meaningfulProgress.action,
+  });
+  const blockReason = disposition.status === 'blocked'
+    ? getExecuteReviewBlockReason({
+        cwd: state.cwd,
+        reopenedCanonical,
+        stalledBlockingCount,
+        reachedMaxRounds: reachedMaxRounds && hasBlockingFindings,
+        maxRounds: state.maxRounds,
+        meaningfulProgressAction: claude.meaningfulProgress.action,
+        meaningfulProgressRationale: claude.meaningfulProgress.rationale,
+        parentScopeLabel,
+      })
+    : null;
 
   const nextState = await saveState(statePath, {
     ...state,
     reviewerSessionHandle: claude.sessionHandle,
-    phase: shouldBlockForConvergence
-      ? 'blocked'
-      : hasBlockingFindings
-        ? reachedMaxRounds
-          ? 'blocked'
-          : 'coder_response'
-        : hasOpenNonBlockingFindings
-          ? 'coder_optional_response'
-          : 'final_squash',
-    status: shouldBlockForConvergence
-      ? 'blocked'
-      : hasBlockingFindings
-        ? reachedMaxRounds
-          ? 'blocked'
-          : 'running'
-        : 'running',
+    phase: disposition.phase,
+    status: disposition.status,
     rounds: [
       ...state.rounds,
       {
@@ -1429,7 +1536,8 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
       },
     ],
     findings: mergedFindings,
-    blockedFromPhase: shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds) ? 'reviewer_scope' : null,
+    blockedFromPhase: disposition.blockedFromPhase,
+    currentScopeMeaningfulProgressVerdict: claude.meaningfulProgress,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -1439,6 +1547,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
     sessionHandle: claude.sessionHandle,
     findings: findings.length,
     blockingFindings: findings.filter((finding) => finding.severity === 'blocking').length,
+    meaningfulProgressAction: claude.meaningfulProgress.action,
     nextPhase: nextState.phase,
   });
   if (nextState.status === 'blocked' && blockReason) {
@@ -2371,6 +2480,7 @@ export async function runFinalSquashPhase(state: OrchestrationState, statePath: 
     state,
     finalCommit,
     finalSubject,
+    changedFiles: changedFilesSinceBase,
     archivedReviewPath,
   });
   const retrospectiveState = {

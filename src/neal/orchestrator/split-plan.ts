@@ -165,6 +165,8 @@ export async function persistSplitPlanRecovery(
     phase: 'reviewer_plan',
     status: 'running',
     blockedFromPhase: null,
+    currentScopeProgressJustification: null,
+    currentScopeMeaningfulProgressVerdict: null,
     interactiveBlockedRecovery: null,
     derivedPlanPath,
     derivedFromScopeNumber: state.currentScopeNumber,

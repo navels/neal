@@ -12,16 +12,25 @@ import {
   computeNextScopeStateAfterSquash,
   finalizeBlockedPlanReviewResponse,
   flushDerivedPlanNotifications,
+  getExecuteReviewBlockReason,
   loadOrInitialize,
+  resolveExecuteReviewDisposition,
   recordInteractiveBlockedRecoveryGuidance,
   runFinalSquashPhase,
 } from '../src/neal/orchestrator.js';
+import {
+  EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
+  EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
+  parseExecuteScopeProgressPayload,
+  stripExecuteScopeProgressPayload,
+} from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
+import { getRecentAcceptedScopesForParentObjective, renderRecentAcceptedScopesSummary } from '../src/neal/scopes.js';
 import { createInitialState, getDefaultAgentConfig, loadState, saveState } from '../src/neal/state.js';
-import type { OrchestrationState } from '../src/neal/types.js';
+import type { ExecuteScopeProgressJustification, OrchestrationState, ReviewerMeaningfulProgressVerdict } from '../src/neal/types.js';
 
 const execFileAsync = promisify(execFile);
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator');
@@ -1252,6 +1261,7 @@ test('flush sends split-plan rejection notification for guardrail blocks', async
         baseCommit: 'abc123',
         finalCommit: null,
         commitSubject: null,
+        changedFiles: [],
         reviewRounds: 0,
         findings: 0,
         archivedReviewPath: null,
@@ -1300,6 +1310,7 @@ test('persistSplitPlanRecovery allows split-plan attempts up to the configured c
               baseCommit: blockedState.baseCommit,
               finalCommit: null,
               commitSubject: null,
+              changedFiles: [],
               reviewRounds: blockedState.rounds.length,
               findings: blockedState.findings.length,
               archivedReviewPath: blockedState.archivedReviewPath,
@@ -1376,6 +1387,7 @@ test('flush sends derived-plan failure notification for blocked derived-plan rev
         baseCommit: 'abc123',
         finalCommit: null,
         commitSubject: null,
+        changedFiles: [],
         reviewRounds: 1,
         findings: 1,
         archivedReviewPath: null,
@@ -1415,6 +1427,7 @@ test('final squash advances to the next derived sub-scope without rolling up the
   const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
   assert.equal(subScope?.derivedFromParentScope, '5');
   assert.equal(subScope?.finalCommit, nextState.baseCommit);
+  assert.deepEqual(subScope?.changedFiles, ['scope.txt']);
   const directParent = await runGit(state.cwd, 'rev-parse', `${nextState.baseCommit}^`);
   assert.equal(directParent, state.baseCommit);
   const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${state.baseCommit}..${nextState.baseCommit}`);
@@ -1445,6 +1458,7 @@ test('computeNextScopeStateAfterSquash advances a non-terminal derived sub-scope
         baseCommit: 'base-1',
         finalCommit: 'final-1',
         commitSubject: 'derived scope work',
+        changedFiles: ['src/feature-a.ts'],
         reviewRounds: 1,
         findings: 0,
         archivedReviewPath: '/tmp/review-5.1.md',
@@ -1497,6 +1511,8 @@ test('final squash rolls the last derived sub-scope up into the parent scope and
   assert.equal(parentScope?.replacedByDerivedPlanPath, '/tmp/DERIVED_PLAN_SCOPE_5.md');
   assert.equal(parentScope?.finalCommit, subScope?.finalCommit);
   assert.equal(parentScope?.finalCommit, nextState.baseCommit);
+  assert.deepEqual(subScope?.changedFiles, ['scope.txt']);
+  assert.deepEqual(parentScope?.changedFiles, ['scope.txt']);
   const directParent = await runGit(state.cwd, 'rev-parse', `${nextState.baseCommit}^`);
   assert.equal(directParent, state.baseCommit);
   const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${state.baseCommit}..${nextState.baseCommit}`);
@@ -1525,6 +1541,7 @@ test('final squash preserves an empty derived scope checkpoint commit without at
   assert.equal(nextState.completedScopes.some((scope) => scope.number === '5.1'), true);
   const subScope = nextState.completedScopes.find((scope) => scope.number === '5.1');
   assert.equal(subScope?.finalCommit, createdCommit);
+  assert.deepEqual(subScope?.changedFiles, []);
   const directParent = await runGit(state.cwd, 'rev-parse', `${createdCommit}^`);
   assert.equal(directParent, baseCommit);
   const squashedCount = await runGit(state.cwd, 'rev-list', '--count', `${baseCommit}..${createdCommit}`);
@@ -1559,6 +1576,7 @@ test('computeNextScopeStateAfterSquash rolls up the last derived sub-scope into 
       baseCommit: 'base-1',
       finalCommit: 'final-2',
       commitSubject: 'derived scope work',
+      changedFiles: ['src/feature-a.ts'],
       reviewRounds: 1,
       findings: 0,
       archivedReviewPath: '/tmp/review-5.2.md',
@@ -1573,6 +1591,7 @@ test('computeNextScopeStateAfterSquash rolls up the last derived sub-scope into 
       baseCommit: 'base-1',
       finalCommit: 'final-2',
       commitSubject: 'derived scope work',
+      changedFiles: ['src/feature-a.ts'],
       reviewRounds: 1,
       findings: 0,
       archivedReviewPath: '/tmp/review-5.md',
@@ -1646,6 +1665,7 @@ test('review and progress reports expose derived-plan audit linkage', async () =
         baseCommit: 'abc123',
         finalCommit: null,
         commitSubject: null,
+        changedFiles: [],
         reviewRounds: 2,
         findings: 1,
         archivedReviewPath: null,
@@ -1669,4 +1689,489 @@ test('review and progress reports expose derived-plan audit linkage', async () =
   assert.match(reviewMarkdown, /Discarded WIP artifact: .*SCOPE_3_DISCARDED\.diff/);
   assert.match(progressMarkdown, /Parent scope: none/);
   assert.match(progressMarkdown, /Replaced by derived plan: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
+});
+
+test('recent accepted scope history for a parent objective keeps oldest-first order within the bounded window', async () => {
+  const { state } = await createResumeFixture({
+    currentScopeNumber: 9,
+    completedScopes: [
+      {
+        number: '3',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-3',
+        finalCommit: 'final-3',
+        commitSubject: 'scope 3',
+        changedFiles: ['src/3.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-3.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5.1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-1',
+        finalCommit: 'final-5-1',
+        commitSubject: 'scope 5.1',
+        changedFiles: ['src/shared.ts', 'src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.1.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5.2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-2',
+        finalCommit: 'final-5-2',
+        commitSubject: 'scope 5.2',
+        changedFiles: ['src/shared.ts', 'src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.2.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5.3',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-3',
+        finalCommit: 'final-5-3',
+        commitSubject: 'scope 5.3',
+        changedFiles: ['src/shared.ts', 'src/c.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.3.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5.4',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-4',
+        finalCommit: 'final-5-4',
+        commitSubject: 'scope 5.4',
+        changedFiles: ['src/shared.ts', 'src/d.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.4.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5.5',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-5',
+        finalCommit: 'final-5-5',
+        commitSubject: 'scope 5.5',
+        changedFiles: ['src/shared.ts', 'src/e.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.5.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5',
+        finalCommit: 'final-5',
+        commitSubject: 'rolled-up scope 5',
+        changedFiles: ['src/shared.ts', 'src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_5.md',
+      },
+      {
+        number: '5.6',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'blocked',
+        baseCommit: 'base-5-6',
+        finalCommit: null,
+        commitSubject: null,
+        changedFiles: ['src/shared.ts'],
+        reviewRounds: 1,
+        findings: 1,
+        archivedReviewPath: null,
+        blocker: 'blocked scope',
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const recentHistory = getRecentAcceptedScopesForParentObjective(state, '5');
+  assert.deepEqual(recentHistory.map((scope) => scope.number), ['5.1', '5.2', '5.3', '5.4', '5.5']);
+  assert.deepEqual(recentHistory.map((scope) => scope.changedFiles), [
+    ['src/shared.ts', 'src/a.ts'],
+    ['src/shared.ts', 'src/b.ts'],
+    ['src/shared.ts', 'src/c.ts'],
+    ['src/shared.ts', 'src/d.ts'],
+    ['src/shared.ts', 'src/e.ts'],
+  ]);
+  assert.deepEqual(
+    state.completedScopes.find((scope) => scope.number === '5')?.changedFiles,
+    ['src/shared.ts', 'src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts'],
+  );
+});
+
+test('state hydration backfills completed scope changed-files history for older sessions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-state-hydration-'));
+  const stateDir = join(root, '.neal');
+  const statePath = join(stateDir, 'session.json');
+  await mkdir(stateDir, { recursive: true });
+
+  await writeFile(
+    statePath,
+    JSON.stringify(
+      {
+        version: 1,
+        planDoc: '/tmp/PLAN.md',
+        cwd: '/tmp/repo',
+        runDir: '/tmp/repo/.neal/runs/test-run',
+        topLevelMode: 'execute',
+        ignoreLocalChanges: false,
+        agentConfig: getDefaultAgentConfig(),
+        progressJsonPath: '/tmp/repo/.neal/runs/test-run/plan-progress.json',
+        progressMarkdownPath: '/tmp/repo/.neal/runs/test-run/PLAN_PROGRESS.md',
+        consultMarkdownPath: '/tmp/repo/.neal/runs/test-run/CONSULT.md',
+        phase: 'coder_scope',
+        createdAt: '2026-04-17T00:00:00.000Z',
+        updatedAt: '2026-04-17T00:00:00.000Z',
+        reviewMarkdownPath: '/tmp/repo/.neal/runs/test-run/REVIEW.md',
+        archivedReviewPath: null,
+        baseCommit: 'abc123',
+        finalCommit: null,
+        coderSessionHandle: null,
+        reviewerSessionHandle: null,
+        executionShape: 'multi_scope',
+        currentScopeNumber: 2,
+        coderRetryCount: 0,
+        lastScopeMarker: null,
+        derivedPlanPath: null,
+        derivedFromScopeNumber: null,
+        derivedPlanStatus: null,
+        derivedScopeIndex: null,
+        splitPlanStartedNotified: false,
+        derivedPlanAcceptedNotified: false,
+        splitPlanBlockedNotified: false,
+        splitPlanCountForCurrentScope: 0,
+        derivedPlanDepth: 0,
+        maxDerivedPlanReviewRounds: 5,
+        rounds: [],
+        consultRounds: [],
+        findings: [],
+        createdCommits: [],
+        completedScopes: [
+          {
+            number: '1',
+            marker: 'AUTONOMY_SCOPE_DONE',
+            result: 'accepted',
+            baseCommit: 'abc123',
+            finalCommit: 'def456',
+            commitSubject: 'legacy scope',
+            reviewRounds: 1,
+            findings: 0,
+            archivedReviewPath: '/tmp/review.md',
+            blocker: null,
+            derivedFromParentScope: null,
+            replacedByDerivedPlanPath: null,
+          },
+        ],
+        maxRounds: 3,
+        maxConsultsPerScope: 4,
+        blockedFromPhase: null,
+        interactiveBlockedRecovery: null,
+        interactiveBlockedRecoveryHistory: [],
+        status: 'running',
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  const hydrated = await loadState(statePath);
+  assert.deepEqual(hydrated.completedScopes[0]?.changedFiles, []);
+  assert.equal(hydrated.currentScopeMeaningfulProgressVerdict, null);
+});
+
+test('recent accepted scope summary surfaces repeated hotspot churn for the parent objective', async () => {
+  const { state } = await createResumeFixture({
+    completedScopes: [
+      {
+        number: '5.2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-2',
+        finalCommit: 'final-5-2',
+        commitSubject: 'scope 5.2',
+        changedFiles: ['src/shared.ts', 'src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.2.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '5.3',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-5-3',
+        finalCommit: 'final-5-3',
+        commitSubject: 'scope 5.3',
+        changedFiles: ['src/shared.ts', 'src/c.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-5.3.md',
+        blocker: null,
+        derivedFromParentScope: '5',
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const summary = renderRecentAcceptedScopesSummary(state, '5');
+  assert.match(summary, /Accepted scope history for parent objective 5/);
+  assert.match(summary, /Scope 5\.2/);
+  assert.match(summary, /Scope 5\.3/);
+  assert.match(summary, /Touched-file concentration: src\/shared\.ts \(2\/2 scopes\), src\/b\.ts \(1\/2 scopes\), src\/c\.ts \(1\/2 scopes\)/);
+});
+
+test('execute review disposition only permits final squash for meaningful-progress accept', () => {
+  assert.deepEqual(
+    resolveExecuteReviewDisposition({
+      hasBlockingFindings: false,
+      hasOpenNonBlockingFindings: false,
+      reachedMaxRounds: false,
+      shouldBlockForConvergence: false,
+      meaningfulProgressAction: 'accept',
+    }),
+    {
+      phase: 'final_squash',
+      status: 'running',
+      blockedFromPhase: null,
+    },
+  );
+
+  assert.deepEqual(
+    resolveExecuteReviewDisposition({
+      hasBlockingFindings: false,
+      hasOpenNonBlockingFindings: false,
+      reachedMaxRounds: false,
+      shouldBlockForConvergence: false,
+      meaningfulProgressAction: 'block_for_operator',
+    }),
+    {
+      phase: 'blocked',
+      status: 'blocked',
+      blockedFromPhase: 'reviewer_scope',
+    },
+  );
+
+  assert.deepEqual(
+    resolveExecuteReviewDisposition({
+      hasBlockingFindings: false,
+      hasOpenNonBlockingFindings: true,
+      reachedMaxRounds: false,
+      shouldBlockForConvergence: false,
+      meaningfulProgressAction: 'block_for_operator',
+    }),
+    {
+      phase: 'blocked',
+      status: 'blocked',
+      blockedFromPhase: 'reviewer_scope',
+    },
+  );
+
+  assert.deepEqual(
+    resolveExecuteReviewDisposition({
+      hasBlockingFindings: false,
+      hasOpenNonBlockingFindings: false,
+      reachedMaxRounds: false,
+      shouldBlockForConvergence: false,
+      meaningfulProgressAction: 'replace_plan',
+    }),
+    {
+      phase: 'blocked',
+      status: 'blocked',
+      blockedFromPhase: 'reviewer_scope',
+    },
+  );
+
+  assert.deepEqual(
+    resolveExecuteReviewDisposition({
+      hasBlockingFindings: true,
+      hasOpenNonBlockingFindings: false,
+      reachedMaxRounds: false,
+      shouldBlockForConvergence: false,
+      meaningfulProgressAction: 'replace_plan',
+    }),
+    {
+      phase: 'coder_response',
+      status: 'running',
+      blockedFromPhase: null,
+    },
+  );
+});
+
+test('execute review block reason names the parent objective for meaningful-progress operator guidance', () => {
+  const reason = getExecuteReviewBlockReason({
+    cwd: process.cwd(),
+    reopenedCanonical: null,
+    stalledBlockingCount: false,
+    reachedMaxRounds: false,
+    maxRounds: 3,
+    meaningfulProgressAction: 'block_for_operator',
+    meaningfulProgressRationale: 'The recent scopes are locally correct but no longer converging on the parent objective.',
+    parentScopeLabel: '4',
+  });
+
+  assert.equal(
+    reason,
+    'meaningful_progress: reviewer requested operator guidance before accepting parent objective 4. ' +
+      'The recent scopes are locally correct but no longer converging on the parent objective.',
+  );
+});
+
+test('execute review block reason directs replace-plan cases into diagnosis-friendly recovery', () => {
+  const reason = getExecuteReviewBlockReason({
+    cwd: process.cwd(),
+    reopenedCanonical: null,
+    stalledBlockingCount: false,
+    reachedMaxRounds: false,
+    maxRounds: 3,
+    meaningfulProgressAction: 'replace_plan',
+    meaningfulProgressRationale: 'The current scope keeps revisiting the same hotspot and should be replaced.',
+    parentScopeLabel: '4',
+  });
+
+  assert.match(
+    reason ?? '',
+    /meaningful_progress: reviewer requested replacing the current scope for parent objective 4 rather than retrying it\./,
+  );
+  assert.match(reason ?? '', /The current scope keeps revisiting the same hotspot and should be replaced\./);
+  assert.match(reason ?? '', /One available next step: neal --diagnose/);
+});
+
+test('execute review block reason preserves convergence blockers ahead of meaningful-progress guidance', () => {
+  const reason = getExecuteReviewBlockReason({
+    cwd: process.cwd(),
+    reopenedCanonical: 'C7',
+    stalledBlockingCount: false,
+    reachedMaxRounds: false,
+    maxRounds: 3,
+    meaningfulProgressAction: 'replace_plan',
+    meaningfulProgressRationale: 'The scope shape is wrong.',
+    parentScopeLabel: '2',
+  });
+
+  assert.equal(reason, 'review_stuck: blocking finding C7 reopened across multiple reviewer rounds');
+});
+
+test('execute scope progress payload parses and strips cleanly from split-plan responses', () => {
+  const derivedPlan = [
+    '## Execution Shape',
+    '',
+    'executionShape: multi_scope',
+    '',
+    '## Execution Queue',
+    '',
+    '### Scope 1: Replace the current scope',
+    '- Goal: Narrow the work.',
+    '- Verification: `pnpm typecheck`',
+    '- Success Condition: The replacement scope is executable.',
+  ].join('\n');
+  const response = [
+    EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
+    JSON.stringify({
+      milestoneTargeted: 'Add the execute-scope progress payload contract.',
+      newEvidence: 'The parser and state wiring are implemented.',
+      whyNotRedundant: 'This replaces the prior marker-only contract with parseable state.',
+      nextStepUnlocked: 'Reviewer prompts can consume the persisted justification next.',
+    }),
+    EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
+    '',
+    derivedPlan,
+    '',
+    'AUTONOMY_SPLIT_PLAN',
+  ].join('\n');
+
+  assert.deepEqual(parseExecuteScopeProgressPayload(response), {
+    milestoneTargeted: 'Add the execute-scope progress payload contract.',
+    newEvidence: 'The parser and state wiring are implemented.',
+    whyNotRedundant: 'This replaces the prior marker-only contract with parseable state.',
+    nextStepUnlocked: 'Reviewer prompts can consume the persisted justification next.',
+  });
+  assert.equal(stripExecuteScopeProgressPayload(response), `${derivedPlan}\n\nAUTONOMY_SPLIT_PLAN`);
+});
+
+test('execute scope progress payload parser fails fast on missing required fields', () => {
+  const malformed = [
+    EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
+    JSON.stringify({
+      milestoneTargeted: 'Carry structured justification.',
+      newEvidence: '',
+      whyNotRedundant: 'The old contract was freeform only.',
+      nextStepUnlocked: 'Reviewer integration can use this next.',
+    }),
+    EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
+    'AUTONOMY_SCOPE_DONE',
+  ].join('\n');
+
+  assert.throws(() => parseExecuteScopeProgressPayload(malformed), /empty or missing newEvidence field/);
+});
+
+test('state round-trip preserves current execute-scope progress justification', async () => {
+  const justification: ExecuteScopeProgressJustification = {
+    milestoneTargeted: 'Scope 2 payload contract',
+    newEvidence: 'The response now carries parseable JSON.',
+    whyNotRedundant: 'The marker alone cannot support the progress gate.',
+    nextStepUnlocked: 'Scope 3 can pass reviewer context deterministically.',
+  };
+  const { cwd, statePath } = await createResumeFixture({
+    currentScopeNumber: 2,
+    phase: 'reviewer_scope',
+    status: 'running',
+    currentScopeProgressJustification: justification,
+  });
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.cwd, cwd);
+  assert.deepEqual(reloadedState.currentScopeProgressJustification, justification);
+});
+
+test('state round-trip preserves current reviewer meaningful-progress verdict', async () => {
+  const verdict: ReviewerMeaningfulProgressVerdict = {
+    action: 'replace_plan',
+    rationale: 'Recent accepted scopes keep returning to src/shared.ts without moving the parent objective forward.',
+  };
+  const { statePath } = await createResumeFixture({
+    currentScopeNumber: 3,
+    phase: 'blocked',
+    status: 'blocked',
+    currentScopeMeaningfulProgressVerdict: verdict,
+  });
+
+  const reloadedState = await loadState(statePath);
+  assert.deepEqual(reloadedState.currentScopeMeaningfulProgressVerdict, verdict);
 });

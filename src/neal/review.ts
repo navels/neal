@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { getCurrentScopeLabel, getExecutionPlanPath } from './scopes.js';
+import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, renderRecentAcceptedScopesSummary } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 function getDiscardedDiffPath(state: OrchestrationState) {
@@ -15,6 +15,7 @@ function getDiscardedDiffPath(state: OrchestrationState) {
 export function renderReviewMarkdown(state: OrchestrationState) {
   const reviewTarget = state.derivedPlanPath ?? getExecutionPlanPath(state);
   const lastReviewedPlanPath = state.rounds.at(-1)?.reviewedPlanPath ?? null;
+  const parentScopeLabel = state.topLevelMode === 'execute' ? getParentScopeLabel(state) : null;
   const lines = [
     '# Review Session',
     '',
@@ -33,9 +34,42 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     `- Derived plan status: ${state.derivedPlanStatus ?? 'none'}`,
     `- Derived from scope: ${state.derivedFromScopeNumber ?? 'none'}`,
     `- Discarded WIP artifact: ${getDiscardedDiffPath(state) ?? 'none'}`,
-    '',
-    '## Review Rounds',
   ];
+
+  if (state.topLevelMode === 'execute') {
+    lines.push(
+      '',
+      '## Meaningful Progress',
+      `- Active parent objective: ${parentScopeLabel ?? 'none'}`,
+    );
+
+    if (state.currentScopeProgressJustification) {
+      lines.push(
+        `- Coder milestone: ${state.currentScopeProgressJustification.milestoneTargeted}`,
+        `- New evidence: ${state.currentScopeProgressJustification.newEvidence}`,
+        `- Why not redundant: ${state.currentScopeProgressJustification.whyNotRedundant}`,
+        `- Next step unlocked: ${state.currentScopeProgressJustification.nextStepUnlocked}`,
+      );
+    } else {
+      lines.push('- Coder justification: pending');
+    }
+
+    if (state.currentScopeMeaningfulProgressVerdict) {
+      lines.push(
+        `- Reviewer action: ${state.currentScopeMeaningfulProgressVerdict.action}`,
+        `- Reviewer rationale: ${state.currentScopeMeaningfulProgressVerdict.rationale}`,
+      );
+    } else {
+      lines.push('- Reviewer action: pending', '- Reviewer rationale: pending');
+    }
+
+    lines.push('', '### Recent Accepted Scope History');
+    for (const line of renderRecentAcceptedScopesSummary(state, parentScopeLabel ?? String(state.currentScopeNumber)).split('\n')) {
+      lines.push(line);
+    }
+  }
+
+  lines.push('', '## Review Rounds');
 
   if (state.rounds.length === 0) {
     lines.push('', 'No review rounds yet.');

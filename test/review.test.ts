@@ -4,10 +4,12 @@ import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { buildReviewerPrompt } from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { renderConsultMarkdown } from '../src/neal/consult.js';
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
-import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
+import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/neal/progress.js';
+import { renderReviewMarkdown } from '../src/neal/review.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
 import type { OrchestrationState } from '../src/neal/types.js';
 
@@ -113,4 +115,301 @@ test('interactive blocked recovery notification is distinct from a terminal bloc
   const notifyLog = await readFile(notifyLogPath, 'utf8');
   assert.match(notifyLog, /interactive blocked recovery for scope 3: Need operator guidance/);
   assert.doesNotMatch(notifyLog, /: blocked:/);
+});
+
+test('execute reviewer prompt includes coder justification and recent parent-objective history', () => {
+  const prompt = buildReviewerPrompt({
+    planDoc: '/tmp/PLAN.md',
+    baseCommit: 'base123',
+    headCommit: 'head456',
+    commits: ['head456 add gate logic'],
+    previousHeadCommit: null,
+    diffStat: ' src/neal/orchestrator.ts | 10 +++++-----',
+    changedFiles: ['src/neal/orchestrator.ts'],
+    round: 2,
+    reviewMarkdownPath: '/tmp/REVIEW.md',
+    parentScopeLabel: '5',
+    progressJustification: {
+      milestoneTargeted: 'Scope 3 reviewer verdict contract',
+      newEvidence: 'The execute reviewer schema now includes a meaningful-progress action.',
+      whyNotRedundant: 'The old review pass could only judge local correctness.',
+      nextStepUnlocked: 'Neal can block acceptance when convergence fails.',
+    },
+    recentHistorySummary: 'Accepted scope history for parent objective 5...\nTouched-file concentration: src/shared.ts (3/3 scopes)',
+  });
+
+  assert.match(prompt, /active parent objective.*scope 5/i);
+  assert.match(prompt, /meaningfulProgressAction/);
+  assert.match(prompt, /Scope 3 reviewer verdict contract/);
+  assert.match(prompt, /Touched-file concentration: src\/shared\.ts \(3\/3 scopes\)/);
+});
+
+test('progress artifact renders current meaningful-progress context and bounded recent history', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 8,
+    currentScopeProgressJustification: {
+      milestoneTargeted: 'Audit trail for meaningful-progress gating',
+      newEvidence: 'Progress markdown now shows the current gate inputs.',
+      whyNotRedundant: 'The prior artifact hid reviewer convergence context.',
+      nextStepUnlocked: 'Operators can inspect scope churn without reconstructing session state.',
+    },
+    currentScopeMeaningfulProgressVerdict: {
+      action: 'block_for_operator',
+      rationale: 'The recent scopes revisit the same hotspot without advancing the parent objective.',
+    },
+    completedScopes: [
+      {
+        number: '8.1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-8-1',
+        finalCommit: 'final-8-1',
+        commitSubject: 'scope 8.1',
+        changedFiles: ['src/shared.ts', 'src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-8.1.md',
+        blocker: null,
+        derivedFromParentScope: '8',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '8.2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-8-2',
+        finalCommit: 'final-8-2',
+        commitSubject: 'scope 8.2',
+        changedFiles: ['src/shared.ts', 'src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-8.2.md',
+        blocker: null,
+        derivedFromParentScope: '8',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '8.3',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-8-3',
+        finalCommit: 'final-8-3',
+        commitSubject: 'scope 8.3',
+        changedFiles: ['src/shared.ts', 'src/c.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-8.3.md',
+        blocker: null,
+        derivedFromParentScope: '8',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '8.4',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-8-4',
+        finalCommit: 'final-8-4',
+        commitSubject: 'scope 8.4',
+        changedFiles: ['src/shared.ts', 'src/d.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-8.4.md',
+        blocker: null,
+        derivedFromParentScope: '8',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '8.5',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-8-5',
+        finalCommit: 'final-8-5',
+        commitSubject: 'scope 8.5',
+        changedFiles: ['src/shared.ts', 'src/e.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-8.5.md',
+        blocker: null,
+        derivedFromParentScope: '8',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '8.6',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-8-6',
+        finalCommit: 'final-8-6',
+        commitSubject: 'scope 8.6',
+        changedFiles: ['src/shared.ts', 'src/f.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-8.6.md',
+        blocker: null,
+        derivedFromParentScope: '8',
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const markdown = renderPlanProgressMarkdown(state);
+  const historySection = markdown.split('## Completed Scopes')[0] ?? markdown;
+
+  assert.match(markdown, /## Meaningful Progress/);
+  assert.match(markdown, /- Active parent objective: 8/);
+  assert.match(markdown, /- Coder milestone: Audit trail for meaningful-progress gating/);
+  assert.match(markdown, /- Reviewer action: block_for_operator/);
+  assert.match(markdown, /- Reviewer rationale: The recent scopes revisit the same hotspot without advancing the parent objective\./);
+  assert.match(historySection, /Accepted scope history for parent objective 8 \(oldest to newest, last 5 max\):/);
+  assert.doesNotMatch(historySection, /Scope 8\.1/);
+  assert.match(historySection, /Scope 8\.2/);
+  assert.match(historySection, /Scope 8\.6/);
+  assert.match(historySection, /Touched-file concentration: src\/shared\.ts \(5\/5 scopes\)/);
+});
+
+test('plan progress json mirrors meaningful-progress context for external tooling', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 4,
+    currentScopeProgressJustification: {
+      milestoneTargeted: 'JSON audit parity',
+      newEvidence: 'plan-progress.json now carries the gate context',
+      whyNotRedundant: 'External tooling should not have to scrape markdown',
+      nextStepUnlocked: 'Operators can inspect machine-readable progress state',
+    },
+    currentScopeMeaningfulProgressVerdict: {
+      action: 'replace_plan',
+      rationale: 'The current objective needs replacement rather than another retry.',
+    },
+    completedScopes: [
+      {
+        number: '4.1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-4-1',
+        finalCommit: 'final-4-1',
+        commitSubject: 'scope 4.1',
+        changedFiles: ['src/shared.ts', 'src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-4.1.md',
+        blocker: null,
+        derivedFromParentScope: '4',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '4.2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-4-2',
+        finalCommit: 'final-4-2',
+        commitSubject: 'scope 4.2',
+        changedFiles: ['src/shared.ts', 'src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-4.2.md',
+        blocker: null,
+        derivedFromParentScope: '4',
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  await writePlanProgressArtifacts(state);
+  const progress = JSON.parse(await readFile(state.progressJsonPath, 'utf8')) as {
+    meaningfulProgress: {
+      parentObjective: string;
+      currentScopeProgressJustification: { milestoneTargeted: string };
+      currentScopeMeaningfulProgressVerdict: { action: string };
+      recentAcceptedScopeHistory: Array<{ number: string }>;
+    };
+  };
+
+  assert.equal(progress.meaningfulProgress.parentObjective, '4');
+  assert.equal(progress.meaningfulProgress.currentScopeProgressJustification.milestoneTargeted, 'JSON audit parity');
+  assert.equal(progress.meaningfulProgress.currentScopeMeaningfulProgressVerdict.action, 'replace_plan');
+  assert.deepEqual(
+    progress.meaningfulProgress.recentAcceptedScopeHistory.map((scope) => scope.number),
+    ['4.1', '4.2'],
+  );
+});
+
+test('review artifact renders derived-parent meaningful-progress history and verdict', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 6,
+    phase: 'reviewer_scope',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_6.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 6,
+    derivedScopeIndex: 3,
+    currentScopeProgressJustification: {
+      milestoneTargeted: 'Derived scope churn detection',
+      newEvidence: 'The review artifact now shows original-parent history for derived execution.',
+      whyNotRedundant: 'Derived sub-scopes should not hide the parent convergence story.',
+      nextStepUnlocked: 'Reviewers can judge whether the sub-scope still advances parent scope 6.',
+    },
+    currentScopeMeaningfulProgressVerdict: {
+      action: 'replace_plan',
+      rationale: 'The sub-scope keeps revisiting the same parent hotspot and should be replaced.',
+    },
+    completedScopes: [
+      {
+        number: '6.1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-6-1',
+        finalCommit: 'final-6-1',
+        commitSubject: 'scope 6.1',
+        changedFiles: ['src/shared.ts', 'src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-6.1.md',
+        blocker: null,
+        derivedFromParentScope: '6',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '6.2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-6-2',
+        finalCommit: 'final-6-2',
+        commitSubject: 'scope 6.2',
+        changedFiles: ['src/shared.ts', 'src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-6.2.md',
+        blocker: null,
+        derivedFromParentScope: '6',
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '6',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-6',
+        finalCommit: 'final-6',
+        commitSubject: 'rolled-up scope 6',
+        changedFiles: ['src/shared.ts', 'src/b.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-6.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_6.md',
+      },
+    ],
+  });
+
+  const markdown = renderReviewMarkdown(state);
+
+  assert.match(markdown, /## Meaningful Progress/);
+  assert.match(markdown, /- Active parent objective: 6/);
+  assert.match(markdown, /- Coder milestone: Derived scope churn detection/);
+  assert.match(markdown, /- Reviewer action: replace_plan/);
+  assert.match(markdown, /- Reviewer rationale: The sub-scope keeps revisiting the same parent hotspot and should be replaced\./);
+  assert.match(markdown, /### Recent Accepted Scope History/);
+  assert.match(markdown, /Accepted scope history for parent objective 6 \(oldest to newest, last 5 max\):/);
+  assert.match(markdown, /Scope 6\.1/);
+  assert.match(markdown, /Scope 6\.2/);
+  assert.doesNotMatch(markdown, /Scope 6\n/);
+  assert.match(markdown, /Touched-file concentration: src\/shared\.ts \(2\/2 scopes\)/);
 });

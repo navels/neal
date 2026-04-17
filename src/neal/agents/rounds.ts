@@ -7,7 +7,9 @@ import { getCoderAdapter, getStructuredAdvisorAdapter } from '../providers/regis
 import type {
   AgentRoleConfig,
   CoderConsultRequest,
+  ExecuteScopeProgressJustification,
   ReviewFinding,
+  ReviewerMeaningfulProgressVerdict,
   ReviewerConsultResponse,
   ScopeMarker,
 } from '../types.js';
@@ -38,6 +40,8 @@ import {
   parseCoderBlockedRecoveryDispositionPayload,
   parseCoderConsultDispositionPayload,
   parseCoderResponsePayload,
+  parseExecuteScopeProgressPayload,
+  stripExecuteScopeProgressPayload,
   type CoderBlockedRecoveryDispositionPayload,
   type CoderConsultDispositionPayload,
   type CoderResponsePayload,
@@ -152,8 +156,16 @@ export async function runReviewerRound(args: {
   changedFiles: string[];
   round: number;
   reviewMarkdownPath: string;
+  parentScopeLabel: string;
+  progressJustification: ExecuteScopeProgressJustification;
+  recentHistorySummary: string;
   logger?: RunLogger;
-}): Promise<{ sessionHandle: string | null; summary: string; findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[] }> {
+}): Promise<{
+  sessionHandle: string | null;
+  summary: string;
+  findings: Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>[];
+  meaningfulProgress: ReviewerMeaningfulProgressVerdict;
+}> {
   void args.diff;
   const { sessionHandle, structured } = await runReviewerStructuredRound<ReviewerPayload>({
     reviewer: args.reviewer,
@@ -176,6 +188,10 @@ export async function runReviewerRound(args: {
       requiredAction: finding.requiredAction,
       roundSummary: structured.summary,
     })),
+    meaningfulProgress: {
+      action: structured.meaningfulProgressAction,
+      rationale: structured.meaningfulProgressRationale,
+    },
   };
 }
 
@@ -251,7 +267,13 @@ export async function runCoderScopeRound(args: {
   sessionHandle?: string | null;
   onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
   logger?: RunLogger;
-}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null }> {
+}): Promise<{
+  sessionHandle: string | null;
+  finalResponse: string;
+  responseWithoutProgressPayload: string;
+  marker: string | null;
+  progressJustification: ExecuteScopeProgressJustification;
+}> {
   const coder = getCoderAdapter(args.coder);
   const progressText = await safeReadText(args.progressMarkdownPath);
   let finalResponse: string;
@@ -269,9 +291,11 @@ export async function runCoderScopeRound(args: {
   } catch (error) {
     throw translateCoderProviderError(error);
   }
-  const marker = extractMarker(finalResponse);
+  const progressJustification = parseExecuteScopeProgressPayload(finalResponse);
+  const responseWithoutProgressPayload = stripExecuteScopeProgressPayload(finalResponse);
+  const marker = extractMarker(responseWithoutProgressPayload);
   if (marker === AUTONOMY_SPLIT_PLAN) {
-    const derivedPlan = finalResponse
+    const derivedPlan = responseWithoutProgressPayload
       .split(/\r?\n/)
       .filter((line) => line.trim() !== AUTONOMY_SPLIT_PLAN)
       .join('\n')
@@ -284,7 +308,9 @@ export async function runCoderScopeRound(args: {
   return {
     sessionHandle,
     finalResponse,
+    responseWithoutProgressPayload,
     marker,
+    progressJustification,
   };
 }
 

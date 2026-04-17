@@ -66,6 +66,20 @@ export type ReviewRound = {
   findings: string[];
 };
 
+export type ExecuteScopeProgressJustification = {
+  milestoneTargeted: string;
+  newEvidence: string;
+  whyNotRedundant: string;
+  nextStepUnlocked: string;
+};
+
+export type ReviewerMeaningfulProgressAction = 'accept' | 'block_for_operator' | 'replace_plan';
+
+export type ReviewerMeaningfulProgressVerdict = {
+  action: ReviewerMeaningfulProgressAction;
+  rationale: string;
+};
+
 export type CoderConsultRequest = {
   summary: string;
   blocker: string;
@@ -164,6 +178,7 @@ export type ProgressScope = {
   baseCommit: string | null;
   finalCommit: string | null;
   commitSubject: string | null;
+  changedFiles: string[];
   reviewRounds: number;
   findings: number;
   archivedReviewPath: string | null;
@@ -196,6 +211,8 @@ export type OrchestrationState = {
   currentScopeNumber: number;
   coderRetryCount: number;
   lastScopeMarker: ScopeMarker | null;
+  currentScopeProgressJustification: ExecuteScopeProgressJustification | null;
+  currentScopeMeaningfulProgressVerdict: ReviewerMeaningfulProgressVerdict | null;
   derivedPlanPath: string | null;
   derivedFromScopeNumber: number | null;
   derivedPlanStatus: 'pending_review' | 'accepted' | 'rejected' | null;

@@ -5,6 +5,7 @@ type AppendCompletedScopeDetails = {
   scopeLabel?: string;
   finalCommit: string | null;
   commitSubject: string | null;
+  changedFiles?: string[];
   archivedReviewPath: string | null;
   blocker: string | null;
   marker?: ScopeMarker;
@@ -28,6 +29,7 @@ export function appendCompletedScope(
       baseCommit: state.baseCommit,
       finalCommit: details.finalCommit,
       commitSubject: details.commitSubject,
+      changedFiles: [...(details.changedFiles ?? [])],
       reviewRounds: state.rounds.length,
       findings: state.findings.length,
       archivedReviewPath: details.archivedReviewPath,
@@ -80,6 +82,8 @@ export function adoptAcceptedDerivedPlan(state: OrchestrationState) {
     derivedScopeIndex: state.derivedScopeIndex ?? 1,
     coderSessionHandle: null,
     coderRetryCount: 0,
+    currentScopeProgressJustification: null,
+    currentScopeMeaningfulProgressVerdict: null,
     rounds: [],
     consultRounds: [],
     findings: [],
@@ -115,6 +119,8 @@ export function computeNextScopeStateAfterSquash({
       coderSessionHandle: null,
       currentScopeNumber: state.currentScopeNumber + 1,
       lastScopeMarker: null,
+      currentScopeProgressJustification: null,
+      currentScopeMeaningfulProgressVerdict: null,
       derivedPlanPath: null,
       derivedFromScopeNumber: null,
       derivedPlanStatus: null,
@@ -141,6 +147,8 @@ export function computeNextScopeStateAfterSquash({
       finalCommit: null,
       coderSessionHandle: null,
       lastScopeMarker: null,
+      currentScopeProgressJustification: null,
+      currentScopeMeaningfulProgressVerdict: null,
       derivedScopeIndex: (state.derivedScopeIndex ?? 1) + 1,
       splitPlanStartedNotified: false,
       derivedPlanAcceptedNotified: false,
@@ -164,6 +172,8 @@ export function computeNextScopeStateAfterSquash({
       coderSessionHandle: null,
       currentScopeNumber: state.currentScopeNumber + 1,
       lastScopeMarker: null,
+      currentScopeProgressJustification: null,
+      currentScopeMeaningfulProgressVerdict: null,
       derivedPlanPath: null,
       derivedFromScopeNumber: null,
       derivedPlanStatus: null,
@@ -188,6 +198,8 @@ export function computeNextScopeStateAfterSquash({
     finalCommit,
     archivedReviewPath,
     completedScopes,
+    currentScopeProgressJustification: null,
+    currentScopeMeaningfulProgressVerdict: null,
     phase: 'done',
     status: 'done',
   };
@@ -197,6 +209,7 @@ export function appendDerivedSubScopeAndParentCompletion(args: {
   state: OrchestrationState;
   finalCommit: string;
   finalSubject: string;
+  changedFiles: string[];
   archivedReviewPath: string;
 }) {
   const derivedExecution = isExecutingDerivedPlan(args.state);
@@ -205,11 +218,21 @@ export function appendDerivedSubScopeAndParentCompletion(args: {
     scopeLabel: currentScopeLabel,
     finalCommit: args.finalCommit,
     commitSubject: args.finalSubject,
+    changedFiles: args.changedFiles,
     archivedReviewPath: args.archivedReviewPath,
     blocker: null,
     derivedFromParentScope: derivedExecution ? getParentScopeLabel(args.state) : null,
   });
   const derivedPlanCompleted = derivedExecution && args.state.lastScopeMarker === 'AUTONOMY_DONE';
+  const parentScopeChangedFiles = derivedPlanCompleted
+    ? [
+        ...new Set(
+            subScopeCompletedScopes
+              .filter((scope) => scope.result === 'accepted' && scope.derivedFromParentScope === getParentScopeLabel(args.state))
+              .flatMap((scope) => scope.changedFiles),
+          ),
+      ]
+    : args.changedFiles;
   return derivedPlanCompleted
     ? appendCompletedScope(
         {
@@ -221,6 +244,7 @@ export function appendDerivedSubScopeAndParentCompletion(args: {
           scopeLabel: getParentScopeLabel(args.state),
           finalCommit: args.finalCommit,
           commitSubject: args.finalSubject,
+          changedFiles: parentScopeChangedFiles,
           archivedReviewPath: args.archivedReviewPath,
           blocker: null,
           marker: 'AUTONOMY_SCOPE_DONE',

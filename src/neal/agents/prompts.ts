@@ -1,4 +1,14 @@
-import type { CoderConsultRequest, ExecutionShape, ReviewFinding, ReviewerConsultResponse } from '../types.js';
+import {
+  EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
+  EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
+} from './schemas.js';
+import type {
+  CoderConsultRequest,
+  ExecuteScopeProgressJustification,
+  ExecutionShape,
+  ReviewFinding,
+  ReviewerConsultResponse,
+} from '../types.js';
 
 export const AUTONOMY_SCOPE_DONE = 'AUTONOMY_SCOPE_DONE';
 export const AUTONOMY_CHUNK_DONE = 'AUTONOMY_CHUNK_DONE';
@@ -81,6 +91,10 @@ export function buildScopePrompt(planDoc: string, progressText: string) {
     `Use ${AUTONOMY_SPLIT_PLAN} only when the current scope result should be discarded and replaced by a safer derived plan for the same target.`,
     `When you return ${AUTONOMY_SPLIT_PLAN}, include a derived plan markdown artifact before the final marker.`,
     'The derived plan must use the same Neal-executable contract as a top-level plan. Any derived-plan-specific sections are optional additive context only; they must not replace or rename the canonical machine-consumed sections.',
+    `Include exactly one progress-justification JSON payload between ${EXECUTE_SCOPE_PROGRESS_PAYLOAD_START} and ${EXECUTE_SCOPE_PROGRESS_PAYLOAD_END}.`,
+    'That JSON payload must contain non-empty string fields for `milestoneTargeted`, `newEvidence`, `whyNotRedundant`, and `nextStepUnlocked`.',
+    'Keep any prose explanation or derived plan body outside that payload block.',
+    'The final line of your response must still be the terminal marker.',
     ...getCanonicalPlanContractLines(),
     'Verify the relevant work before you finish.',
     'Create real git commit(s) for completed work.',
@@ -108,6 +122,9 @@ export function buildReviewerPrompt(args: {
   changedFiles: string[];
   round: number;
   reviewMarkdownPath: string;
+  parentScopeLabel: string;
+  progressJustification: ExecuteScopeProgressJustification;
+  recentHistorySummary: string;
 }) {
   const changedFilesText = args.changedFiles.length > 0 ? args.changedFiles.join('\n') : '(no changed files)';
   const commitsText = args.commits.length > 0 ? args.commits.join('\n') : '(no commits recorded)';
@@ -131,6 +148,18 @@ export function buildReviewerPrompt(args: {
     args.previousHeadCommit
       ? `Previous reviewer head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
       : 'This is the first reviewer round for this scope.',
+    `The active parent objective for meaningful-progress evaluation is scope ${args.parentScopeLabel}.`,
+    'You are the authority for meaningful-progress gating during this execute review pass.',
+    'Set `meaningfulProgressAction` to `accept` only when this scope materially advances the active parent objective.',
+    'Set `meaningfulProgressAction` to `block_for_operator` when the code may be locally correct but the run needs operator guidance before more work on this objective.',
+    'Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.',
+    'Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history.',
+    '',
+    'Coder progress justification for this scope:',
+    JSON.stringify(args.progressJustification, null, 2),
+    '',
+    'Recent accepted scope history for this parent objective:',
+    args.recentHistorySummary,
     '',
     'Commits in scope:',
     commitsText,

@@ -5,10 +5,12 @@ import type {
   AgentConfig,
   AgentProvider,
   ConsultRound,
+  ExecuteScopeProgressJustification,
   InteractiveBlockedRecoveryRecord,
   InteractiveBlockedRecoveryState,
   OrchestrationState,
   OrchestratorInit,
+  ReviewerMeaningfulProgressVerdict,
   ReviewFinding,
   ReviewRound,
 } from './types.js';
@@ -92,6 +94,8 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     currentScopeNumber: 1,
     coderRetryCount: 0,
     lastScopeMarker: null,
+    currentScopeProgressJustification: null,
+    currentScopeMeaningfulProgressVerdict: null,
     derivedPlanPath: null,
     derivedFromScopeNumber: null,
     derivedPlanStatus: null,
@@ -130,6 +134,48 @@ export async function saveState(path: string, state: OrchestrationState): Promis
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function hydrateExecuteScopeProgressJustification(value: unknown): ExecuteScopeProgressJustification | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const justification = value as Partial<ExecuteScopeProgressJustification>;
+  if (
+    typeof justification.milestoneTargeted !== 'string' ||
+    typeof justification.newEvidence !== 'string' ||
+    typeof justification.whyNotRedundant !== 'string' ||
+    typeof justification.nextStepUnlocked !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    milestoneTargeted: justification.milestoneTargeted,
+    newEvidence: justification.newEvidence,
+    whyNotRedundant: justification.whyNotRedundant,
+    nextStepUnlocked: justification.nextStepUnlocked,
+  };
+}
+
+function hydrateReviewerMeaningfulProgressVerdict(value: unknown): ReviewerMeaningfulProgressVerdict | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const verdict = value as Partial<ReviewerMeaningfulProgressVerdict>;
+  if (
+    (verdict.action !== 'accept' && verdict.action !== 'block_for_operator' && verdict.action !== 'replace_plan') ||
+    typeof verdict.rationale !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    action: verdict.action,
+    rationale: verdict.rationale,
+  };
 }
 
 function validateState(value: unknown): asserts value is OrchestrationState {
@@ -431,6 +477,9 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
     baseCommit: typeof scope.baseCommit === 'string' ? scope.baseCommit : null,
     finalCommit: typeof scope.finalCommit === 'string' ? scope.finalCommit : null,
     commitSubject: typeof scope.commitSubject === 'string' ? scope.commitSubject : null,
+    changedFiles: isStringArray((scope as { changedFiles?: unknown }).changedFiles)
+      ? (scope as { changedFiles: string[] }).changedFiles
+      : [],
     reviewRounds: typeof scope.reviewRounds === 'number' ? scope.reviewRounds : 0,
     findings: typeof scope.findings === 'number' ? scope.findings : 0,
     archivedReviewPath: typeof scope.archivedReviewPath === 'string' ? scope.archivedReviewPath : null,
@@ -479,6 +528,12 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
       typeof (parsed as { coderRetryCount?: unknown }).coderRetryCount === 'number'
         ? (parsed as { coderRetryCount: number }).coderRetryCount
         : 0,
+    currentScopeProgressJustification: hydrateExecuteScopeProgressJustification(
+      (parsed as { currentScopeProgressJustification?: unknown }).currentScopeProgressJustification,
+    ),
+    currentScopeMeaningfulProgressVerdict: hydrateReviewerMeaningfulProgressVerdict(
+      (parsed as { currentScopeMeaningfulProgressVerdict?: unknown }).currentScopeMeaningfulProgressVerdict,
+    ),
     consultRounds: Array.isArray(parsed.consultRounds) ? parsed.consultRounds.map(hydrateConsultRound) : [],
     lastScopeMarker:
       (parsed as { lastScopeMarker?: unknown }).lastScopeMarker === 'AUTONOMY_SCOPE_DONE' ||

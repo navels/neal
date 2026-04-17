@@ -65,6 +65,13 @@ test('derived-plan prompts require the same canonical Neal-executable contract',
     assert.doesNotMatch(prompt, /Ordered Derived Scopes/);
   }
 
+  assert.match(scopePrompt, /Include exactly one progress-justification JSON payload/);
+  assert.match(scopePrompt, /milestoneTargeted/);
+  assert.match(scopePrompt, /newEvidence/);
+  assert.match(scopePrompt, /whyNotRedundant/);
+  assert.match(scopePrompt, /nextStepUnlocked/);
+  assert.match(scopePrompt, /The final line of your response must still be the terminal marker/);
+
   assert.match(reviewerPrompt, /same canonical `## Execution Shape` \/ `## Execution Queue` contract as a top-level plan/);
   assert.match(reviewerPrompt, /canonical Neal-executable plan shape/);
 });

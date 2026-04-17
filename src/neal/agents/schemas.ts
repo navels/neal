@@ -1,4 +1,10 @@
-import type { CoderBlockedRecoveryDisposition, CoderConsultDisposition, ExecutionShape } from '../types.js';
+import type {
+  CoderBlockedRecoveryDisposition,
+  CoderConsultDisposition,
+  ExecuteScopeProgressJustification,
+  ExecutionShape,
+  ReviewerMeaningfulProgressAction,
+} from '../types.js';
 
 export type ReviewerFindingPayload = {
   severity: 'blocking' | 'non_blocking';
@@ -10,10 +16,14 @@ export type ReviewerFindingPayload = {
 export type ReviewerPayload = {
   summary: string;
   findings: ReviewerFindingPayload[];
+  meaningfulProgressAction: ReviewerMeaningfulProgressAction;
+  meaningfulProgressRationale: string;
 };
 
-export type PlanReviewerPayload = ReviewerPayload & {
+export type PlanReviewerPayload = {
+  summary: string;
   executionShape: ExecutionShape;
+  findings: ReviewerFindingPayload[];
 };
 
 export type CoderResponsePayload = {
@@ -30,6 +40,10 @@ export type CoderResponsePayload = {
 
 export type CoderConsultDispositionPayload = CoderConsultDisposition;
 export type CoderBlockedRecoveryDispositionPayload = CoderBlockedRecoveryDisposition;
+export type ExecuteScopeProgressPayload = ExecuteScopeProgressJustification;
+
+export const EXECUTE_SCOPE_PROGRESS_PAYLOAD_START = 'NEAL_PROGRESS_JUSTIFICATION_JSON_START';
+export const EXECUTE_SCOPE_PROGRESS_PAYLOAD_END = 'NEAL_PROGRESS_JUSTIFICATION_JSON_END';
 
 export function buildReviewerSchema() {
   return {
@@ -50,8 +64,10 @@ export function buildReviewerSchema() {
           additionalProperties: false,
         },
       },
+      meaningfulProgressAction: { type: 'string', enum: ['accept', 'block_for_operator', 'replace_plan'] },
+      meaningfulProgressRationale: { type: 'string' },
     },
-    required: ['summary', 'findings'],
+    required: ['summary', 'findings', 'meaningfulProgressAction', 'meaningfulProgressRationale'],
     additionalProperties: false,
   } as const;
 }
@@ -185,6 +201,20 @@ export function buildCoderPlanResponseSchema() {
   } as const;
 }
 
+export function buildExecuteScopeProgressSchema() {
+  return {
+    type: 'object',
+    properties: {
+      milestoneTargeted: { type: 'string' },
+      newEvidence: { type: 'string' },
+      whyNotRedundant: { type: 'string' },
+      nextStepUnlocked: { type: 'string' },
+    },
+    required: ['milestoneTargeted', 'newEvidence', 'whyNotRedundant', 'nextStepUnlocked'],
+    additionalProperties: false,
+  } as const;
+}
+
 function parseJsonPayload<TPayload>(raw: string, label: string): TPayload {
   try {
     return JSON.parse(raw) as TPayload;
@@ -192,6 +222,70 @@ function parseJsonPayload<TPayload>(raw: string, label: string): TPayload {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${label} returned invalid JSON: ${message}\nRaw response:\n${raw}`);
   }
+}
+
+function extractDelimitedPayload(raw: string, label: string) {
+  const startIndex = raw.indexOf(EXECUTE_SCOPE_PROGRESS_PAYLOAD_START);
+  if (startIndex === -1) {
+    throw new Error(`${label} did not include the required progress-justification payload start marker.`);
+  }
+
+  if (raw.indexOf(EXECUTE_SCOPE_PROGRESS_PAYLOAD_START, startIndex + EXECUTE_SCOPE_PROGRESS_PAYLOAD_START.length) !== -1) {
+    throw new Error(`${label} included multiple progress-justification payload start markers.`);
+  }
+
+  const endIndex = raw.indexOf(EXECUTE_SCOPE_PROGRESS_PAYLOAD_END, startIndex + EXECUTE_SCOPE_PROGRESS_PAYLOAD_START.length);
+  if (endIndex === -1) {
+    throw new Error(`${label} did not include the required progress-justification payload end marker.`);
+  }
+
+  if (raw.indexOf(EXECUTE_SCOPE_PROGRESS_PAYLOAD_END, endIndex + EXECUTE_SCOPE_PROGRESS_PAYLOAD_END.length) !== -1) {
+    throw new Error(`${label} included multiple progress-justification payload end markers.`);
+  }
+
+  const payloadText = raw.slice(startIndex + EXECUTE_SCOPE_PROGRESS_PAYLOAD_START.length, endIndex).trim();
+  if (!payloadText) {
+    throw new Error(`${label} returned an empty progress-justification payload.`);
+  }
+
+  return {
+    payloadText,
+    startIndex,
+    endIndex,
+  };
+}
+
+function requireNonEmptyString(value: unknown, field: keyof ExecuteScopeProgressPayload, label: string) {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${label} returned an empty or missing ${field} field in the progress-justification payload.`);
+  }
+
+  return value.trim();
+}
+
+export function parseExecuteScopeProgressPayload(raw: string): ExecuteScopeProgressPayload {
+  const label = 'Coder scope round';
+  const { payloadText } = extractDelimitedPayload(raw, label);
+  const payload = parseJsonPayload<ExecuteScopeProgressPayload>(payloadText, `${label} progress-justification payload`);
+
+  return {
+    milestoneTargeted: requireNonEmptyString(payload.milestoneTargeted, 'milestoneTargeted', label),
+    newEvidence: requireNonEmptyString(payload.newEvidence, 'newEvidence', label),
+    whyNotRedundant: requireNonEmptyString(payload.whyNotRedundant, 'whyNotRedundant', label),
+    nextStepUnlocked: requireNonEmptyString(payload.nextStepUnlocked, 'nextStepUnlocked', label),
+  };
+}
+
+export function stripExecuteScopeProgressPayload(raw: string) {
+  const { startIndex, endIndex } = extractDelimitedPayload(raw, 'Coder scope round');
+  const before = raw.slice(0, startIndex).trimEnd();
+  const after = raw.slice(endIndex + EXECUTE_SCOPE_PROGRESS_PAYLOAD_END.length).trimStart();
+
+  if (before && after) {
+    return `${before}\n\n${after}`;
+  }
+
+  return before || after;
 }
 
 export function parseCoderResponsePayload(raw: string) {

@@ -1,7 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { getCurrentScopeLabel, getParentScopeLabel, isExecutingDerivedPlan } from './scopes.js';
+import {
+  getCurrentScopeLabel,
+  getParentScopeLabel,
+  getRecentAcceptedScopesForParentObjective,
+  isExecutingDerivedPlan,
+  renderRecentAcceptedScopesSummary,
+} from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 type InteractiveBlockedRecoverySummary = {
@@ -17,6 +23,19 @@ type InteractiveBlockedRecoveryHistorySummary = {
   sessions: number;
   lastAction: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resolvedByAction'] | null;
   lastResultPhase: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resultPhase'] | null;
+};
+
+type MeaningfulProgressSummary = {
+  parentObjective: string;
+  currentScopeProgressJustification: OrchestrationState['currentScopeProgressJustification'];
+  currentScopeMeaningfulProgressVerdict: OrchestrationState['currentScopeMeaningfulProgressVerdict'];
+  recentAcceptedScopeHistory: {
+    number: string;
+    finalCommit: string | null;
+    commitSubject: string | null;
+    parentScope: string | null;
+    changedFiles: string[];
+  }[];
 };
 
 type PlanProgressState = {
@@ -38,12 +57,26 @@ type PlanProgressState = {
     splitPlanCount: number;
     derivedPlanDepth: number;
   } | null;
+  meaningfulProgress: MeaningfulProgressSummary | null;
   interactiveBlockedRecovery: InteractiveBlockedRecoverySummary | null;
   interactiveBlockedRecoveryHistory: InteractiveBlockedRecoveryHistorySummary | null;
   completedScopes: OrchestrationState['completedScopes'];
 };
 
 function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
+  const parentScopeLabel = state.topLevelMode === 'execute' ? getParentScopeLabel(state) : null;
+  const recentAcceptedScopeHistory =
+    state.topLevelMode === 'execute' && parentScopeLabel
+      ? getRecentAcceptedScopesForParentObjective(state, parentScopeLabel)
+          .map((scope) => ({
+            number: scope.number,
+            finalCommit: scope.finalCommit,
+            commitSubject: scope.commitSubject,
+            parentScope: scope.derivedFromParentScope,
+            changedFiles: [...scope.changedFiles],
+          }))
+      : [];
+
   return {
     version: 1,
     planDoc: state.planDoc,
@@ -66,6 +99,15 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
             splitPlanCount: state.splitPlanCountForCurrentScope,
             derivedPlanDepth: state.derivedPlanDepth,
           },
+    meaningfulProgress:
+      state.topLevelMode === 'execute'
+        ? {
+            parentObjective: parentScopeLabel ?? String(state.currentScopeNumber),
+            currentScopeProgressJustification: state.currentScopeProgressJustification,
+            currentScopeMeaningfulProgressVerdict: state.currentScopeMeaningfulProgressVerdict,
+            recentAcceptedScopeHistory,
+          }
+        : null,
     interactiveBlockedRecovery: state.interactiveBlockedRecovery
       ? {
           sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
@@ -89,6 +131,18 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
         : null,
     completedScopes: state.completedScopes,
   };
+}
+
+function pushIndentedMultiline(lines: string[], value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    lines.push('- none');
+    return;
+  }
+
+  for (const line of trimmed.split('\n')) {
+    lines.push(`  ${line}`);
+  }
 }
 
 export function renderPlanProgressMarkdown(state: OrchestrationState) {
@@ -116,6 +170,43 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Derived plan status: ${progress.currentScope.derivedPlanStatus ?? 'none'}`,
       `- Split plan count: ${progress.currentScope.splitPlanCount}`,
       `- Derived plan depth: ${progress.currentScope.derivedPlanDepth}`,
+    );
+  }
+
+  if (state.topLevelMode === 'execute') {
+    lines.push(
+      '',
+      '## Meaningful Progress',
+      `- Active parent objective: ${progress.meaningfulProgress?.parentObjective ?? 'none'}`,
+    );
+
+    if (state.currentScopeProgressJustification) {
+      lines.push(
+        '- Coder milestone: ' + state.currentScopeProgressJustification.milestoneTargeted,
+        '- New evidence: ' + state.currentScopeProgressJustification.newEvidence,
+        '- Why not redundant: ' + state.currentScopeProgressJustification.whyNotRedundant,
+        '- Next step unlocked: ' + state.currentScopeProgressJustification.nextStepUnlocked,
+      );
+    } else {
+      lines.push('- Coder justification: pending');
+    }
+
+    if (state.currentScopeMeaningfulProgressVerdict) {
+      lines.push(
+        `- Reviewer action: ${state.currentScopeMeaningfulProgressVerdict.action}`,
+        `- Reviewer rationale: ${state.currentScopeMeaningfulProgressVerdict.rationale}`,
+      );
+    } else {
+      lines.push('- Reviewer action: pending', '- Reviewer rationale: pending');
+    }
+
+    lines.push('- Recent accepted scope history:');
+    pushIndentedMultiline(
+      lines,
+      renderRecentAcceptedScopesSummary(
+        state,
+        progress.meaningfulProgress?.parentObjective ?? String(state.currentScopeNumber),
+      ),
     );
   }
 
