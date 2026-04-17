@@ -333,6 +333,7 @@ export async function initializeOrchestration(
   topLevelMode: 'plan' | 'execute' = 'execute',
   options?: {
     ignoreLocalChanges?: boolean;
+    runDir?: string;
   },
 ) {
   const absolutePlanDoc = resolve(planDoc);
@@ -342,6 +343,7 @@ export async function initializeOrchestration(
     stateDir,
     planDoc: absolutePlanDoc,
     topLevelMode,
+    runDir: options?.runDir,
   });
 
   const init: OrchestratorInit = {
@@ -2576,6 +2578,7 @@ export async function loadOrInitialize(
   topLevelMode: 'plan' | 'execute' = 'execute',
   options?: {
     ignoreLocalChanges?: boolean;
+    runDir?: string;
   },
 ) {
   if (resumeStatePath) {

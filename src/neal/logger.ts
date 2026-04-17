@@ -17,7 +17,7 @@ export type RunLoggerInit = {
   resumedFromStatePath?: string;
 };
 
-function createRunId() {
+export function createRunId() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return `${timestamp}-${randomUUID().slice(0, 8)}`;
 }

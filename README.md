@@ -30,7 +30,8 @@ Run from the target repository:
 ```bash
 cd /path/to/repo
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md
-pnpm --dir ~/code/personal/codex-chunked start -- --execute "fix failing tests"
+pnpm --dir ~/code/personal/codex-chunked start -- --execute-file /absolute/or/relative/PLAN.md
+pnpm --dir ~/code/personal/codex-chunked start -- --execute-text "# Inline Plan"
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --coder-model gpt-5.4 --reviewer-model claude-opus-4-6
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --ignore-local-changes
 ```
@@ -90,8 +91,9 @@ Use [`notes/testing/NEAL_PLAN_DRAFT.md`](/Users/lee.nave/code/personal/codex-chu
 Execution semantics:
 
 - `neal --plan PLAN.md` revises a draft plan in place without making commits
-- `neal --execute PLAN.md` executes the plan scope by scope until it completes or blocks
-- `neal --execute "..."` treats the argument as an inline ad hoc execution prompt when it is not an existing file path, writes a wrapper-owned prompt file under `.neal/adhoc/`, and runs the normal execute loop against that generated prompt
+- `neal --execute PLAN.md` executes the plan scope by scope until it completes or blocks; this remains the default file-mode spelling
+- `neal --execute-file PLAN.md` is the explicit file-mode spelling for execution
+- `neal --execute-text "..."` treats the argument as inline plan markdown, writes a run-owned `INLINE_EXECUTE_PLAN.md` artifact under `.neal/runs/<timestamp>-<id>/`, and runs the normal execute loop against that generated plan file
 - `neal --resume [state-file]` resumes the Neal orchestration loop from saved wrapper state
 - `neal --resume-coder [state-file]` opens the persisted coder session directly in the matching provider CLI
 - `neal --resume-reviewer [state-file]` opens the persisted reviewer session directly in the matching provider CLI
