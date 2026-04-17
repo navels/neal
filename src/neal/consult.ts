@@ -29,6 +29,12 @@ function appendInteractiveBlockedRecoverySection(
     );
   }
 
+  if (recovery.pendingDirective) {
+    lines.push(
+      `- Pending terminal directive at ${recovery.pendingDirective.recordedAt}: ${recovery.pendingDirective.operatorGuidance}`,
+    );
+  }
+
   if (recovery.turns.length === 0) {
     lines.push('- Operator guidance: pending');
     return;

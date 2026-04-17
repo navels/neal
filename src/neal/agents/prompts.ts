@@ -285,6 +285,7 @@ export function buildBlockedRecoveryCoderPrompt(args: {
   operatorGuidance: string;
   maxTurns: number;
   turnsTaken: number;
+  terminalOnly?: boolean;
 }) {
   return [
     `Continue blocked recovery for the current neal scope in ${args.planDoc}.`,
@@ -297,10 +298,16 @@ export function buildBlockedRecoveryCoderPrompt(args: {
     '- `replace_current_scope`',
     '- `stay_blocked`',
     '- `terminal_block`',
-    'Use `resume_current_scope` when the current scope is still correct and the operator guidance gives enough direction to continue normally.',
+    args.terminalOnly
+      ? 'The recovery turn cap has been reached. You must choose either `replace_current_scope` or `terminal_block`. Do not use `resume_current_scope` or `stay_blocked`.'
+      : 'Use `resume_current_scope` when the current scope is still correct and the operator guidance gives enough direction to continue normally.',
     'Use `replace_current_scope` when the current scope shape is wrong and Neal should route the replacement through the existing split-plan / derived-plan machinery.',
-    'Use `stay_blocked` when more operator guidance is still required and the run should remain in interactive blocked recovery.',
-    'Use `terminal_block` only when no safe in-repo path remains and the run should finalize as truly blocked.',
+    args.terminalOnly
+      ? 'Use `terminal_block` when no safe in-repo path remains and the run must finalize as truly blocked.'
+      : 'Use `stay_blocked` when more operator guidance is still required and the run should remain in interactive blocked recovery.',
+    args.terminalOnly
+      ? 'Do not ask for additional operator guidance in this turn.'
+      : 'Use `terminal_block` only when no safe in-repo path remains and the run should finalize as truly blocked.',
     'Always include a `summary` and `rationale`.',
     'Always include a `blocker` string. Use an empty string only when action=`resume_current_scope` or action=`replace_current_scope`.',
     'Always include a `replacementPlan` string. Use an empty string unless action=`replace_current_scope`.',

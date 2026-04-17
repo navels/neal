@@ -10,7 +10,6 @@ import readline from 'node:readline';
 
 import {
   InteractiveBlockedRecoveryPendingTurnError,
-  InteractiveBlockedRecoveryTurnLimitError,
   loadOrInitialize,
   recordInteractiveBlockedRecoveryGuidance,
   runOnePass,
@@ -83,7 +82,8 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
   const interactiveBlockedRecovery = finalState.interactiveBlockedRecovery;
   const waitingForOperatorGuidance =
     finalState.phase === 'interactive_blocked_recovery' && interactiveBlockedRecovery
-      ? interactiveBlockedRecovery.turns.length === interactiveBlockedRecovery.lastHandledTurn
+      ? interactiveBlockedRecovery.turns.length === interactiveBlockedRecovery.lastHandledTurn &&
+        !interactiveBlockedRecovery.pendingDirective
       : false;
 
   if (waitingForOperatorGuidance) {
@@ -335,25 +335,6 @@ async function main() {
         );
         return;
       }
-      if (error instanceof InteractiveBlockedRecoveryTurnLimitError) {
-        process.stdout.write(
-          JSON.stringify(
-            {
-              ok: false,
-              code: 'interactive_blocked_recovery_turn_limit',
-              message: error.message,
-              statePath: loaded.statePath,
-              runDir: loaded.state.runDir,
-              maxTurns: error.maxTurns,
-              recoveryTurns: loaded.state.interactiveBlockedRecovery?.turns.length ?? 0,
-              nextStep: 'Run `neal --resume` and choose `terminal_block` or `replace_current_scope`.',
-            },
-            null,
-            2,
-          ) + '\n',
-        );
-        return;
-      }
       throw error;
     }
     process.stderr.write(`[neal] recovery guidance recorded; run: neal --resume ${loaded.statePath}\n`);
@@ -366,6 +347,7 @@ async function main() {
           statePath: loaded.statePath,
           runDir: nextState.runDir,
           recoveryTurns: nextState.interactiveBlockedRecovery?.turns.length ?? 0,
+          terminalDirectivePending: nextState.interactiveBlockedRecovery?.pendingDirective?.terminalOnly ?? false,
           nextStep: `Run \`neal --resume ${loaded.statePath}\` to process the recovery guidance.`,
         },
         null,

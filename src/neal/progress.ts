@@ -10,6 +10,7 @@ type InteractiveBlockedRecoverySummary = {
   turns: number;
   handledTurns: number;
   remainingTurns: number;
+  pendingDirective: string | null;
 };
 
 type InteractiveBlockedRecoveryHistorySummary = {
@@ -75,6 +76,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
             state.interactiveBlockedRecovery.maxTurns - state.interactiveBlockedRecovery.turns.length,
             0,
           ),
+          pendingDirective: state.interactiveBlockedRecovery.pendingDirective?.operatorGuidance ?? null,
         }
       : null,
     interactiveBlockedRecoveryHistory:
@@ -126,6 +128,7 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Recorded turns: ${progress.interactiveBlockedRecovery.turns}`,
       `- Handled turns: ${progress.interactiveBlockedRecovery.handledTurns}`,
       `- Remaining turns: ${progress.interactiveBlockedRecovery.remainingTurns}`,
+      `- Pending terminal directive: ${progress.interactiveBlockedRecovery.pendingDirective ?? 'none'}`,
     );
   }
 

@@ -281,6 +281,17 @@ function hydrateInteractiveBlockedRecovery(value: unknown): InteractiveBlockedRe
     blockedReason: typeof recovery.blockedReason === 'string' ? recovery.blockedReason : '',
     maxTurns: typeof recovery.maxTurns === 'number' ? recovery.maxTurns : 3,
     lastHandledTurn: typeof recovery.lastHandledTurn === 'number' ? recovery.lastHandledTurn : 0,
+    pendingDirective:
+      recovery.pendingDirective &&
+      typeof recovery.pendingDirective === 'object' &&
+      typeof recovery.pendingDirective.recordedAt === 'string' &&
+      typeof recovery.pendingDirective.operatorGuidance === 'string'
+        ? {
+            recordedAt: recovery.pendingDirective.recordedAt,
+            operatorGuidance: recovery.pendingDirective.operatorGuidance,
+            terminalOnly: recovery.pendingDirective.terminalOnly === true,
+          }
+        : null,
     turns: Array.isArray(recovery.turns)
       ? recovery.turns
           .filter(

@@ -427,16 +427,6 @@ function getInteractiveBlockedRecoveryMaxTurns() {
   return parsed;
 }
 
-export class InteractiveBlockedRecoveryTurnLimitError extends Error {
-  readonly maxTurns: number;
-
-  constructor(maxTurns: number) {
-    super(`Interactive blocked recovery has reached its turn limit (${maxTurns}); resume the run and choose terminal_block or replace_current_scope.`);
-    this.name = 'InteractiveBlockedRecoveryTurnLimitError';
-    this.maxTurns = maxTurns;
-  }
-}
-
 export class InteractiveBlockedRecoveryPendingTurnError extends Error {
   readonly pendingTurn: number;
 
@@ -489,6 +479,7 @@ async function enterInteractiveBlockedRecovery(
     // Keep the operator/coder loop short so recovery remains bounded and auditable.
     maxTurns: getInteractiveBlockedRecoveryMaxTurns(),
     lastHandledTurn: 0,
+    pendingDirective: null,
     turns: [],
   };
 
@@ -528,13 +519,34 @@ export async function recordInteractiveBlockedRecoveryGuidance(
   }
 
   const turns = state.interactiveBlockedRecovery.turns;
+  if (state.interactiveBlockedRecovery.pendingDirective) {
+    throw new InteractiveBlockedRecoveryPendingTurnError(turns.length + 1);
+  }
+
   const pendingTurn = turns.at(-1);
   if (pendingTurn && pendingTurn.number > state.interactiveBlockedRecovery.lastHandledTurn) {
     throw new InteractiveBlockedRecoveryPendingTurnError(pendingTurn.number);
   }
 
   if (turns.length >= state.interactiveBlockedRecovery.maxTurns) {
-    throw new InteractiveBlockedRecoveryTurnLimitError(state.interactiveBlockedRecovery.maxTurns);
+    const nextState = await saveState(statePath, {
+      ...state,
+      interactiveBlockedRecovery: {
+        ...state.interactiveBlockedRecovery,
+        pendingDirective: {
+          recordedAt: new Date().toISOString(),
+          operatorGuidance: trimmedGuidance,
+          terminalOnly: true,
+        },
+      },
+    });
+    await writeExecutionArtifacts(nextState);
+    await logger?.event('interactive_blocked_recovery.terminal_directive_recorded', {
+      scopeNumber: nextState.currentScopeNumber,
+      sourcePhase: nextState.interactiveBlockedRecovery?.sourcePhase,
+      recoveryTurn: turns.length,
+    });
+    return nextState;
   }
 
   const nextState = await saveState(statePath, {
@@ -580,7 +592,10 @@ function hasPendingInteractiveBlockedRecoveryTurn(state: OrchestrationState) {
     return false;
   }
 
-  return state.interactiveBlockedRecovery.turns.length > state.interactiveBlockedRecovery.lastHandledTurn;
+  return (
+    state.interactiveBlockedRecovery.turns.length > state.interactiveBlockedRecovery.lastHandledTurn ||
+    Boolean(state.interactiveBlockedRecovery.pendingDirective)
+  );
 }
 
 function withRecordedInteractiveBlockedRecoveryDisposition(
@@ -591,6 +606,34 @@ function withRecordedInteractiveBlockedRecoveryDisposition(
 ) {
   if (!state.interactiveBlockedRecovery) {
     return state;
+  }
+
+  if (state.interactiveBlockedRecovery.pendingDirective) {
+    return {
+      ...state,
+      interactiveBlockedRecovery: {
+        ...state.interactiveBlockedRecovery,
+        pendingDirective: null,
+        turns: [
+          ...state.interactiveBlockedRecovery.turns,
+          {
+            number: state.interactiveBlockedRecovery.turns.length + 1,
+            recordedAt: state.interactiveBlockedRecovery.pendingDirective.recordedAt,
+            operatorGuidance: state.interactiveBlockedRecovery.pendingDirective.operatorGuidance,
+            disposition: {
+              recordedAt: new Date().toISOString(),
+              sessionHandle,
+              action: disposition.action,
+              summary: disposition.summary,
+              rationale: disposition.rationale,
+              blocker: disposition.blocker.trim(),
+              replacementPlan: disposition.replacementPlan.trim(),
+              resultingPhase,
+            },
+          },
+        ],
+      },
+    };
   }
 
   const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
@@ -639,6 +682,7 @@ function finalizeInteractiveBlockedRecovery(
       ...state.interactiveBlockedRecoveryHistory,
       {
         ...state.interactiveBlockedRecovery,
+        pendingDirective: null,
         resolvedAt: new Date().toISOString(),
         resolvedByAction: action,
         resultPhase,
@@ -683,6 +727,13 @@ function getInteractiveBlockedRecoveryResumePhase(
   }
 }
 
+function isTerminalDirectivePending(state: OrchestrationState) {
+  return (
+    state.phase === 'interactive_blocked_recovery' &&
+    Boolean(state.interactiveBlockedRecovery?.pendingDirective)
+  );
+}
+
 export async function applyInteractiveBlockedRecoveryDisposition(
   state: OrchestrationState,
   statePath: string,
@@ -698,11 +749,20 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   }
 
   const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
-  if (!latestTurn) {
+  const terminalDirective = state.interactiveBlockedRecovery.pendingDirective;
+  if (!latestTurn && !terminalDirective) {
     throw new Error('Interactive blocked recovery requires recorded operator guidance before a coder response can be applied.');
   }
 
-  const turnNumber = latestTurn.number;
+  if (
+    terminalDirective &&
+    disposition.action !== 'replace_current_scope' &&
+    disposition.action !== 'terminal_block'
+  ) {
+    throw new Error('Interactive blocked recovery reached its turn cap and now only allows replace_current_scope or terminal_block.');
+  }
+
+  const turnNumber = latestTurn?.number ?? state.interactiveBlockedRecovery.turns.length + 1;
   const trimmedBlocker = disposition.blocker.trim();
 
   await logger?.event('interactive_blocked_recovery.disposition', {
@@ -788,6 +848,7 @@ export async function applyInteractiveBlockedRecoveryDisposition(
         ...recordedState.interactiveBlockedRecovery,
         blockedReason: trimmedBlocker,
         lastHandledTurn: turnNumber,
+        pendingDirective: null,
       },
       coderRetryCount: 0,
     });
@@ -884,7 +945,7 @@ async function finalizePlanReviewResponseWithoutOpenFindings(
   return nextState;
 }
 
-async function finalizeBlockedPlanReviewResponse(
+export async function finalizeBlockedPlanReviewResponse(
   state: OrchestrationState,
   statePath: string,
   derivedPlanReview: boolean,
@@ -1140,14 +1201,17 @@ async function runInteractiveBlockedRecoveryPhase(state: OrchestrationState, sta
   }
 
   const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
-  if (!latestTurn || latestTurn.number <= state.interactiveBlockedRecovery.lastHandledTurn) {
+  const pendingDirective = state.interactiveBlockedRecovery.pendingDirective;
+  const hasPendingTurn = Boolean(latestTurn && latestTurn.number > state.interactiveBlockedRecovery.lastHandledTurn);
+  if (!hasPendingTurn && !pendingDirective) {
     throw new Error('Interactive blocked recovery has no pending operator guidance to process.');
   }
 
   await logger?.event('phase.start', {
     phase: 'interactive_blocked_recovery',
-    recoveryTurn: latestTurn.number,
+    recoveryTurn: pendingDirective ? state.interactiveBlockedRecovery.turns.length : latestTurn?.number,
     sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
+    terminalOnly: Boolean(pendingDirective?.terminalOnly),
   });
 
   let codex;
@@ -1159,9 +1223,10 @@ async function runInteractiveBlockedRecoveryPhase(state: OrchestrationState, sta
       progressMarkdownPath: state.progressMarkdownPath,
       consultMarkdownPath: state.consultMarkdownPath,
       blockedReason: state.interactiveBlockedRecovery.blockedReason,
-      operatorGuidance: latestTurn.operatorGuidance,
+      operatorGuidance: pendingDirective?.operatorGuidance ?? latestTurn?.operatorGuidance ?? state.interactiveBlockedRecovery.blockedReason,
       maxTurns: state.interactiveBlockedRecovery.maxTurns,
-      turnsTaken: latestTurn.number,
+      turnsTaken: pendingDirective ? state.interactiveBlockedRecovery.turns.length : latestTurn?.number ?? 0,
+      terminalOnly: Boolean(pendingDirective?.terminalOnly),
       sessionHandle: state.coderSessionHandle,
       logger,
     });
@@ -1190,7 +1255,7 @@ async function runInteractiveBlockedRecoveryPhase(state: OrchestrationState, sta
   );
   await logger?.event('phase.complete', {
     phase: 'interactive_blocked_recovery',
-    recoveryTurn: latestTurn.number,
+    recoveryTurn: pendingDirective ? state.interactiveBlockedRecovery.turns.length : latestTurn?.number,
     action: codex.payload.action,
     nextPhase: nextState.phase,
   });

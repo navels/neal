@@ -425,6 +425,7 @@ export async function runBlockedRecoveryCoderRound(args: {
   operatorGuidance: string;
   maxTurns: number;
   turnsTaken: number;
+  terminalOnly?: boolean;
   sessionHandle?: string | null;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; payload: CoderBlockedRecoveryDispositionPayload }> {
@@ -444,6 +445,7 @@ export async function runBlockedRecoveryCoderRound(args: {
         operatorGuidance: args.operatorGuidance,
         maxTurns: args.maxTurns,
         turnsTaken: args.turnsTaken,
+        terminalOnly: args.terminalOnly,
       }),
       resumeHandle: args.sessionHandle,
       outputSchema: buildCoderBlockedRecoveryDispositionSchema(),

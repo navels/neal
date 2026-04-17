@@ -135,6 +135,12 @@ export type InteractiveBlockedRecoveryTurn = {
   disposition: InteractiveBlockedRecoveryTurnDisposition | null;
 };
 
+export type InteractiveBlockedRecoveryDirective = {
+  recordedAt: string;
+  operatorGuidance: string;
+  terminalOnly: boolean;
+};
+
 export type InteractiveBlockedRecoveryState = {
   enteredAt: string;
   sourcePhase: Exclude<OrchestrationPhase, 'interactive_blocked_recovery' | 'done' | 'blocked'>;
@@ -142,6 +148,7 @@ export type InteractiveBlockedRecoveryState = {
   maxTurns: number;
   lastHandledTurn: number;
   turns: InteractiveBlockedRecoveryTurn[];
+  pendingDirective?: InteractiveBlockedRecoveryDirective | null;
 };
 
 export type InteractiveBlockedRecoveryRecord = InteractiveBlockedRecoveryState & {

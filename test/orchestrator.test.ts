@@ -10,6 +10,7 @@ import {
   adoptAcceptedDerivedPlan,
   applyInteractiveBlockedRecoveryDisposition,
   computeNextScopeStateAfterSquash,
+  finalizeBlockedPlanReviewResponse,
   flushDerivedPlanNotifications,
   loadOrInitialize,
   recordInteractiveBlockedRecoveryGuidance,
@@ -456,7 +457,7 @@ test('neal --recover rejects recording more guidance while a recovery turn is st
   assert.match(result.nextStep, /neal --resume/);
 });
 
-test('neal --recover returns a structured result when interactive blocked recovery hits its turn cap', async () => {
+test('neal --recover records a terminal-only directive when interactive blocked recovery hits its turn cap', async () => {
   const { statePath, state } = await createResumeFixture({
     currentScopeNumber: 3,
     phase: 'interactive_blocked_recovery',
@@ -499,23 +500,30 @@ test('neal --recover returns a structured result when interactive blocked recove
   );
   const result = JSON.parse(stdout) as {
     ok: boolean;
-    code: string;
-    message: string;
+    phase: string;
+    status: string;
     statePath: string;
     runDir: string;
-    maxTurns: number;
     recoveryTurns: number;
+    terminalDirectivePending: boolean;
     nextStep: string;
   };
 
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'interactive_blocked_recovery_turn_limit');
+  assert.equal(result.ok, true);
+  assert.equal(result.phase, 'interactive_blocked_recovery');
+  assert.equal(result.status, 'running');
   assert.equal(result.statePath, statePath);
   assert.equal(result.runDir, state.runDir);
-  assert.equal(result.maxTurns, 3);
   assert.equal(result.recoveryTurns, 3);
-  assert.match(result.message, /turn limit \(3\)/);
+  assert.equal(result.terminalDirectivePending, true);
   assert.match(result.nextStep, /neal --resume/);
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.interactiveBlockedRecovery?.pendingDirective?.terminalOnly, true);
+  assert.equal(
+    reloadedState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
+    'One more operator instruction.',
+  );
 });
 
 test('interactive blocked recovery can stay blocked, resume after interruption, and then continue the scope', async () => {
@@ -826,6 +834,28 @@ test('neal --recover rejects plan-mode sessions', async () => {
     () => runNealCliResult('--recover', statePath, '--message', 'Keep revising the plan.'),
     /--recover is only supported for execute-mode runs/,
   );
+});
+
+test('blocked top-level plan review does not enter interactive blocked recovery', async () => {
+  const { statePath, state } = await createResumeFixture({
+    topLevelMode: 'plan',
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'coder_plan_response',
+    interactiveBlockedRecovery: null,
+  });
+
+  const nextState = await finalizeBlockedPlanReviewResponse(
+    state,
+    statePath,
+    false,
+    'Plan review did not converge.',
+  );
+
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.status, 'blocked');
+  assert.equal(nextState.interactiveBlockedRecovery, null);
+  assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 0);
 });
 
 test('interactive blocked recovery can remain paused after a handled turn', async () => {
