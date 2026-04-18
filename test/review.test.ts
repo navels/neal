@@ -17,6 +17,7 @@ import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
 import { getFinalCompletionReviewArtifactPath, renderFinalCompletionReviewMarkdown } from '../src/neal/final-completion-review.js';
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
 import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/neal/progress.js';
+import { getPromptSpec, PROMPT_SPECS } from '../src/neal/prompts/specs.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
 import type { OrchestrationState } from '../src/neal/types.js';
@@ -170,6 +171,77 @@ test('diagnostic analysis prompt carries explicit baseline and artifact-writing 
   assert.match(prompt, /Why is this scope strategically non-convergent\?/);
   assert.match(prompt, /## Recovery Implications/);
   assert.match(prompt, /AUTONOMY_DONE or AUTONOMY_BLOCKED/);
+});
+
+test('prompt spec inventory covers the curated role-task surface with explicit schema targets', () => {
+  assert.equal(PROMPT_SPECS.length, 9);
+  assert.deepEqual(
+    PROMPT_SPECS.map((spec) => spec.id),
+    [
+      'plan_author',
+      'plan_reviewer',
+      'scope_coder',
+      'scope_reviewer',
+      'diagnostic_analyst',
+      'recovery_plan_author',
+      'recovery_plan_reviewer',
+      'completion_coder',
+      'completion_reviewer',
+    ],
+  );
+
+  const scopeReviewer = getPromptSpec('scope_reviewer');
+  assert.equal(scopeReviewer.schemaTarget.kind, 'structured_json');
+  assert.equal(scopeReviewer.schemaTarget.schemaBuilder, 'buildReviewerSchema');
+  assert.equal(scopeReviewer.baseInstructions.modulePath, 'src/neal/prompts/execute.ts');
+  assert.equal(scopeReviewer.currentHome, 'src/neal/prompts');
+  assert.equal(scopeReviewer.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/execute.ts'), true);
+  assert.equal(scopeReviewer.variants.some((variant) => variant.kind === 'meaningful_progress'), true);
+
+  const scopeCoder = getPromptSpec('scope_coder');
+  assert.equal(scopeCoder.currentHome, 'mixed');
+  assert.equal(scopeCoder.baseInstructions.modulePath, 'src/neal/prompts/execute.ts');
+  assert.equal(
+    scopeCoder.variants
+      .filter((variant) => variant.status === 'migration_target')
+      .every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/execute.ts'),
+    true,
+  );
+
+  const planAuthor = getPromptSpec('plan_author');
+  assert.equal(planAuthor.firstMigrationPriority, 1);
+  assert.equal(planAuthor.currentHome, 'src/neal/prompts');
+  assert.equal(planAuthor.baseInstructions.modulePath, 'src/neal/prompts/planning.ts');
+  assert.equal(planAuthor.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/planning.ts'), true);
+
+  const planReviewer = getPromptSpec('plan_reviewer');
+  assert.equal(planReviewer.baseInstructions.modulePath, 'src/neal/prompts/planning.ts');
+  assert.equal(planReviewer.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/planning.ts'), true);
+
+  const recoveryPlanReviewer = getPromptSpec('recovery_plan_reviewer');
+  assert.equal(recoveryPlanReviewer.baseInstructions.exportName, 'buildPlanReviewerPrompt');
+  assert.equal(recoveryPlanReviewer.baseInstructions.modulePath, 'src/neal/prompts/planning.ts');
+
+  const diagnosticAnalyst = getPromptSpec('diagnostic_analyst');
+  assert.equal(diagnosticAnalyst.baseInstructions.modulePath, 'src/neal/prompts/specialized.ts');
+  assert.equal(diagnosticAnalyst.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/specialized.ts'), true);
+
+  const recoveryPlanAuthor = getPromptSpec('recovery_plan_author');
+  assert.equal(recoveryPlanAuthor.baseInstructions.modulePath, 'src/neal/prompts/specialized.ts');
+  assert.equal(
+    recoveryPlanAuthor.variants
+      .filter((variant) => variant.baseInstructions.exportName === 'buildRecoveryPlanPrompt')
+      .every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/specialized.ts'),
+    true,
+  );
+
+  const completionCoder = getPromptSpec('completion_coder');
+  assert.equal(completionCoder.baseInstructions.modulePath, 'src/neal/prompts/specialized.ts');
+  assert.equal(completionCoder.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/specialized.ts'), true);
+
+  const completionReviewer = getPromptSpec('completion_reviewer');
+  assert.equal(completionReviewer.baseInstructions.modulePath, 'src/neal/prompts/specialized.ts');
+  assert.equal(completionReviewer.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/specialized.ts'), true);
 });
 
 test('final completion packet summarizes whole-plan completion context', async () => {

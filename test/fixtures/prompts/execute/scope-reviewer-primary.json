@@ -1,0 +1,38 @@
+{
+  "name": "execute scope reviewer prompt",
+  "specId": "scope_reviewer",
+  "variant": "primary",
+  "builder": "buildReviewerPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "baseCommit": "base123",
+    "headCommit": "head456",
+    "commits": [
+      "head456 isolate render-state mutation"
+    ],
+    "previousHeadCommit": null,
+    "diffStat": " src/neal/orchestrator.ts | 10 +++++-----",
+    "changedFiles": [
+      "src/neal/orchestrator.ts"
+    ],
+    "round": 2,
+    "reviewMarkdownPath": "/tmp/REVIEW.md",
+    "parentScopeLabel": "5.2",
+    "progressJustification": {
+      "milestoneTargeted": "Scope 5.2 execution-shape correction",
+      "newEvidence": "The prompt now makes split-plan replacement explicit.",
+      "whyNotRedundant": "The prior wording left too much ambiguity in reviewer guidance.",
+      "nextStepUnlocked": "Reviewer verdicts can now judge progress against the parent objective."
+    },
+    "recentHistorySummary": "Accepted scope history for parent objective 5.2...\nTouched-file concentration: src/shared.ts (2/2 scopes)"
+  },
+  "contains": [
+    "The active parent objective for meaningful-progress evaluation is scope 5.2.",
+    "You are the authority for meaningful-progress gating during this execute review pass.",
+    "Set `meaningfulProgressAction` to `accept` only when this scope materially advances the active parent objective."
+  ],
+  "excludes": [
+    "brand-new top-level initiative",
+    "Ordered Derived Scopes"
+  ]
+}

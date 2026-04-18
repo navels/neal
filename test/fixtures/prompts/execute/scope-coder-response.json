@@ -1,0 +1,33 @@
+{
+  "name": "execute scope coder response prompt",
+  "specId": "scope_coder",
+  "variant": "response",
+  "builder": "buildCoderResponsePrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "progressText": "## Current Scope\n- Scope: 5.2\n- Status: review-response\n",
+    "verificationHint": "Run the focused regression tests before replying.",
+    "mode": "optional",
+    "openFindings": [
+      {
+        "id": "finding-1",
+        "severity": "non_blocking",
+        "claim": "Consider simplifying the helper naming.",
+        "requiredAction": "Either rename it now or defer with rationale.",
+        "files": [
+          "src/neal/prompts/execute.ts"
+        ],
+        "roundSummary": "Non-blocking cleanup suggestion."
+      }
+    ]
+  },
+  "contains": [
+    "The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.",
+    "If you choose to address any findings, make the smallest justified code changes",
+    "A derived plan must use the same Neal-executable contract as a top-level plan."
+  ],
+  "excludes": [
+    "Do not start a new top-level plan",
+    "Ordered Derived Scopes"
+  ]
+}

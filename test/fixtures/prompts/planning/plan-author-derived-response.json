@@ -1,0 +1,40 @@
+{
+  "name": "derived-plan response prompt keeps canonical plan sections and response outcomes",
+  "specId": "plan_author",
+  "variant": "response",
+  "builder": "buildCoderPlanResponsePrompt",
+  "args": {
+    "planDoc": "/tmp/DERIVED_PLAN.md",
+    "openFindings": [
+      {
+        "id": "finding-1",
+        "source": "reviewer",
+        "claim": "Split the work into ordered scopes.",
+        "requiredAction": "Replace the vague staged rollout note with a concrete execution queue.",
+        "severity": "blocking",
+        "files": [
+          "/tmp/DERIVED_PLAN.md"
+        ],
+        "roundSummary": "The derived plan remains too vague."
+      }
+    ],
+    "reviewMode": "derived-plan",
+    "parentPlanDoc": "/tmp/PLAN.md",
+    "derivedFromScopeNumber": 3
+  },
+  "contains": [
+    "Continue refining the derived implementation plan at /tmp/DERIVED_PLAN.md for scope 3 in parent plan /tmp/PLAN.md.",
+    "Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.",
+    "Do not silently widen the target or convert a real blocker into a vague replan.",
+    "Revise the derived plan so it uses the same Neal-executable contract as a top-level plan.",
+    "## Execution Shape",
+    "executionShape: multi_scope",
+    "## Execution Queue",
+    "Use `fixed` only when you actually revised the plan to resolve the finding.",
+    "\"id\": \"finding-1\""
+  ],
+  "excludes": [
+    "Ordered Derived Scopes",
+    "diagnostic recovery plan candidate"
+  ]
+}

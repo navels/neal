@@ -1,0 +1,19 @@
+{
+  "name": "execute scope coder primary prompt",
+  "specId": "scope_coder",
+  "variant": "primary",
+  "builder": "buildScopePrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "progressText": "## Current Scope\n- Scope: 5.2\n- Status: running\n"
+  },
+  "contains": [
+    "If the target remains viable but the current scope has proven to be the wrong execution shape, return AUTONOMY_SPLIT_PLAN instead of forcing the bad shape or using AUTONOMY_BLOCKED.",
+    "The derived plan must use the same Neal-executable contract as a top-level plan.",
+    "Current progress state:"
+  ],
+  "excludes": [
+    "Ordered Derived Scopes",
+    "brand-new top-level initiative"
+  ]
+}

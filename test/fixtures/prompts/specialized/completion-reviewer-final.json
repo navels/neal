@@ -1,0 +1,68 @@
+{
+  "name": "final completion reviewer prompt",
+  "specId": "completion_reviewer",
+  "variant": "final_completion",
+  "builder": "buildFinalCompletionReviewerPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "packet": {
+      "executionShape": "multi_scope",
+      "currentScopeLabel": "6",
+      "acceptedScopeCount": 5,
+      "blockedScopeCount": 0,
+      "verificationOnlyCompletion": false,
+      "finalCommit": "abc123",
+      "completedScopeSummary": [
+        "1 accepted",
+        "2 accepted"
+      ],
+      "terminalChangedFilesSummary": [
+        "src/neal/prompts/execute.ts"
+      ],
+      "planChangedFilesSummary": [
+        "src/neal/prompts/execute.ts",
+        "src/neal/prompts/specs.ts"
+      ],
+      "verificationSummary": [
+        "pnpm typecheck",
+        "tsx --test test/prompt-spec-fixtures.test.ts"
+      ],
+      "lastNonEmptyImplementationScope": {
+        "number": "5",
+        "marker": "AUTONOMY_SCOPE_DONE",
+        "result": "accepted",
+        "baseCommit": "base123",
+        "finalCommit": "head456",
+        "commitSubject": "tighten prompt-spec fixtures",
+        "changedFiles": [
+          "src/neal/prompts/specs.ts"
+        ],
+        "reviewRounds": 1,
+        "findings": 0,
+        "meaningfulProgress": null,
+        "createdAt": "2026-04-17T00:00:00.000Z",
+        "completedAt": "2026-04-17T00:05:00.000Z",
+        "archivedReviewPath": "/tmp/REVIEW-5.md"
+      },
+      "continueExecutionCount": 0,
+      "continueExecutionMax": 2
+    },
+    "summary": {
+      "planGoalSatisfied": false,
+      "whatChangedOverall": "Planning, execute, and specialized prompt specs were migrated into dedicated prompt modules.",
+      "verificationSummary": "pnpm typecheck; tsx --test test/prompt-spec-fixtures.test.ts",
+      "remainingKnownGaps": [
+        "Completion reviewer contract wording still needs one final pass."
+      ]
+    }
+  },
+  "contains": [
+    "This is a whole-plan final completion review, not an ordinary last-scope review.",
+    "When you return `continue_execution`, you must provide a non-null `missingWork` object",
+    "Use `block_for_operator` when the remaining gap is ambiguous"
+  ],
+  "excludes": [
+    "candidate recovery plan",
+    "Ordered Derived Scopes"
+  ]
+}

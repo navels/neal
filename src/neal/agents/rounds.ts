@@ -24,16 +24,16 @@ import {
   AUTONOMY_SPLIT_PLAN,
   buildBlockedRecoveryCoderPrompt,
   buildCoderConsultResponsePrompt,
-  buildCoderPlanResponsePrompt,
   buildCoderResponsePrompt,
+  buildCoderPlanResponsePrompt,
   buildConsultReviewerPrompt,
   buildDiagnosticAnalysisPrompt,
   buildFinalCompletionReviewerPrompt,
   buildFinalCompletionSummaryPrompt,
-  buildRecoveryPlanPrompt,
   buildPlanReviewerPrompt,
   buildPlanningPrompt,
   buildReviewerPrompt,
+  buildRecoveryPlanPrompt,
   buildScopePrompt,
 } from './prompts.js';
 import {

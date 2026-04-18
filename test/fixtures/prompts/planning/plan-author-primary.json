@@ -1,0 +1,23 @@
+{
+  "name": "plan author primary prompt preserves the canonical execution-shape contract",
+  "specId": "plan_author",
+  "variant": "primary",
+  "builder": "buildPlanningPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md"
+  },
+  "contains": [
+    "Rewrite the draft plan document at /tmp/PLAN.md into a future execution plan for neal.",
+    "Choose exactly one execution shape: `one_shot` or `multi_scope`.",
+    "Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot` or `executionShape: multi_scope`.",
+    "## Execution Queue",
+    "### Scope 1: Example scope",
+    "If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.",
+    "AUTONOMY_DONE",
+    "AUTONOMY_BLOCKED"
+  ],
+  "excludes": [
+    "AUTONOMY_SCOPE_DONE",
+    "AUTONOMY_SPLIT_PLAN"
+  ]
+}

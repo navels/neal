@@ -1,0 +1,25 @@
+{
+  "name": "recovery-plan reviewer prompt stays anchored to the active run",
+  "specId": "recovery_plan_reviewer",
+  "variant": "recovery_plan",
+  "builder": "buildPlanReviewerPrompt",
+  "args": {
+    "planDoc": "/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md",
+    "round": 1,
+    "reviewMarkdownPath": "/tmp/REVIEW.md",
+    "mode": "recovery-plan",
+    "parentPlanDoc": "/tmp/PLAN.md",
+    "recoveryParentScopeLabel": "4"
+  },
+  "contains": [
+    "Review the diagnostic recovery plan candidate at /tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md for parent objective 4 in active plan /tmp/PLAN.md.",
+    "Review it as a candidate recovery plan, not as a brand-new top-level initiative.",
+    "Also use blocking severity if the proposal silently broadens into unrelated future work instead of a bounded recovery path for the diagnosed failure mode.",
+    "The recovery plan should remain a candidate replacement for the active parent objective, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.",
+    "Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings."
+  ],
+  "excludes": [
+    "Reject vague replans such as \"break it into smaller chunks\"",
+    "Treat leftover planning-task scaffolding as blocking."
+  ]
+}

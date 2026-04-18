@@ -1,0 +1,24 @@
+{
+  "name": "plan reviewer primary prompt requires explicit execution-shape confirmation",
+  "specId": "plan_reviewer",
+  "variant": "primary",
+  "builder": "buildPlanReviewerPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "round": 2,
+    "reviewMarkdownPath": "/tmp/REVIEW.md"
+  },
+  "contains": [
+    "Review the plan document at /tmp/PLAN.md.",
+    "Review round: 2.",
+    "You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.",
+    "Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.",
+    "Use blocking severity for missing information or plan structure that would prevent neal from executing safely.",
+    "Treat leftover planning-task scaffolding as blocking.",
+    "Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses."
+  ],
+  "excludes": [
+    "candidate recovery plan, not as a brand-new top-level initiative",
+    "scope 3 in parent plan"
+  ]
+}
