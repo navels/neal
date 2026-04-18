@@ -25,7 +25,7 @@ import { StatusFooter } from './status-footer.js';
 import { getDefaultAgentConfig, loadState } from './state.js';
 import { showSummaries } from './summaries.js';
 import { CoderRoundError, ReviewerRoundError } from './agents.js';
-import type { AgentProvider } from './types.js';
+import type { AgentProvider, OrchestrationState } from './types.js';
 
 type SessionLaunchCommand = {
   command: string;
@@ -43,6 +43,91 @@ function usage(): never {
     console.error(line);
   }
   process.exit(1);
+}
+
+function getActiveHandleSummary() {
+  const getActiveHandles = (process as typeof process & { _getActiveHandles?: () => unknown[] })._getActiveHandles;
+  const getActiveRequests = (process as typeof process & { _getActiveRequests?: () => unknown[] })._getActiveRequests;
+  const activeResourcesInfo = 'getActiveResourcesInfo' in process ? process.getActiveResourcesInfo?.() ?? [] : [];
+  const handles = getActiveHandles ? getActiveHandles.call(process) : [];
+  const requests = getActiveRequests ? getActiveRequests.call(process) : [];
+
+  return {
+    resourceTypes: Array.from(new Set(activeResourcesInfo)).sort(),
+    handles: handles.map(summarizeActiveEntry),
+    requests: requests.map(summarizeActiveEntry),
+  };
+}
+
+function summarizeActiveEntry(entry: unknown) {
+  if (!entry || typeof entry !== 'object') {
+    return { type: typeof entry };
+  }
+
+  const candidate = entry as {
+    constructor?: { name?: string };
+    fd?: unknown;
+    path?: unknown;
+    bytesRead?: unknown;
+    bytesWritten?: unknown;
+    pending?: unknown;
+    readable?: unknown;
+    writable?: unknown;
+    connecting?: unknown;
+    destroyed?: unknown;
+    localAddress?: unknown;
+    localPort?: unknown;
+    remoteAddress?: unknown;
+    remotePort?: unknown;
+  };
+
+  return {
+    type: candidate.constructor?.name ?? 'unknown',
+    fd: typeof candidate.fd === 'number' ? candidate.fd : undefined,
+    path: typeof candidate.path === 'string' ? candidate.path : undefined,
+    pending: typeof candidate.pending === 'boolean' ? candidate.pending : undefined,
+    readable: typeof candidate.readable === 'boolean' ? candidate.readable : undefined,
+    writable: typeof candidate.writable === 'boolean' ? candidate.writable : undefined,
+    connecting: typeof candidate.connecting === 'boolean' ? candidate.connecting : undefined,
+    destroyed: typeof candidate.destroyed === 'boolean' ? candidate.destroyed : undefined,
+    bytesRead: typeof candidate.bytesRead === 'number' ? candidate.bytesRead : undefined,
+    bytesWritten: typeof candidate.bytesWritten === 'number' ? candidate.bytesWritten : undefined,
+    localAddress: typeof candidate.localAddress === 'string' ? candidate.localAddress : undefined,
+    localPort: typeof candidate.localPort === 'number' ? candidate.localPort : undefined,
+    remoteAddress: typeof candidate.remoteAddress === 'string' ? candidate.remoteAddress : undefined,
+    remotePort: typeof candidate.remotePort === 'number' ? candidate.remotePort : undefined,
+  };
+}
+
+function armShutdownWatchdog(finalState: OrchestrationState, logger: RunLogger) {
+  const armedAt = Date.now();
+  const timeout = setTimeout(() => {
+    const elapsedMs = Date.now() - armedAt;
+    const active = getActiveHandleSummary();
+    const resourceSummary = active.resourceTypes.length > 0 ? active.resourceTypes.join(', ') : '(none reported)';
+    writeDiagnostic(
+      `[neal:debug] process still alive ${elapsedMs}ms after final output; active resources: ${resourceSummary}\n`,
+      logger,
+    );
+    void logger.event('shutdown.hang_detected', {
+      elapsedMs,
+      phase: finalState.phase,
+      status: finalState.status,
+      topLevelMode: finalState.topLevelMode,
+      runDir: finalState.runDir,
+      activeResources: active,
+    });
+  }, 5000);
+  timeout.unref();
+
+  return async () => {
+    clearTimeout(timeout);
+    await logger.event('shutdown.watchdog_cleared', {
+      phase: finalState.phase,
+      status: finalState.status,
+      runDir: finalState.runDir,
+    });
+  };
 }
 
 async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['state'], statePath: string, logger: RunLogger) {
@@ -96,6 +181,15 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
     writeDiagnostic(`[neal] waiting for operator guidance; use: neal --recover ${statePath} --message \"...\"\n`);
   }
 
+  await logger.event('shutdown.final_output_begin', {
+    phase: finalState.phase,
+    status: finalState.status,
+    waitingForOperatorGuidance,
+    shouldResumeLastThread,
+    lastCoderSessionHandle,
+    runDir: finalState.runDir,
+  });
+
   process.stdout.write(
     JSON.stringify(
       {
@@ -124,13 +218,33 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
     ) + '\n',
   );
 
+  await logger.event('shutdown.final_output_written', {
+    phase: finalState.phase,
+    status: finalState.status,
+    waitingForOperatorGuidance,
+    runDir: finalState.runDir,
+  });
+
+  const clearShutdownWatchdog = armShutdownWatchdog(finalState, logger);
+
   if (shouldResumeLastThread && lastCoderSessionHandle) {
     writeDiagnostic(`[neal] resuming ${lastCoderSessionHandle}\n`);
+    await logger.event('shutdown.resuming_last_coder_thread', {
+      sessionHandle: lastCoderSessionHandle,
+      provider: finalState.agentConfig.coder.provider,
+      runDir: finalState.runDir,
+    });
     clearDiagnosticFooter();
     await resumeLastCoderSession(finalState.agentConfig.coder.provider, lastCoderSessionHandle);
   }
 
   clearDiagnosticFooter();
+  await logger.event('shutdown.footer_cleared', {
+    phase: finalState.phase,
+    status: finalState.status,
+    runDir: finalState.runDir,
+  });
+  await clearShutdownWatchdog();
 }
 
 async function resumeLastCoderSession(provider: AgentProvider, sessionHandle: string) {
