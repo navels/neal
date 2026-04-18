@@ -15,31 +15,47 @@ import {
   ReviewerRoundError,
   runBlockedRecoveryCoderRound,
   runCoderConsultResponseRound,
-  runCoderFinalCompletionSummaryRound,
   runDiagnosticAnalysisRound,
   runRecoveryPlanRound,
   runCoderScopeRound,
-  runCoderPlanResponseRound,
   runCoderPlanRound,
   runCoderResponseRound,
   runConsultReviewerRound,
-  runPlanReviewerRound,
-  runReviewerFinalCompletionRound,
   runReviewerRound,
 } from './agents.js';
-import { writeConsultMarkdown } from './consult.js';
-import { buildFinalCompletionPacket } from './final-completion.js';
-import { getFinalCompletionReviewArtifactPath, writeFinalCompletionReviewMarkdown } from './final-completion-review.js';
+import {
+  buildVerificationHint,
+  countOpenBlockingCanonicals,
+  findCanonicalId,
+  getExecuteResponseOpenFindings,
+  getExecuteReviewBlockReason,
+  getNextCanonicalIndex,
+  getReopenedCanonical,
+  hasRepeatedNonReduction,
+  isOpenBlockingFinding,
+  isOpenNonBlockingFinding,
+  mapDecisionToStatus,
+  resolveExecuteReviewDisposition,
+  runExecuteResponseAdjudication,
+  runExecuteReviewerAdjudication,
+  synthesizeExecuteResponseState,
+  synthesizeExecuteReviewerState,
+} from './adjudicator/execute.js';
+import {
+  isDerivedPlanReviewState,
+  isDiagnosticRecoveryPlanReviewState,
+  resolvePlanningAdjudicationContext,
+  runPlanningResponseAdjudication,
+  runPlanningReviewerAdjudication,
+  type PreparedPlanReview,
+} from './adjudicator/planning.js';
 import {
   getChangedFilesForRange,
-  getCommitMessage,
   getCommitRange,
-  getCommitSubjects,
   getDiffForRange,
   getDiffStatForRange,
   getHeadCommit,
   getWorktreeStatus,
-  squashCommits,
 } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writeDiagnostic } from './diagnostic.js';
@@ -49,21 +65,27 @@ import {
   notifyComplete,
   notifyInteractiveBlockedRecovery,
   notifyRetry,
-  notifyScopeAccepted,
 } from './orchestrator/notifications.js';
+import { writeExecutionArtifacts } from './orchestrator/artifacts.js';
+import { runFinalCompletionReviewPhase as runFinalCompletionReviewPhaseImpl, runFinalSquashPhase as runFinalSquashPhaseImpl } from './orchestrator/completion.js';
+import { isCoderTimeoutError, shouldNotifyFailure } from './orchestrator/failures.js';
+import {
+  runOnePass as runOnePassLoop,
+  type RunnablePhase,
+  type RunLoopHandlers,
+  type RunOnePassOptions,
+} from './orchestrator/run-loop.js';
 import { filterWrapperOwnedWorktreeStatus, persistSplitPlanRecovery } from './orchestrator/split-plan.js';
 import {
   adoptAcceptedDerivedPlan,
   appendCompletedScope,
-  appendDerivedSubScopeAndParentCompletion,
   computeNextScopeStateAfterSquash,
   shouldNotifyDerivedPlanAcceptance,
   transitionPlanReviewWithoutOpenFindings,
 } from './orchestrator/transitions.js';
 import { validatePlanDocument } from './plan-validation.js';
-import { writePlanProgressArtifacts } from './progress.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
-import { renderReviewMarkdown, writeReviewMarkdown } from './review.js';
+import { renderReviewMarkdown } from './review.js';
 import {
   getCurrentScopeLabel,
   getExecutionPlanPath,
@@ -94,6 +116,23 @@ import type {
 const execFile = promisify(execFileCallback);
 export { flushDerivedPlanNotifications };
 export { adoptAcceptedDerivedPlan, computeNextScopeStateAfterSquash };
+export { getExecuteReviewBlockReason, resolveExecuteReviewDisposition };
+export const runFinalCompletionReviewPhase = (
+  state: OrchestrationState,
+  statePath: string,
+  logger?: RunLogger,
+) =>
+  runFinalCompletionReviewPhaseImpl(state, statePath, logger, {
+    writeExecutionArtifacts,
+  });
+export const runFinalSquashPhase = (
+  state: OrchestrationState,
+  statePath: string,
+  logger?: RunLogger,
+) =>
+  runFinalSquashPhaseImpl(state, statePath, logger, {
+    writeExecutionArtifacts,
+  });
 
 function formatReviewFindings(
   findings: Array<{
@@ -157,102 +196,8 @@ function printFinalCompletionReviewResult(args: {
   writeDiagnostic(`${message}\n`, logger);
 }
 
-export function resolveExecuteReviewDisposition(args: {
-  hasBlockingFindings: boolean;
-  hasOpenNonBlockingFindings: boolean;
-  reachedMaxRounds: boolean;
-  shouldBlockForConvergence: boolean;
-  meaningfulProgressAction: ReviewerMeaningfulProgressAction;
-}) {
-  if (args.shouldBlockForConvergence) {
-    return {
-      phase: 'blocked' as const,
-      status: 'blocked' as const,
-      blockedFromPhase: 'reviewer_scope' as const,
-    };
-  }
-
-  if (args.hasBlockingFindings) {
-    // Blocking findings take precedence over a non-accept meaningful-progress verdict
-    // until the normal review loop has converged or exhausted its round budget.
-    return {
-      phase: args.reachedMaxRounds ? ('blocked' as const) : ('coder_response' as const),
-      status: args.reachedMaxRounds ? ('blocked' as const) : ('running' as const),
-      blockedFromPhase: args.reachedMaxRounds ? ('reviewer_scope' as const) : null,
-    };
-  }
-
-  if (args.meaningfulProgressAction !== 'accept') {
-    return {
-      phase: 'blocked' as const,
-      status: 'blocked' as const,
-      blockedFromPhase: 'reviewer_scope' as const,
-    };
-  }
-
-  if (args.hasOpenNonBlockingFindings) {
-    return {
-      phase: 'coder_optional_response' as const,
-      status: 'running' as const,
-      blockedFromPhase: null,
-    };
-  }
-
-  return {
-    phase: 'final_squash' as const,
-    status: 'running' as const,
-    blockedFromPhase: null,
-  };
-}
-
-export function getExecuteReviewBlockReason(args: {
-  cwd: string;
-  reopenedCanonical: string | null;
-  stalledBlockingCount: boolean;
-  reachedMaxRounds: boolean;
-  maxRounds: number;
-  meaningfulProgressAction: ReviewerMeaningfulProgressAction;
-  meaningfulProgressRationale: string;
-  parentScopeLabel: string;
-}) {
-  if (args.reopenedCanonical) {
-    return `review_stuck: blocking finding ${args.reopenedCanonical} reopened across multiple reviewer rounds`;
-  }
-
-  if (args.stalledBlockingCount) {
-    return `review_stuck: blocking findings did not decrease across ${getReviewStuckWindow(args.cwd)} consecutive reviewer rounds`;
-  }
-
-  if (args.reachedMaxRounds) {
-    return `reached max review rounds (${args.maxRounds}) with blocking findings still open`;
-  }
-
-  if (args.meaningfulProgressAction === 'block_for_operator') {
-    return (
-      `meaningful_progress: reviewer requested operator guidance before accepting parent objective ` +
-      `${args.parentScopeLabel}. ${args.meaningfulProgressRationale}`
-    );
-  }
-
-  if (args.meaningfulProgressAction === 'replace_plan') {
-    return (
-      `meaningful_progress: reviewer requested replacing the current scope for parent objective ` +
-      `${args.parentScopeLabel} rather than retrying it. ${args.meaningfulProgressRationale} ` +
-      `One available next step: neal --diagnose`
-    );
-  }
-
-  return null;
-}
 
 type ReviewFindingInput = Omit<ReviewFinding, 'id' | 'canonicalId' | 'status' | 'coderDisposition' | 'coderCommit'>;
-
-type PreparedPlanReview = {
-  executionShape: OrchestrationState['executionShape'];
-  reviewedPlanPath: string;
-  originalPlanPath: string;
-  validation: ReturnType<typeof validatePlanDocument>;
-};
 
 function getNormalizedPlanArtifactPath(state: OrchestrationState, planPath: string) {
   const parsed = parse(planPath);
@@ -424,15 +369,6 @@ function getRecoveryPlanCompletionProblem(marker: string | null) {
   return marker === 'AUTONOMY_DONE'
     ? null
     : 'Diagnostic recovery plan authoring must end with AUTONOMY_DONE or AUTONOMY_BLOCKED.';
-}
-
-async function writeExecutionArtifacts(state: OrchestrationState) {
-  await writeReviewMarkdown(state.reviewMarkdownPath, state);
-  await writeConsultMarkdown(state.consultMarkdownPath, state);
-  await writePlanProgressArtifacts(state);
-  if (state.topLevelMode === 'execute' && (state.finalCompletionSummary || state.finalCompletionReviewVerdict)) {
-    await writeFinalCompletionReviewMarkdown(getFinalCompletionReviewArtifactPath(state.runDir), state);
-  }
 }
 
 function countConsultsForCurrentScope(state: OrchestrationState) {
@@ -1385,70 +1321,8 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   return flushDerivedPlanNotifications(persistedState, statePath, logger, trimmedBlocker);
 }
 
-function normalizeFinalCommitMessage(message: string) {
-  const normalizedNewlines = message.replace(/\r\n/g, '\n');
-  const convertedEscapes = normalizedNewlines.replace(/\\n(?=- )/g, '\n');
-  return convertedEscapes.replace(/\n+$/, '') + '\n';
-}
-
-function isCoderTimeoutError(error: CoderRoundError) {
-  return /\btimed out after\b/i.test(error.message);
-}
-
 function isSplitPlanMarker(marker: string | null): marker is 'AUTONOMY_SPLIT_PLAN' {
   return marker === 'AUTONOMY_SPLIT_PLAN';
-}
-
-function isDerivedPlanReviewState(state: OrchestrationState) {
-  return state.topLevelMode === 'execute' && Boolean(state.derivedPlanPath) && state.derivedPlanStatus === 'pending_review';
-}
-
-function isDiagnosticRecoveryPlanReviewState(state: OrchestrationState) {
-  if (!state.diagnosticRecovery?.recoveryPlanPath) {
-    return false;
-  }
-
-  if (state.phase === 'diagnostic_recovery_review' || state.phase === 'diagnostic_recovery_adopt') {
-    return true;
-  }
-
-  if (state.phase === 'blocked' && state.blockedFromPhase === 'diagnostic_recovery_review') {
-    return true;
-  }
-
-  if (state.phase === 'coder_plan_response' || state.phase === 'coder_plan_optional_response') {
-    return state.rounds.at(-1)?.reviewedPlanPath === state.diagnosticRecovery.recoveryPlanPath;
-  }
-
-  return false;
-}
-
-function getPlanReviewMode(state: OrchestrationState) {
-  if (isDerivedPlanReviewState(state)) {
-    return 'derived-plan' as const;
-  }
-
-  if (isDiagnosticRecoveryPlanReviewState(state)) {
-    return 'recovery-plan' as const;
-  }
-
-  return 'plan' as const;
-}
-
-function getPlanReviewTargetPath(state: OrchestrationState) {
-  if (isDerivedPlanReviewState(state) && state.derivedPlanPath) {
-    return state.derivedPlanPath;
-  }
-
-  if (isDiagnosticRecoveryPlanReviewState(state) && state.diagnosticRecovery?.recoveryPlanPath) {
-    return state.diagnosticRecovery.recoveryPlanPath;
-  }
-
-  return state.planDoc;
-}
-
-function getPlanReviewRoundLimit(state: OrchestrationState) {
-  return isDerivedPlanReviewState(state) ? state.maxDerivedPlanReviewRounds : state.maxRounds;
 }
 
 function getDerivedPlanBlockedReason(state: OrchestrationState, reason: string) {
@@ -1478,7 +1352,7 @@ async function finalizePlanReviewResponseWithoutOpenFindings(
   derivedPlanReview: boolean,
   logger?: RunLogger,
 ) {
-  const reviewMode = getPlanReviewMode(state);
+  const { reviewMode } = resolvePlanningAdjudicationContext(state);
   let nextState = await saveState(statePath, transitionPlanReviewWithoutOpenFindings(state, reviewMode));
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
@@ -1525,27 +1399,6 @@ export async function finalizeBlockedPlanReviewResponse(
     await notifyBlocked(persistedState, blocker, logger);
   }
   return flushDerivedPlanNotifications(persistedState, statePath, logger, blocker);
-}
-
-function isTransientApiFailureMessage(message: string, subtype?: string | null) {
-  const text = `${subtype ?? ''}\n${message}`.toLowerCase();
-  return (
-    text.includes('api_error') ||
-    text.includes('api error') ||
-    text.includes('internal server error') ||
-    text.includes('overloaded') ||
-    text.includes('rate limit') ||
-    text.includes('temporar') ||
-    text.includes('try again')
-  );
-}
-
-function shouldNotifyFailure(error: CoderRoundError | ReviewerRoundError) {
-  if (error instanceof CoderRoundError) {
-    return isCoderTimeoutError(error) || isTransientApiFailureMessage(error.message);
-  }
-
-  return isTransientApiFailureMessage(error.message, error.subtype);
 }
 
 function shouldRetryCoderTimeout(
@@ -1647,6 +1500,21 @@ async function scheduleCoderTimeoutRetry(
     logger,
   );
   return retryState;
+}
+
+export function getExecuteResponseRetryPhase(mode: 'required' | 'optional') {
+  return mode === 'optional' ? 'coder_optional_response' : 'coder_response';
+}
+
+export function getPlanningResponseRetryPhase(mode: 'required' | 'optional') {
+  return mode === 'optional' ? 'coder_plan_optional_response' : 'coder_plan_response';
+}
+
+export function getExecuteResponsePhaseWithoutOpenFindings() {
+  return {
+    phase: 'final_squash' as const,
+    status: 'running' as const,
+  };
 }
 
 async function runCoderScopePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
@@ -2082,42 +1950,26 @@ async function runCoderPlanPhase(state: OrchestrationState, statePath: string, l
 }
 
 async function runReviewPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  if (!state.baseCommit) {
-    throw new Error('Cannot run reviewer round without baseCommit');
-  }
-  if (!state.currentScopeProgressJustification) {
-    throw new Error('Cannot run execute reviewer round without a coder progress justification');
-  }
-
   await logger?.event('phase.start', { phase: 'reviewer_scope', round: state.rounds.length + 1 });
-  const headCommit = await getHeadCommit(state.cwd);
-  const round = state.rounds.length + 1;
-  const parentScopeLabel = getParentScopeLabel(state);
-  const previousHeadCommit = state.rounds.at(-1)?.commitRange.head ?? null;
-  const commits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
-  const diffStat = await getDiffStatForRange(state.cwd, state.baseCommit, headCommit);
-  const diff = await getDiffForRange(state.cwd, state.baseCommit, headCommit);
-  const changedFiles = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
-  const recentHistorySummary = renderRecentAcceptedScopesSummary(state, parentScopeLabel);
   let claude;
+  let headCommit: string;
+  let reviewContext;
+  let reviewerSynthesis;
   try {
-    claude = await runReviewerRound({
-      reviewer: state.agentConfig.reviewer,
-      cwd: state.cwd,
-      planDoc: getExecutionPlanPath(state),
-      baseCommit: state.baseCommit,
-      headCommit,
-      commits,
-      previousHeadCommit,
-      diffStat,
-      diff,
-      changedFiles,
-      round,
-      reviewMarkdownPath: state.reviewMarkdownPath,
-      parentScopeLabel,
-      progressJustification: state.currentScopeProgressJustification,
-      recentHistorySummary,
+    ({ context: reviewContext, reviewerResult: claude, reviewInput: { headCommit }, } = await runExecuteReviewerAdjudication({
+      state,
       logger,
+      getHeadCommit,
+      getCommitRange,
+      getDiffStatForRange,
+      getDiffForRange,
+      getChangedFilesForRange,
+    }));
+    reviewerSynthesis = synthesizeExecuteReviewerState({
+      state,
+      context: reviewContext,
+      headCommit,
+      reviewerResult: claude,
     });
   } catch (error) {
     if (error instanceof ReviewerRoundError) {
@@ -2129,7 +1981,7 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
       await writeExecutionArtifacts(failedState);
       await logger?.event('phase.error', {
         phase: 'reviewer_scope',
-        round,
+        round: state.rounds.length + 1,
         sessionHandle: error.sessionHandle,
         subtype: error.subtype,
         message: error.message,
@@ -2147,86 +1999,33 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
     logger,
   );
 
-  let nextCanonicalIndex = getNextCanonicalIndex(state.findings);
-  const findings = claude.findings.map((finding, index) => {
-    const canonicalId = findCanonicalId(state.findings, finding) ?? `C${nextCanonicalIndex++}`;
-    return {
-      ...finding,
-      id: `R${round}-F${index + 1}`,
-      canonicalId,
-      status: 'open' as const,
-      coderDisposition: null,
-      coderCommit: null,
-    };
-  });
-  const mergedFindings = [...state.findings, ...findings];
-  const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
-  const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
-  const reachedMaxRounds = round >= state.maxRounds;
-  const openBlockingCanonicalCount = countOpenBlockingCanonicals(mergedFindings);
-  const stalledBlockingCount = hasRepeatedNonReduction(state.rounds, openBlockingCanonicalCount, state.cwd);
-  const reopenedCanonical = getReopenedCanonical(mergedFindings);
-  const shouldBlockForConvergence = Boolean(reopenedCanonical || stalledBlockingCount);
-  const disposition = resolveExecuteReviewDisposition({
-    hasBlockingFindings,
-    hasOpenNonBlockingFindings,
-    reachedMaxRounds,
-    shouldBlockForConvergence,
-    meaningfulProgressAction: claude.meaningfulProgress.action,
-  });
-  const blockReason = disposition.status === 'blocked'
-    ? getExecuteReviewBlockReason({
-        cwd: state.cwd,
-        reopenedCanonical,
-        stalledBlockingCount,
-        reachedMaxRounds: reachedMaxRounds && hasBlockingFindings,
-        maxRounds: state.maxRounds,
-        meaningfulProgressAction: claude.meaningfulProgress.action,
-        meaningfulProgressRationale: claude.meaningfulProgress.rationale,
-        parentScopeLabel,
-      })
-    : null;
-
   const nextState = await saveState(statePath, {
     ...state,
     reviewerSessionHandle: claude.sessionHandle,
-    phase: disposition.phase,
-    status: disposition.status,
+    phase: reviewerSynthesis.disposition.phase,
+    status: reviewerSynthesis.disposition.status,
     rounds: [
       ...state.rounds,
-      {
-        round,
-        reviewerSessionHandle: claude.sessionHandle,
-        reviewedPlanPath: getExecutionPlanPath(state),
-        normalizationApplied: false,
-        normalizationOperations: [],
-        normalizationScopeLabelMappings: [],
-        commitRange: {
-          base: state.baseCommit,
-          head: headCommit,
-        },
-        openBlockingCanonicalCount,
-        findings: findings.map((finding) => finding.id),
-      },
+      reviewerSynthesis.roundRecord,
     ],
-    findings: mergedFindings,
-    blockedFromPhase: disposition.blockedFromPhase,
+    findings: reviewerSynthesis.mergedFindings,
+    blockedFromPhase: reviewerSynthesis.disposition.blockedFromPhase,
     currentScopeMeaningfulProgressVerdict: claude.meaningfulProgress,
   });
 
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
     phase: 'reviewer_scope',
-    round,
+    round: reviewContext.round,
     sessionHandle: claude.sessionHandle,
-    findings: findings.length,
-    blockingFindings: findings.filter((finding) => finding.severity === 'blocking').length,
+    findings: reviewerSynthesis.findings.length,
+    blockingFindings: reviewerSynthesis.findings.filter((finding) => finding.severity === 'blocking').length,
     meaningfulProgressAction: claude.meaningfulProgress.action,
     nextPhase: nextState.phase,
   });
-  if (nextState.status === 'blocked' && blockReason) {
-    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blockReason, logger);
-    await notifyBlocked(persistedState, blockReason, logger);
+  if (nextState.status === 'blocked' && reviewerSynthesis.blockReason) {
+    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, reviewerSynthesis.blockReason, logger);
+    await notifyBlocked(persistedState, reviewerSynthesis.blockReason, logger);
     return persistedState;
   }
   return nextState;
@@ -2235,29 +2034,26 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
 async function runPlanReviewPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'reviewer_plan', round: state.rounds.length + 1 });
   const round = state.rounds.length + 1;
-  const derivedPlanReview = isDerivedPlanReviewState(state);
-  const diagnosticRecoveryPlanReview = isDiagnosticRecoveryPlanReviewState(state);
-  const reviewMode = getPlanReviewMode(state);
-  const roundLimit = getPlanReviewRoundLimit(state);
-  const reviewTargetPath = getPlanReviewTargetPath(state);
-  const preparedReview = await preparePlanReviewArtifact({
-    planPath: reviewTargetPath,
-    normalizedPlanPath: getNormalizedPlanArtifactPath(state, reviewTargetPath),
-  });
+  const normalizedPlanPath = getNormalizedPlanArtifactPath(state, resolvePlanningAdjudicationContext(state).reviewTargetPath);
   let claude;
+  let context;
+  let preparedReview;
+  let synthesizedReview;
   try {
-    claude = await runPlanReviewerRound({
-      reviewer: state.agentConfig.reviewer,
-      cwd: state.cwd,
-      planDoc: preparedReview.reviewedPlanPath,
+    ({
+      context,
+      preparedReview,
+      reviewerResult: claude,
+      synthesizedReview,
+    } = await runPlanningReviewerAdjudication({
+      state,
       round,
       reviewMarkdownPath: state.reviewMarkdownPath,
-      mode: reviewMode,
-      parentPlanDoc: derivedPlanReview || diagnosticRecoveryPlanReview ? state.planDoc : undefined,
-      derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
-      recoveryParentScopeLabel: diagnosticRecoveryPlanReview ? state.diagnosticRecovery?.parentScopeLabel : null,
+      normalizedPlanPath,
       logger,
-    });
+      preparePlanReviewArtifact,
+      synthesizePlanReviewFindings,
+    }));
   } catch (error) {
     if (error instanceof ReviewerRoundError) {
       const failedState = await saveState(statePath, {
@@ -2279,17 +2075,7 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
     }
     throw error;
   }
-
-  const synthesizedReview = await synthesizePlanReviewFindings({
-    planPath: reviewTargetPath,
-    round,
-    roundSummary: claude.summary,
-    findings: claude.findings.map((finding) => ({
-      ...finding,
-      source: finding.source,
-    })),
-    preparedReview,
-  });
+  const { derivedPlanReview, diagnosticRecoveryPlanReview, roundLimit } = context;
   const normalizedFindingInputs = synthesizedReview.findings;
 
   printReviewResult('plan-review', claude.summary, normalizedFindingInputs, logger);
@@ -2475,127 +2261,25 @@ async function runConsultPhase(state: OrchestrationState, statePath: string, log
   return nextState;
 }
 
-function isOpenBlockingFinding(finding: ReviewFinding) {
-  return finding.status === 'open' && finding.severity === 'blocking';
-}
-
-function isOpenNonBlockingFinding(finding: ReviewFinding) {
-  return finding.status === 'open' && finding.severity === 'non_blocking';
-}
-
-function normalizeText(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function getCanonicalSignature(finding: Pick<ReviewFinding, 'claim' | 'files'>) {
-  const files = [...finding.files].map((file) => file.trim().toLowerCase()).sort().join('|');
-  return `${normalizeText(finding.claim)}::${files}`;
-}
-
-function findCanonicalId(existingFindings: ReviewFinding[], finding: Pick<ReviewFinding, 'claim' | 'files'>) {
-  const signature = getCanonicalSignature(finding);
-  return existingFindings.find((item) => getCanonicalSignature(item) === signature)?.canonicalId ?? null;
-}
-
-function getNextCanonicalIndex(findings: ReviewFinding[]) {
-  const maxSeen = findings.reduce((max, finding) => {
-    const match = /^C(\d+)$/.exec(finding.canonicalId);
-    if (!match) {
-      return max;
-    }
-
-    return Math.max(max, Number(match[1]));
-  }, 0);
-
-  return maxSeen + 1;
-}
-
-function countOpenBlockingCanonicals(findings: ReviewFinding[]) {
-  return new Set(findings.filter(isOpenBlockingFinding).map((finding) => finding.canonicalId)).size;
-}
-
-function hasRepeatedNonReduction(rounds: OrchestrationState['rounds'], currentCount: number, cwd: string) {
-  const counts = [...rounds.map((round) => round.openBlockingCanonicalCount), currentCount];
-  const reviewStuckWindow = getReviewStuckWindow(cwd);
-  if (counts.length < reviewStuckWindow || currentCount <= 0) {
-    return false;
-  }
-
-  const recentCounts = counts.slice(-reviewStuckWindow);
-  for (let index = 1; index < recentCounts.length; index += 1) {
-    if (recentCounts[index] < recentCounts[index - 1]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function getReopenedCanonical(findings: ReviewFinding[]) {
-  const roundsByCanonical = new Map<string, Set<number>>();
-
-  for (const finding of findings) {
-    if (finding.severity !== 'blocking') {
-      continue;
-    }
-
-    const rounds = roundsByCanonical.get(finding.canonicalId) ?? new Set<number>();
-    rounds.add(finding.round);
-    roundsByCanonical.set(finding.canonicalId, rounds);
-  }
-
-  for (const [canonicalId, rounds] of roundsByCanonical.entries()) {
-    if (rounds.size >= 3) {
-      return canonicalId;
-    }
-  }
-
-  return null;
-}
-
-function mapDecisionToStatus(decision: 'fixed' | 'rejected' | 'deferred'): FindingStatus {
-  switch (decision) {
-    case 'fixed':
-      return 'fixed';
-    case 'rejected':
-      return 'rejected';
-    case 'deferred':
-      return 'deferred';
-  }
-}
-
-function buildVerificationHint(state: OrchestrationState) {
-  const latestRound = state.rounds.at(-1);
-  if (!latestRound) {
-    return [
-      'Verification state hint from neal:',
-      '- No prior reviewer round exists for this scope yet.',
-      '- Choose verification based on the plan and the concrete changes you make.',
-      '- Prefer focused reruns during active fixes. Reserve full-suite reruns for the final gate or for changes that materially invalidate earlier verification.',
-    ].join('\n');
-  }
-
-  return [
-    'Verification state hint from neal:',
-    `- This scope already reached reviewer feedback for commit range ${latestRound.commitRange.base}..${latestRound.commitRange.head}.`,
-    '- Treat that reviewed head as the current verified baseline unless you find concrete contrary evidence in the repository or review history.',
-    '- Prefer focused reruns while addressing review findings.',
-    '- Rerun full OSL and Portal suites only if your new changes materially invalidate that reviewed baseline or the plan explicitly requires new end-of-scope full-suite verification.',
-  ].join('\n');
-}
-
-async function runCoderResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  await logger?.event('phase.start', { phase: 'coder_response' });
-  const openFindings = state.findings.filter(isOpenBlockingFinding);
+async function runExecuteResponsePhase(
+  state: OrchestrationState,
+  statePath: string,
+  phase: 'coder_response' | 'coder_optional_response',
+  logger?: RunLogger,
+) {
+  const mode = phase === 'coder_optional_response' ? 'optional' : 'required';
+  await logger?.event('phase.start', { phase });
+  const openFindings = getExecuteResponseOpenFindings(state, mode === 'optional' ? 'optional' : undefined);
   if (openFindings.length === 0) {
+    const settled = getExecuteResponsePhaseWithoutOpenFindings();
     let nextState = await saveState(statePath, {
       ...state,
-      phase: 'done',
-      status: 'done',
+      phase: settled.phase,
+      status: settled.status,
     });
     await writeExecutionArtifacts(nextState);
     await logger?.event('phase.complete', {
-      phase: 'coder_response',
+      phase,
       openFindings: 0,
       nextPhase: nextState.phase,
     });
@@ -2605,33 +2289,21 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
   const beforeHead = await getHeadCommit(state.cwd);
   let codex;
   try {
-    codex = await runCoderResponseRound({
-      coder: state.agentConfig.coder,
-      cwd: state.cwd,
-      planDoc: getExecutionPlanPath(state),
-      progressMarkdownPath: state.progressMarkdownPath,
-      verificationHint: buildVerificationHint(state),
-      openFindings: openFindings.map((finding) => ({
-        id: finding.id,
-        source: finding.source,
-        claim: finding.claim,
-        requiredAction: finding.requiredAction,
-        severity: finding.severity,
-        files: finding.files,
-        roundSummary: finding.roundSummary,
-      })),
-      sessionHandle: state.coderSessionHandle,
+    ({ response: codex } = await runExecuteResponseAdjudication({
+      state,
+      mode: mode === 'optional' ? 'optional' : undefined,
       logger,
-    });
+    }));
   } catch (error) {
     if (error instanceof CoderRoundError) {
-      if (shouldRetryCoderTimeout(state, 'coder_optional_response', error)) {
-        return scheduleCoderTimeoutRetry(state, statePath, 'coder_optional_response', error, logger);
+      const retryPhase = getExecuteResponseRetryPhase(mode);
+      if (shouldRetryCoderTimeout(state, retryPhase, error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, retryPhase, error, logger);
       }
       if (isCoderTimeoutError(error)) {
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
-      const failedState = await persistCoderFailureState(state, statePath, 'coder_optional_response', error, logger);
+      const failedState = await persistCoderFailureState(state, statePath, retryPhase, error, logger);
       if (shouldNotifyFailure(error)) {
         await notifyBlocked(failedState, error.message, logger);
       }
@@ -2640,37 +2312,27 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
   }
   const afterHead = await getHeadCommit(state.cwd);
   const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
-  const latestCommit = createdCommits.at(-1) ?? null;
-  const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
-
-  const findings = state.findings.map((finding) => {
-    const response = responseById.get(finding.id);
-    if (!response) {
-      return finding;
-    }
-
-    return {
-      ...finding,
-      status: mapDecisionToStatus(response.decision),
-      coderDisposition: response.summary,
-      coderCommit: latestCommit,
-    };
+  const responseState = synthesizeExecuteResponseState({
+    state,
+    mode: mode === 'optional' ? 'optional' : undefined,
+    response: codex,
+    createdCommits,
   });
 
   const nextState = await saveState(statePath, {
     ...state,
     coderSessionHandle: codex.sessionHandle,
-    findings,
+    findings: responseState.findings,
     createdCommits: [...state.createdCommits, ...createdCommits],
-    phase: codex.payload.outcome === 'blocked' || codex.payload.outcome === 'split_plan' ? 'blocked' : 'reviewer_scope',
-    status: codex.payload.outcome === 'blocked' || codex.payload.outcome === 'split_plan' ? 'blocked' : 'running',
-    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_response' : null,
+    phase: responseState.nextPhase,
+    status: responseState.nextStatus,
+    blockedFromPhase: responseState.blockedFromPhase,
     coderRetryCount: 0,
   });
 
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
-    phase: 'coder_response',
+    phase,
     outcome: codex.payload.outcome,
     respondedFindings: codex.payload.responses.length,
     createdCommits,
@@ -2681,7 +2343,7 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
       nextState,
       statePath,
       {
-        sourcePhase: 'coder_response',
+        sourcePhase: phase,
         derivedPlanMarkdown: codex.payload.derivedPlan?.trim() ?? '',
         createdCommits,
         logger,
@@ -2694,8 +2356,13 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
   }
 
   if (nextState.status === 'blocked') {
-    const blocker = codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during review response';
-    if (shouldConsultBlockedCoder(nextState)) {
+    const blocker =
+      codex.payload.blocker?.trim() ||
+      codex.payload.summary.trim() ||
+      (mode === 'optional'
+        ? 'The coder reported a blocker while considering non-blocking review findings'
+        : 'The coder reported a blocker during review response');
+    if (mode !== 'optional' && shouldConsultBlockedCoder(nextState)) {
       const consultState = await saveState(statePath, {
         ...nextState,
         phase: 'reviewer_consult',
@@ -2722,128 +2389,6 @@ async function runCoderResponsePhase(state: OrchestrationState, statePath: strin
       });
       return consultState;
     }
-    const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blocker, logger);
-    await notifyBlocked(persistedState, blocker, logger);
-    return persistedState;
-  }
-  return nextState;
-}
-
-async function runCoderOptionalResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  await logger?.event('phase.start', { phase: 'coder_optional_response' });
-  const openFindings = state.findings.filter(isOpenNonBlockingFinding);
-  if (openFindings.length === 0) {
-    let nextState = await saveState(statePath, {
-      ...state,
-      phase: 'final_squash',
-      status: 'running',
-    });
-    await writeExecutionArtifacts(nextState);
-    await logger?.event('phase.complete', {
-      phase: 'coder_optional_response',
-      openFindings: 0,
-      nextPhase: nextState.phase,
-    });
-    return nextState;
-  }
-
-  const beforeHead = await getHeadCommit(state.cwd);
-  let codex;
-  try {
-    codex = await runCoderResponseRound({
-      coder: state.agentConfig.coder,
-      cwd: state.cwd,
-      planDoc: getExecutionPlanPath(state),
-      progressMarkdownPath: state.progressMarkdownPath,
-      verificationHint: buildVerificationHint(state),
-      openFindings: openFindings.map((finding) => ({
-        id: finding.id,
-        source: finding.source,
-        claim: finding.claim,
-        requiredAction: finding.requiredAction,
-        severity: finding.severity,
-        files: finding.files,
-        roundSummary: finding.roundSummary,
-      })),
-      mode: 'optional',
-      sessionHandle: state.coderSessionHandle,
-      logger,
-    });
-  } catch (error) {
-    if (error instanceof CoderRoundError) {
-      if (shouldRetryCoderTimeout(state, 'coder_response', error)) {
-        return scheduleCoderTimeoutRetry(state, statePath, 'coder_response', error, logger);
-      }
-      if (isCoderTimeoutError(error)) {
-        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
-      }
-      const failedState = await persistCoderFailureState(state, statePath, 'coder_response', error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
-    }
-    throw error;
-  }
-  const afterHead = await getHeadCommit(state.cwd);
-  const createdCommits = await getCommitRange(state.cwd, beforeHead, afterHead);
-  const latestCommit = createdCommits.at(-1) ?? null;
-  const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
-
-  const findings = state.findings.map((finding) => {
-    const response = responseById.get(finding.id);
-    if (!response) {
-      return finding;
-    }
-
-    return {
-      ...finding,
-      status: mapDecisionToStatus(response.decision),
-      coderDisposition: response.summary,
-      coderCommit: latestCommit,
-    };
-  });
-
-  const nextState = await saveState(statePath, {
-    ...state,
-    coderSessionHandle: codex.sessionHandle,
-    findings,
-    createdCommits: [...state.createdCommits, ...createdCommits],
-    phase: codex.payload.outcome === 'blocked' || codex.payload.outcome === 'split_plan' ? 'blocked' : 'final_squash',
-    status: codex.payload.outcome === 'blocked' || codex.payload.outcome === 'split_plan' ? 'blocked' : 'running',
-    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_optional_response' : null,
-    coderRetryCount: 0,
-  });
-
-  await writeExecutionArtifacts(nextState);
-  await logger?.event('phase.complete', {
-    phase: 'coder_optional_response',
-    outcome: codex.payload.outcome,
-    respondedFindings: codex.payload.responses.length,
-    createdCommits,
-    nextPhase: nextState.phase,
-  });
-  if (codex.payload.outcome === 'split_plan') {
-    return persistSplitPlanRecovery(
-      nextState,
-      statePath,
-      {
-        sourcePhase: 'coder_optional_response',
-        derivedPlanMarkdown: codex.payload.derivedPlan?.trim() ?? '',
-        createdCommits,
-        logger,
-      },
-      {
-        persistBlockedScope,
-        writeExecutionArtifacts,
-      },
-    );
-  }
-
-  if (nextState.status === 'blocked') {
-    const blocker =
-      codex.payload.blocker?.trim() ||
-      codex.payload.summary.trim() ||
-      'The coder reported a blocker while considering non-blocking review findings';
     const persistedState = await enterInteractiveBlockedRecovery(nextState, statePath, blocker, logger);
     await notifyBlocked(persistedState, blocker, logger);
     return persistedState;
@@ -2925,26 +2470,30 @@ async function runCoderConsultResponsePhase(state: OrchestrationState, statePath
   return nextState;
 }
 
-async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
+async function runPlanningResponsePhase(
+  state: OrchestrationState,
+  statePath: string,
+  phase: 'coder_plan_response' | 'coder_plan_optional_response',
+  logger?: RunLogger,
+) {
   if (!state.coderSessionHandle) {
-    throw new Error('Cannot run coder plan response phase without an existing coder session');
+    throw new Error(`Cannot run ${phase} phase without an existing coder session`);
   }
 
-  await logger?.event('phase.start', { phase: 'coder_plan_response' });
-  const derivedPlanReview = isDerivedPlanReviewState(state);
-  const reviewMode = getPlanReviewMode(state);
-  const diagnosticRecoveryPlanReview = reviewMode === 'recovery-plan';
-  const openFindings = state.findings.filter(isOpenBlockingFinding);
+  const mode = phase === 'coder_plan_optional_response' ? 'optional' : 'required';
+  await logger?.event('phase.start', { phase });
+  const planningContext = resolvePlanningAdjudicationContext(state);
+  const { derivedPlanReview, diagnosticRecoveryPlanReview } = planningContext;
+  const openFindings = state.findings.filter(mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding);
   if (openFindings.length === 0) {
-    return finalizePlanReviewResponseWithoutOpenFindings(state, statePath, 'coder_plan_response', derivedPlanReview, logger);
+    return finalizePlanReviewResponseWithoutOpenFindings(state, statePath, phase, derivedPlanReview, logger);
   }
 
   let codex;
   try {
-    codex = await runCoderPlanResponseRound({
-      coder: state.agentConfig.coder,
-      cwd: state.cwd,
-      planDoc: getPlanReviewTargetPath(state),
+    ({ response: codex } = await runPlanningResponseAdjudication({
+      state,
+      mode: mode === 'optional' ? 'optional' : undefined,
       openFindings: openFindings.map((finding) => ({
         id: finding.id,
         source: finding.source,
@@ -2954,22 +2503,18 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
         files: finding.files,
         roundSummary: finding.roundSummary,
       })),
-      sessionHandle: state.coderSessionHandle,
-      reviewMode,
-      parentPlanDoc: derivedPlanReview || diagnosticRecoveryPlanReview ? state.planDoc : undefined,
-      derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
-      recoveryParentScopeLabel: diagnosticRecoveryPlanReview ? state.diagnosticRecovery?.parentScopeLabel : null,
       logger,
-    });
+    }));
   } catch (error) {
     if (error instanceof CoderRoundError) {
-      if (shouldRetryCoderTimeout(state, 'coder_plan_optional_response', error)) {
-        return scheduleCoderTimeoutRetry(state, statePath, 'coder_plan_optional_response', error, logger);
+      const retryPhase = getPlanningResponseRetryPhase(mode);
+      if (shouldRetryCoderTimeout(state, retryPhase, error)) {
+        return scheduleCoderTimeoutRetry(state, statePath, retryPhase, error, logger);
       }
       if (isCoderTimeoutError(error)) {
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
-      const failedState = await persistCoderFailureState(state, statePath, 'coder_plan_optional_response', error, logger);
+      const failedState = await persistCoderFailureState(state, statePath, retryPhase, error, logger);
       if (shouldNotifyFailure(error)) {
         await notifyBlocked(failedState, error.message, logger);
       }
@@ -2999,135 +2544,33 @@ async function runCoderPlanResponsePhase(state: OrchestrationState, statePath: s
     phase:
       codex.payload.outcome === 'blocked'
         ? 'blocked'
-        : diagnosticRecoveryPlanReview
-          ? 'diagnostic_recovery_review'
-          : 'reviewer_plan',
-    status: codex.payload.outcome === 'blocked' ? 'blocked' : 'running',
-    derivedPlanStatus: codex.payload.outcome === 'blocked' && derivedPlanReview ? 'rejected' : state.derivedPlanStatus,
-    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_plan_response' : null,
-  });
-
-  await writeExecutionArtifacts(nextState);
-  await logger?.event('phase.complete', {
-    phase: 'coder_plan_response',
-    outcome: codex.payload.outcome,
-    respondedFindings: codex.payload.responses.length,
-    nextPhase: nextState.phase,
-  });
-  if (nextState.status === 'blocked') {
-    const blocker = getDerivedPlanBlockedReason(
-      state,
-      codex.payload.blocker?.trim() || codex.payload.summary.trim() || 'The coder reported a blocker during plan response',
-    );
-    return finalizeBlockedPlanReviewResponse(nextState, statePath, derivedPlanReview, blocker, logger);
-  }
-  return nextState;
-}
-
-async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  if (!state.coderSessionHandle) {
-    throw new Error('Cannot run coder plan optional response phase without an existing coder session');
-  }
-
-  await logger?.event('phase.start', { phase: 'coder_plan_optional_response' });
-  const derivedPlanReview = isDerivedPlanReviewState(state);
-  const reviewMode = getPlanReviewMode(state);
-  const diagnosticRecoveryPlanReview = reviewMode === 'recovery-plan';
-  const openFindings = state.findings.filter(isOpenNonBlockingFinding);
-  if (openFindings.length === 0) {
-    return finalizePlanReviewResponseWithoutOpenFindings(
-      state,
-      statePath,
-      'coder_plan_optional_response',
-      derivedPlanReview,
-      logger,
-    );
-  }
-
-  let codex;
-  try {
-    codex = await runCoderPlanResponseRound({
-      coder: state.agentConfig.coder,
-      cwd: state.cwd,
-      planDoc: getPlanReviewTargetPath(state),
-      openFindings: openFindings.map((finding) => ({
-        id: finding.id,
-        source: finding.source,
-        claim: finding.claim,
-        requiredAction: finding.requiredAction,
-        severity: finding.severity,
-        files: finding.files,
-        roundSummary: finding.roundSummary,
-      })),
-      mode: 'optional',
-      sessionHandle: state.coderSessionHandle,
-      reviewMode,
-      parentPlanDoc: derivedPlanReview || diagnosticRecoveryPlanReview ? state.planDoc : undefined,
-      derivedFromScopeNumber: derivedPlanReview ? state.derivedFromScopeNumber : null,
-      recoveryParentScopeLabel: diagnosticRecoveryPlanReview ? state.diagnosticRecovery?.parentScopeLabel : null,
-      logger,
-    });
-  } catch (error) {
-    if (error instanceof CoderRoundError) {
-      if (shouldRetryCoderTimeout(state, 'coder_plan_response', error)) {
-        return scheduleCoderTimeoutRetry(state, statePath, 'coder_plan_response', error, logger);
-      }
-      if (isCoderTimeoutError(error)) {
-        await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? state.coderSessionHandle, logger);
-      }
-      const failedState = await persistCoderFailureState(state, statePath, 'coder_plan_response', error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
-    }
-    throw error;
-  }
-  const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
-
-  const findings = state.findings.map((finding) => {
-    const response = responseById.get(finding.id);
-    if (!response) {
-      return finding;
-    }
-
-    return {
-      ...finding,
-      status: mapDecisionToStatus(response.decision),
-      coderDisposition: response.summary,
-      coderCommit: null,
-    };
-  });
-
-  const nextState = await saveState(statePath, {
-    ...state,
-    coderSessionHandle: codex.sessionHandle,
-    findings,
-    phase:
-      codex.payload.outcome === 'blocked'
-        ? 'blocked'
-        : derivedPlanReview
-          ? 'awaiting_derived_plan_execution'
+        : mode === 'optional'
+          ? derivedPlanReview
+            ? 'awaiting_derived_plan_execution'
+            : diagnosticRecoveryPlanReview
+              ? 'diagnostic_recovery_adopt'
+              : 'done'
           : diagnosticRecoveryPlanReview
-            ? 'diagnostic_recovery_adopt'
-            : 'done',
+            ? 'diagnostic_recovery_review'
+            : 'reviewer_plan',
     status:
       codex.payload.outcome === 'blocked'
         ? 'blocked'
-        : derivedPlanReview || diagnosticRecoveryPlanReview
-          ? 'running'
-          : 'done',
+        : mode === 'optional' && !derivedPlanReview && !diagnosticRecoveryPlanReview
+          ? 'done'
+          : 'running',
     derivedPlanStatus:
       codex.payload.outcome === 'blocked' && derivedPlanReview
         ? 'rejected'
-        : derivedPlanReview
+        : mode === 'optional' && derivedPlanReview
           ? 'accepted'
           : state.derivedPlanStatus,
-    blockedFromPhase: codex.payload.outcome === 'blocked' ? 'coder_plan_optional_response' : null,
+    blockedFromPhase: codex.payload.outcome === 'blocked' ? phase : null,
   });
 
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
-    phase: 'coder_plan_optional_response',
+    phase,
     outcome: codex.payload.outcome,
     respondedFindings: codex.payload.responses.length,
     nextPhase: nextState.phase,
@@ -3137,527 +2580,100 @@ async function runCoderPlanOptionalResponsePhase(state: OrchestrationState, stat
       state,
       codex.payload.blocker?.trim() ||
         codex.payload.summary.trim() ||
-        'The coder reported a blocker while considering non-blocking plan findings',
+        (mode === 'optional'
+          ? 'The coder reported a blocker while considering non-blocking plan findings'
+          : 'The coder reported a blocker during plan response'),
     );
     return finalizeBlockedPlanReviewResponse(nextState, statePath, derivedPlanReview, blocker, logger);
   }
-  if (shouldNotifyDerivedPlanAcceptance(state, nextState)) {
+  if (mode === 'optional' && shouldNotifyDerivedPlanAcceptance(state, nextState)) {
     return flushDerivedPlanNotifications(nextState, statePath, logger);
   }
-  if (nextState.status === 'done') {
+  if (mode === 'optional' && nextState.status === 'done') {
     await notifyComplete(nextState, 'Plan review converged', logger);
   }
   return nextState;
-}
-
-export async function runFinalSquashPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  if (!state.baseCommit) {
-    throw new Error('Cannot finalize without a baseCommit');
-  }
-
-  await logger?.event('phase.start', { phase: 'final_squash' });
-  const headCommit = await getHeadCommit(state.cwd);
-  const statusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(state.cwd));
-  if (statusOutput && !state.ignoreLocalChanges) {
-    throw new Error(`Cannot finalize with a dirty worktree:\n${statusOutput}`);
-  }
-
-  const commitSubjects = await getCommitSubjects(state.cwd, state.createdCommits);
-  const latestCreatedCommit = state.createdCommits.at(-1) ?? null;
-  const rawFinalMessage = latestCreatedCommit
-    ? await getCommitMessage(state.cwd, latestCreatedCommit)
-    : commitSubjects.at(-1)?.replace(/^[a-f0-9]+\s+/, '') || 'Finalize scope work';
-  const finalMessage = normalizeFinalCommitMessage(rawFinalMessage);
-  const finalSubject = finalMessage.split(/\r?\n/, 1)[0] || 'Finalize scope work';
-  const changedFilesSinceBase = await getChangedFilesForRange(state.cwd, state.baseCommit, headCommit);
-  const finalCommit =
-    state.createdCommits.length > 0 && changedFilesSinceBase.length > 0
-      ? await squashCommits(state.cwd, state.baseCommit, finalMessage)
-      : headCommit;
-
-  const archivedReviewPath = join(state.runDir, `REVIEW-${finalCommit}.md`);
-  const archivedReviewState = {
-    ...state,
-    finalCommit,
-    archivedReviewPath,
-  };
-  const completedScopes = appendDerivedSubScopeAndParentCompletion({
-    state,
-    finalCommit,
-    finalSubject,
-    changedFiles: changedFilesSinceBase,
-    archivedReviewPath,
-  });
-  const retrospectiveState = {
-    ...archivedReviewState,
-    completedScopes,
-  };
-  const provisionalNextState = computeNextScopeStateAfterSquash({
-    state,
-    finalCommit,
-    completedScopes,
-    archivedReviewPath,
-  });
-  const continueScopes = provisionalNextState.phase === 'coder_scope' && provisionalNextState.status === 'running';
-  let finalCompletionSummary = state.finalCompletionSummary;
-
-  if (!continueScopes && !finalCompletionSummary) {
-    const packet = await buildFinalCompletionPacket({
-      state: retrospectiveState,
-      terminalScope: {
-        finalCommit,
-        commitSubject: finalSubject,
-        changedFiles: changedFilesSinceBase,
-        archivedReviewPath,
-        marker: state.lastScopeMarker,
-      },
-    });
-    try {
-      const finalCompletion = await runCoderFinalCompletionSummaryRound({
-        coder: state.agentConfig.coder,
-        cwd: state.cwd,
-        planDoc: state.planDoc,
-        packet,
-        logger,
-      });
-      finalCompletionSummary = finalCompletion.summary;
-    } catch (error) {
-      if (error instanceof CoderRoundError) {
-        const failedState = await saveState(statePath, {
-          ...state,
-          finalCommit,
-          archivedReviewPath,
-          completedScopes,
-          coderSessionHandle: error.sessionHandle ?? state.coderSessionHandle,
-          status: 'failed',
-        });
-        await writeExecutionArtifacts(failedState);
-        await writeCheckpointRetrospective(
-          {
-            ...failedState,
-            finalCompletionSummary,
-          },
-          'failed',
-        );
-        await logger?.event('phase.error', {
-          phase: 'final_squash',
-          sessionHandle: error.sessionHandle ?? state.coderSessionHandle,
-          message: error.message,
-        });
-        if (shouldNotifyFailure(error)) {
-          await notifyBlocked(failedState, error.message, logger);
-        }
-      }
-      else {
-        const failedState = await saveState(statePath, {
-          ...state,
-          finalCommit,
-          archivedReviewPath,
-          completedScopes,
-          status: 'failed',
-        });
-        await writeExecutionArtifacts(failedState);
-        await writeCheckpointRetrospective(
-          {
-            ...failedState,
-            finalCompletionSummary,
-          },
-          'failed',
-        );
-        await logger?.event('phase.error', {
-          phase: 'final_squash',
-          sessionHandle: state.coderSessionHandle,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-      throw error;
-    }
-  }
-
-  const nextState = await saveState(
-    statePath,
-    continueScopes
-      ? {
-          ...provisionalNextState,
-          finalCompletionSummary,
-        }
-      : {
-          ...provisionalNextState,
-          blockedFromPhase: null,
-          finalCompletionSummary,
-          finalCompletionReviewVerdict: null,
-          finalCompletionResolvedAction: null,
-          finalCompletionContinueExecutionCapReached: false,
-        },
-  );
-
-  await writeFile(
-    archivedReviewPath,
-    renderReviewMarkdown({ ...archivedReviewState, finalCompletionSummary, finalCompletionReviewVerdict: null }),
-    'utf8',
-  );
-  await writeCheckpointRetrospective(retrospectiveState, 'scope_accepted');
-  if (continueScopes) {
-    await writeExecutionArtifacts(nextState);
-  } else {
-    await writeReviewMarkdown(nextState.reviewMarkdownPath, { ...nextState, finalCommit, archivedReviewPath });
-    await writePlanProgressArtifacts(nextState);
-    await writeFinalCompletionReviewMarkdown(
-      getFinalCompletionReviewArtifactPath(nextState.runDir),
-      { ...nextState, finalCommit, archivedReviewPath },
-    );
-  }
-  await logger?.event('phase.complete', {
-    phase: 'final_squash',
-    finalCommit,
-    archivedReviewPath,
-    continueScopes,
-  });
-  if (continueScopes) {
-    await notifyScopeAccepted(state, finalSubject, logger);
-  }
-
-  return nextState;
-}
-
-function getTerminalCompletedScope(state: OrchestrationState) {
-  const currentScopeLabel = getCurrentScopeLabel(state);
-  return state.completedScopes.find((scope) => scope.number === currentScopeLabel) ?? null;
-}
-
-function getFinalCompletionReviewBlockReason(args: {
-  reviewerAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
-  effectiveAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
-  rationale: string;
-  continueExecutionCount: number;
-  continueExecutionLimit: number;
-  capReached: boolean;
-}) {
-  if (args.effectiveAction === 'continue_execution') {
-    return `final_completion_review: reviewer reopened execution. ${args.rationale}`;
-  }
-
-  if (args.reviewerAction === 'continue_execution' && args.capReached) {
-    return (
-      'final_completion_review: reviewer requested more execution, ' +
-      `but the continue_execution cap (${args.continueExecutionLimit}) is already exhausted ` +
-      `after ${args.continueExecutionCount} reopen cycle(s). ${args.rationale} ` +
-      'One available next step is `neal --diagnose`.'
-    );
-  }
-
-  return `final_completion_review: reviewer blocked completion for operator guidance. ${args.rationale} One available next step is \`neal --diagnose\`.`;
-}
-
-export async function runFinalCompletionReviewPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
-  if (!state.finalCompletionSummary) {
-    throw new Error('Cannot run final completion review without a final completion summary');
-  }
-
-  await logger?.event('phase.start', { phase: 'final_completion_review' });
-  const terminalScope = getTerminalCompletedScope(state);
-  const packet = await buildFinalCompletionPacket({
-    state,
-    terminalScope: terminalScope
-      ? {
-          finalCommit: terminalScope.finalCommit,
-          commitSubject: terminalScope.commitSubject,
-          changedFiles: terminalScope.changedFiles,
-          archivedReviewPath: terminalScope.archivedReviewPath,
-          marker: terminalScope.marker,
-        }
-      : null,
-  });
-
-  let reviewerResult;
-  try {
-    reviewerResult = await runReviewerFinalCompletionRound({
-      reviewer: state.agentConfig.reviewer,
-      cwd: state.cwd,
-      planDoc: state.planDoc,
-      packet,
-      summary: state.finalCompletionSummary,
-      logger,
-    });
-  } catch (error) {
-    if (error instanceof ReviewerRoundError) {
-      const failedState = await saveState(statePath, {
-        ...state,
-        reviewerSessionHandle: error.sessionHandle,
-        status: 'failed',
-      });
-      await writeExecutionArtifacts(failedState);
-      await logger?.event('phase.error', {
-        phase: 'final_completion_review',
-        sessionHandle: error.sessionHandle,
-        subtype: error.subtype,
-        message: error.message,
-      });
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
-    }
-    throw error;
-  }
-
-  printFinalCompletionReviewResult(reviewerResult.verdict, logger);
-
-  const continueExecutionLimit = Math.max(0, getFinalCompletionContinueExecutionMax(state.cwd));
-  const capReached =
-    reviewerResult.verdict.action === 'continue_execution' &&
-    state.finalCompletionContinueExecutionCount >= continueExecutionLimit;
-  const effectiveAction =
-    reviewerResult.verdict.action === 'continue_execution' && capReached
-      ? 'block_for_operator'
-      : reviewerResult.verdict.action;
-  const continueExecutionCount =
-    reviewerResult.verdict.action === 'continue_execution' && !capReached
-      ? state.finalCompletionContinueExecutionCount + 1
-      : state.finalCompletionContinueExecutionCount;
-
-  const baseState = {
-    ...state,
-    reviewerSessionHandle: reviewerResult.sessionHandle,
-    finalCompletionReviewVerdict: reviewerResult.verdict,
-    finalCompletionResolvedAction: effectiveAction,
-    finalCompletionContinueExecutionCount: continueExecutionCount,
-    finalCompletionContinueExecutionCapReached: capReached,
-  };
-
-  const nextState =
-    effectiveAction === 'accept_complete'
-      ? await saveState(statePath, {
-          ...baseState,
-          phase: 'done',
-          status: 'done',
-          blockedFromPhase: null,
-        })
-      : effectiveAction === 'continue_execution'
-        ? await saveState(statePath, {
-            ...baseState,
-            baseCommit: state.finalCommit,
-            finalCommit: null,
-            archivedReviewPath: null,
-            coderSessionHandle: null,
-            coderRetryCount: 0,
-            currentScopeNumber: state.currentScopeNumber + 1,
-            lastScopeMarker: null,
-            currentScopeProgressJustification: null,
-            currentScopeMeaningfulProgressVerdict: null,
-            finalCompletionSummary: null,
-            rounds: [],
-            consultRounds: [],
-            findings: [],
-            createdCommits: [],
-            blockedFromPhase: null,
-            phase: 'coder_scope',
-            status: 'running',
-          })
-        : await saveState(statePath, {
-            ...baseState,
-            phase: 'blocked',
-            status: 'blocked',
-            blockedFromPhase: 'final_completion_review',
-          });
-
-  await writeExecutionArtifacts(nextState);
-  await logger?.event('phase.complete', {
-    phase: 'final_completion_review',
-    action: reviewerResult.verdict.action,
-    resultingAction: effectiveAction,
-    continueExecutionCount,
-    continueExecutionLimit,
-    continueExecutionCapReached: capReached,
-    reviewerSessionHandle: reviewerResult.sessionHandle,
-    nextPhase: nextState.phase,
-  });
-
-  if (effectiveAction === 'accept_complete') {
-    const finalSubject = terminalScope?.commitSubject ?? 'Finalize scope work';
-    await notifyComplete(nextState, finalSubject, logger);
-  } else if (effectiveAction === 'block_for_operator') {
-    const reason = getFinalCompletionReviewBlockReason({
-      reviewerAction:
-        reviewerResult.verdict.action === 'accept_complete' ? 'block_for_operator' : reviewerResult.verdict.action,
-      effectiveAction,
-      rationale: reviewerResult.verdict.rationale,
-      continueExecutionCount,
-      continueExecutionLimit,
-      capReached,
-    });
-    await notifyBlocked(nextState, reason, logger);
-  }
-
-  return nextState;
-}
-
-type RunnablePhase = Extract<
-  OrchestrationState['phase'],
-  | 'coder_plan'
-  | 'diagnostic_recovery_analyze'
-  | 'diagnostic_recovery_author_plan'
-  | 'diagnostic_recovery_review'
-  | 'reviewer_plan'
-  | 'coder_plan_response'
-  | 'coder_plan_optional_response'
-  | 'awaiting_derived_plan_execution'
-  | 'coder_scope'
-  | 'reviewer_scope'
-  | 'coder_response'
-  | 'coder_optional_response'
-  | 'reviewer_consult'
-  | 'coder_consult_response'
-  | 'interactive_blocked_recovery'
-  | 'final_squash'
-  | 'final_completion_review'
->;
-
-const RUNNABLE_PHASES = new Set<RunnablePhase>([
-  'coder_plan',
-  'diagnostic_recovery_analyze',
-  'diagnostic_recovery_author_plan',
-  'diagnostic_recovery_review',
-  'reviewer_plan',
-  'coder_plan_response',
-  'coder_plan_optional_response',
-  'awaiting_derived_plan_execution',
-  'coder_scope',
-  'reviewer_scope',
-  'coder_response',
-  'coder_optional_response',
-  'reviewer_consult',
-  'coder_consult_response',
-  'interactive_blocked_recovery',
-  'final_squash',
-  'final_completion_review',
-]);
-
-function isRunnablePhase(phase: OrchestrationState['phase']): phase is RunnablePhase {
-  return RUNNABLE_PHASES.has(phase as RunnablePhase);
 }
 
 export async function runOnePass(
   state: OrchestrationState,
   statePath: string,
   logger?: RunLogger,
-  options?: {
-    shouldStopAfterCurrentScope?: () => boolean;
-    onCoderSessionHandle?: (sessionHandle: string | null) => void;
-    onDisplayState?: (state: OrchestrationState, phaseStartedAt: number) => void | Promise<void>;
-  },
+  options?: RunOnePassOptions,
 ) {
-  let currentState = state;
+  const runPhaseWithCoderSessionHandle = async (runPhase: () => Promise<OrchestrationState>) => {
+    const nextState = await runPhase();
+    options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
+    return nextState;
+  };
 
-  while (
-    isRunnablePhase(currentState.phase) &&
-    (currentState.phase !== 'interactive_blocked_recovery' || hasPendingInteractiveBlockedRecoveryTurn(currentState))
-  ) {
-    const phaseStartedAt = Date.now();
-    await options?.onDisplayState?.(currentState, phaseStartedAt);
-    const stopHeartbeat = startPhaseHeartbeat(currentState.phase, () => currentState, logger);
-    try {
-      const currentPhase = currentState.phase;
-      const phaseHandlers: Record<RunnablePhase, () => Promise<OrchestrationState>> = {
-        coder_plan: async () => {
-          const nextState = await runCoderPlanPhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        diagnostic_recovery_analyze: async () => {
-          const nextState = await runDiagnosticRecoveryAnalyzePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        diagnostic_recovery_author_plan: async () => {
-          const nextState = await runDiagnosticRecoveryAuthorPlanPhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        diagnostic_recovery_review: async () => runPlanReviewPhase(currentState, statePath, logger),
-        reviewer_plan: async () => runPlanReviewPhase(currentState, statePath, logger),
-        coder_plan_response: async () => {
-          const nextState = await runCoderPlanResponsePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        coder_plan_optional_response: async () => {
-          const nextState = await runCoderPlanOptionalResponsePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        awaiting_derived_plan_execution: async () => {
-          const nextState = await saveState(statePath, adoptAcceptedDerivedPlan(currentState));
-          await writeExecutionArtifacts(nextState);
-          await logger?.event('phase.complete', {
-            phase: 'awaiting_derived_plan_execution',
-            nextPhase: nextState.phase,
-            scopeNumber: getCurrentScopeLabel(nextState),
-            planDoc: getExecutionPlanPath(nextState),
-          });
-          return nextState;
-        },
-        coder_scope: async () => {
-          const nextState = await runCoderScopePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        reviewer_scope: async () => runReviewPhase(currentState, statePath, logger),
-        coder_response: async () => {
-          const nextState = await runCoderResponsePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        coder_optional_response: async () => {
-          const nextState = await runCoderOptionalResponsePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        reviewer_consult: async () => runConsultPhase(currentState, statePath, logger),
-        coder_consult_response: async () => {
-          const nextState = await runCoderConsultResponsePhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        interactive_blocked_recovery: async () => {
-          const nextState = await runInteractiveBlockedRecoveryPhase(currentState, statePath, logger);
-          options?.onCoderSessionHandle?.(nextState.coderSessionHandle);
-          return nextState;
-        },
-        final_squash: async () => runFinalSquashPhase(currentState, statePath, logger),
-        final_completion_review: async () => runFinalCompletionReviewPhase(currentState, statePath, logger),
-      };
+  const handlers: RunLoopHandlers = {
+    coder_plan: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() => runCoderPlanPhase(currentState, statePath, logger)),
+    diagnostic_recovery_analyze: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() => runDiagnosticRecoveryAnalyzePhase(currentState, statePath, logger)),
+    diagnostic_recovery_author_plan: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() => runDiagnosticRecoveryAuthorPlanPhase(currentState, statePath, logger)),
+    reviewer_plan: async (currentState) => runPlanReviewPhase(currentState, statePath, logger),
+    coder_plan_response: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() =>
+        runPlanningResponsePhase(
+          currentState,
+          statePath,
+          currentState.phase as 'coder_plan_response' | 'coder_plan_optional_response',
+          logger,
+        )),
+    awaiting_derived_plan_execution: async (currentState) => {
+      const nextState = await saveState(statePath, adoptAcceptedDerivedPlan(currentState));
+      await writeExecutionArtifacts(nextState);
+      await logger?.event('phase.complete', {
+        phase: 'awaiting_derived_plan_execution',
+        nextPhase: nextState.phase,
+        scopeNumber: getCurrentScopeLabel(nextState),
+        planDoc: getExecutionPlanPath(nextState),
+      });
+      return nextState;
+    },
+    coder_scope: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() => runCoderScopePhase(currentState, statePath, logger)),
+    reviewer_scope: async (currentState) => runReviewPhase(currentState, statePath, logger),
+    coder_response: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() =>
+        runExecuteResponsePhase(
+          currentState,
+          statePath,
+          currentState.phase as 'coder_response' | 'coder_optional_response',
+          logger,
+        )),
+    reviewer_consult: async (currentState) => runConsultPhase(currentState, statePath, logger),
+    coder_consult_response: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() => runCoderConsultResponsePhase(currentState, statePath, logger)),
+    interactive_blocked_recovery: async (currentState) =>
+      runPhaseWithCoderSessionHandle(() => runInteractiveBlockedRecoveryPhase(currentState, statePath, logger)),
+    final_squash: async (currentState) =>
+      runFinalSquashPhaseImpl(currentState, statePath, logger, {
+        writeExecutionArtifacts,
+      }),
+    final_completion_review: async (currentState) =>
+      runFinalCompletionReviewPhaseImpl(currentState, statePath, logger, {
+        writeExecutionArtifacts,
+      }),
+  };
 
-      currentState = await phaseHandlers[currentPhase]();
-      await options?.onDisplayState?.(currentState, Date.now());
-
-      const pausedAfterScopeBoundary =
-        currentState.phase === 'coder_scope' &&
-        currentState.status === 'running' &&
-        (currentPhase === 'final_squash' || currentPhase === 'final_completion_review') &&
-        options?.shouldStopAfterCurrentScope?.();
-      if (pausedAfterScopeBoundary) {
-        await logger?.event('run.paused_after_scope', {
-          currentScopeNumber: currentState.currentScopeNumber,
-          phase: currentState.phase,
-          status: currentState.status,
-        });
-        return currentState;
-      }
-    } finally {
-      stopHeartbeat();
-    }
-  }
-
-  await logger?.event('run.complete', {
-    phase: currentState.phase,
-    status: currentState.status,
-    finalCommit: currentState.finalCommit,
-    archivedReviewPath: currentState.archivedReviewPath,
+  return runOnePassLoop({
+    state,
+    statePath,
+    logger,
+    options,
+    runtime: {
+      hasPendingInteractiveBlockedRecoveryTurn,
+      startPhaseHeartbeat,
+      writeCheckpointRetrospective: async (currentState, reason) => {
+        await writeCheckpointRetrospective(currentState, reason);
+      },
+    },
+    handlers,
   });
-  if (currentState.phase === 'blocked' || currentState.phase === 'done') {
-    await writeCheckpointRetrospective(currentState, currentState.phase === 'blocked' ? 'blocked' : 'done');
-  }
-  return currentState;
 }
 
 function shouldResumeAcceptedDerivedPlan(state: OrchestrationState) {

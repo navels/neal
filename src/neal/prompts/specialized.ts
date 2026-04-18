@@ -3,6 +3,7 @@ import {
   AUTONOMY_BLOCKED,
   AUTONOMY_DONE,
   buildProgressSection,
+  getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
 import { getPromptSpec } from './specs.js';
 
@@ -189,6 +190,7 @@ export function buildDiagnosticAnalysisPrompt(args: {
     '',
     'You may inspect the progress artifact for run context, but do not edit wrapper-owned artifacts.',
     'Keep any commentary outside the artifact body out of the response.',
+    ...getTerminalMarkerArtifactBoundaryLines(),
     `End your response with exactly one terminal marker on the final line: ${AUTONOMY_DONE} or ${AUTONOMY_BLOCKED}.`,
     'Use AUTONOMY_BLOCKED only if you cannot produce the diagnostic analysis artifact from the available repository and baseline context.',
     '',
@@ -249,6 +251,7 @@ export function buildRecoveryPlanPrompt(args: {
     '',
     'The plan must be Neal-executable and ready for ordinary Neal plan review in a later phase.',
     'Keep any commentary outside the artifact body out of the response.',
+    ...getTerminalMarkerArtifactBoundaryLines(),
     `End your response with exactly one terminal marker on the final line: ${AUTONOMY_DONE} or ${AUTONOMY_BLOCKED}.`,
     'Use AUTONOMY_BLOCKED only if the diagnostic analysis does not provide enough grounded information to author a safe recovery plan.',
     '',

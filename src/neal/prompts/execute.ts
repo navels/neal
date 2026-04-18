@@ -7,6 +7,7 @@ import {
   buildProgressSection,
   getCanonicalPlanContractLines,
   getExecuteScopeProgressPayloadContractLines,
+  getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
 import { getPromptSpec } from './specs.js';
 
@@ -46,6 +47,7 @@ export function buildScopePrompt(planDoc: string, progressText: string) {
     `When you return ${AUTONOMY_SPLIT_PLAN}, include a derived plan markdown artifact before the final marker.`,
     'The derived plan must use the same Neal-executable contract as a top-level plan. Any derived-plan-specific sections are optional additive context only; they must not replace or rename the canonical machine-consumed sections.',
     ...getExecuteScopeProgressPayloadContractLines(),
+    ...getTerminalMarkerArtifactBoundaryLines(),
     'The final line of your response must still be the terminal marker.',
     ...getCanonicalPlanContractLines(),
     'Verify the relevant work before you finish.',

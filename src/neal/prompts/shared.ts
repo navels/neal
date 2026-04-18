@@ -34,6 +34,16 @@ export function getCanonicalPlanContractLines() {
   ];
 }
 
+export function getTerminalMarkerArtifactBoundaryLines() {
+  return [
+    'Protocol markers are terminal-response control signals, not artifact content.',
+    `Never write ${AUTONOMY_DONE}, ${AUTONOMY_BLOCKED}, ${AUTONOMY_SCOPE_DONE}, or ${AUTONOMY_SPLIT_PLAN} into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.`,
+    'Finish writing the artifact body first, stop editing files, and then emit exactly one terminal marker only in your final terminal response.',
+    'Bad example: appending a marker line to the plan or recovery artifact itself.',
+    'Good example: leave the file content marker-free, then output the marker as the final line of your terminal response.',
+  ];
+}
+
 export function buildProgressSection(progressText: string) {
   return progressText.trim() || '(no current progress summary available)';
 }

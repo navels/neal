@@ -3,6 +3,7 @@ import {
   AUTONOMY_BLOCKED,
   AUTONOMY_DONE,
   getCanonicalPlanContractLines,
+  getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
 import { getPromptSpec } from './specs.js';
 
@@ -94,6 +95,7 @@ export function buildPlanningPrompt(planDoc: string) {
     'Make the final plan explicit about scope boundaries, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any repeated-scope selection rules.',
     'Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.',
     'Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.',
+    ...getTerminalMarkerArtifactBoundaryLines(),
     ...getCanonicalPlanContractLines(),
     'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
     '',
@@ -204,6 +206,7 @@ export function buildCoderPlanResponsePrompt(args: {
       : reviewMode === 'recovery-plan'
         ? 'Revise the recovery plan so it uses the same Neal-executable contract as a top-level plan. Any diagnostic-recovery-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.'
         : 'Where the current repository already answers an implementation detail, revise the plan to use the concrete existing symbol names and exports instead of leaving generic or redundant instructions.',
+    ...getTerminalMarkerArtifactBoundaryLines(),
     ...(reviewMode === 'derived-plan' || reviewMode === 'recovery-plan' ? getCanonicalPlanContractLines() : []),
     'Use `fixed` only when you actually revised the plan to resolve the finding.',
     'Use `rejected` only when the finding is incorrect and your summary explains why.',

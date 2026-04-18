@@ -30,6 +30,8 @@ test('planning prompt requires an explicit execution-shape declaration', () => {
   assert.match(prompt, /executionShape: multi_scope/);
   assert.match(prompt, /Choose `multi_scope` when the work changes orchestration or state-machine behavior/);
   assert.match(prompt, /Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope/);
+  assert.match(prompt, /Protocol markers are terminal-response control signals, not artifact content/);
+  assert.match(prompt, /Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact/);
 });
 
 test('derived-plan prompts require the same canonical Neal-executable contract', () => {
@@ -71,6 +73,8 @@ test('derived-plan prompts require the same canonical Neal-executable contract',
   assert.match(scopePrompt, /whyNotRedundant/);
   assert.match(scopePrompt, /nextStepUnlocked/);
   assert.match(scopePrompt, /The final line of your response must still be the terminal marker/);
+  assert.match(scopePrompt, /Protocol markers are terminal-response control signals, not artifact content/);
+  assert.match(planResponsePrompt, /Protocol markers are terminal-response control signals, not artifact content/);
 
   assert.match(reviewerPrompt, /same canonical `## Execution Shape` \/ `## Execution Queue` contract as a top-level plan/);
   assert.match(reviewerPrompt, /canonical Neal-executable plan shape/);
@@ -102,6 +106,7 @@ test('recovery-plan prompts keep review and response anchored to the active run'
   assert.match(planResponsePrompt, /Edit only the diagnostic recovery plan artifact/);
   assert.match(planResponsePrompt, /adopt back into the active run safely/);
   assert.match(planResponsePrompt, /same Neal-executable contract as a top-level plan/);
+  assert.match(planResponsePrompt, /Protocol markers are terminal-response control signals, not artifact content/);
 });
 
 test('plan reviewer schema and prompt require executionShape confirmation', () => {

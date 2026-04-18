@@ -11,6 +11,7 @@ import {
   buildRecoveryPlanPrompt,
   buildReviewerPrompt,
 } from '../src/neal/agents.js';
+import { ADJUDICATION_ADJACENT_FLOWS, ADJUDICATION_SPECS, getAdjudicationSpec, getReviewerCapability } from '../src/neal/adjudicator/specs.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { renderConsultMarkdown } from '../src/neal/consult.js';
 import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
@@ -171,6 +172,24 @@ test('diagnostic analysis prompt carries explicit baseline and artifact-writing 
   assert.match(prompt, /Why is this scope strategically non-convergent\?/);
   assert.match(prompt, /## Recovery Implications/);
   assert.match(prompt, /AUTONOMY_DONE or AUTONOMY_BLOCKED/);
+  assert.match(prompt, /Protocol markers are terminal-response control signals, not artifact content/);
+});
+
+test('recovery plan prompt keeps protocol markers out of the authored artifact', () => {
+  const prompt = buildRecoveryPlanPrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: '## Current Scope\n- Status: blocked\n',
+    question: 'How should this blocker be recovered?',
+    target: 'src/neal/orchestrator.ts',
+    analysisArtifactPath: '/tmp/DIAGNOSTIC_RECOVERY_1_ANALYSIS.md',
+    recoveryPlanPath: '/tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md',
+    baselineRef: 'abc123',
+    baselineSource: 'explicit',
+  });
+
+  assert.match(prompt, /Write the markdown body that Neal will save to \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
+  assert.match(prompt, /Protocol markers are terminal-response control signals, not artifact content/);
+  assert.match(prompt, /Good example: leave the file content marker-free, then output the marker as the final line of your terminal response/);
 });
 
 test('prompt spec inventory covers the curated role-task surface with explicit schema targets', () => {
@@ -242,6 +261,96 @@ test('prompt spec inventory covers the curated role-task surface with explicit s
   const completionReviewer = getPromptSpec('completion_reviewer');
   assert.equal(completionReviewer.baseInstructions.modulePath, 'src/neal/prompts/specialized.ts');
   assert.equal(completionReviewer.variants.every((variant) => variant.baseInstructions.modulePath === 'src/neal/prompts/specialized.ts'), true);
+});
+
+test('adjudication spec inventory maps in-scope loops and leaves consult-style flows adjacent', async () => {
+  assert.deepEqual(
+    ADJUDICATION_SPECS.map((spec) => spec.id),
+    ['plan_review', 'derived_plan_review', 'execute_review', 'recovery_plan_review', 'final_completion_review'],
+  );
+
+  const executeReview = getAdjudicationSpec('execute_review');
+  assert.equal(executeReview.family, 'execute_review');
+  assert.equal(executeReview.reviewer.prompt.promptSpecId, 'scope_reviewer');
+  assert.deepEqual(
+    executeReview.reviewer.capabilities?.map((capability) => `${capability.promptSpecId}:${capability.variantKind}`),
+    ['scope_reviewer:meaningful_progress'],
+  );
+  assert.equal(executeReview.coder.primary.output.protocol, 'terminal_marker');
+  assert.equal(executeReview.coder.primary.output.companionParser, 'parseExecuteScopeProgressPayload');
+
+  const planReview = getAdjudicationSpec('plan_review');
+  assert.equal(planReview.family, 'plan_review');
+  assert.equal(planReview.reviewer.output.schemaBuilder, 'buildPlanReviewerSchema');
+
+  const finalCompletion = getAdjudicationSpec('final_completion_review');
+  assert.equal(finalCompletion.family, 'final_completion');
+  assert.equal(finalCompletion.coder.response, null);
+  assert.equal(finalCompletion.transitionSignals.includes('continue_execution'), true);
+
+  assert.deepEqual(
+    ADJUDICATION_ADJACENT_FLOWS.map((flow) => flow.id),
+    ['consult_review', 'interactive_blocked_recovery', 'diagnostic_analysis', 'recovery_plan_authoring'],
+  );
+  assert.equal(ADJUDICATION_ADJACENT_FLOWS.find((flow) => flow.id === 'consult_review')?.status, 'adjacent_v1');
+  assert.equal(
+    ADJUDICATION_ADJACENT_FLOWS.find((flow) => flow.id === 'diagnostic_analysis')?.status,
+    'single_coder_adjacent_v1',
+  );
+
+  const inventoryDoc = await readFile(join(process.cwd(), 'docs', 'ADJUDICATOR_INVENTORY.md'), 'utf8');
+  const landedLineCountMatch = inventoryDoc.match(/## Landed State[\s\S]*?`src\/neal\/orchestrator\.ts`: `(\d+)` lines/);
+  assert.match(inventoryDoc, /use the terms `adjudicator` and `adjudication spec`/);
+  assert.match(inventoryDoc, /src\/neal\/orchestrator\.ts`: `3810` lines/);
+  assert.match(inventoryDoc, /phaseHandlers` branches: `17`/);
+  assert.match(inventoryDoc, /Informal real-run prerequisite audit: `2026-04-18`/);
+  assert.match(inventoryDoc, /evidence posture: this document records the audit checkpoint and the deterministic regression baseline/);
+  assert.match(inventoryDoc, /## Landed State/);
+  assert.match(inventoryDoc, /src\/neal\/orchestrator\/run-loop\.ts/);
+  assert.match(inventoryDoc, /src\/neal\/orchestrator\/completion\.ts/);
+  assert.match(inventoryDoc, /five in-scope adjudication specs now share three explicit adjudication-spec families/);
+  assert.match(inventoryDoc, /runOnePass` handler entries in `src\/neal\/orchestrator\.ts`: `14`/);
+  assert.match(inventoryDoc, /reduced from `8` to `4`/);
+  assert.match(inventoryDoc, /meaningful-progress remains a capability of this family, not a separate adjudication spec/);
+  assert.match(inventoryDoc, /transitionSignals.*inventory-level contract labels/);
+  assert.ok(landedLineCountMatch, 'expected landed-state orchestrator line count in adjudicator inventory');
+  const documentedLineCount = Number(landedLineCountMatch[1]);
+  assert.ok(documentedLineCount <= 3048, `expected documented orchestrator.ts line count <= 3048, got ${documentedLineCount}`);
+
+  const orchestratorSource = await readFile(join(process.cwd(), 'src', 'neal', 'orchestrator.ts'), 'utf8');
+  const handlersBlock = orchestratorSource.match(/const handlers: RunLoopHandlers = \{([\s\S]*?)\n  \};/);
+  assert.ok(handlersBlock, 'expected runOnePass handlers block in orchestrator source');
+  const handlerCount = [...handlersBlock[1].matchAll(/^    [a-z_]+:/gm)].length;
+  assert.equal(handlerCount, 14);
+
+  const adjudicationWrapperCount = [
+    'runPlanReviewPhase',
+    'runReviewPhase',
+    'runExecuteResponsePhase',
+    'runPlanningResponsePhase',
+  ].filter((name) => orchestratorSource.includes(`async function ${name}(`)).length;
+  assert.equal(adjudicationWrapperCount, 4);
+});
+
+test('execute review requires meaningful-progress as an adjudication-spec reviewer capability', () => {
+  const executeReview = getAdjudicationSpec('execute_review');
+  const capability = getReviewerCapability(executeReview, 'meaningful_progress');
+  assert.equal(capability.promptSpecId, 'scope_reviewer');
+  assert.equal(capability.variantKind, 'meaningful_progress');
+  assert.equal(capability.exportName, 'buildReviewerPrompt');
+
+  const malformedExecuteReview = {
+    ...executeReview,
+    reviewer: {
+      ...executeReview.reviewer,
+      capabilities: [],
+    },
+  };
+
+  assert.throws(
+    () => getReviewerCapability(malformedExecuteReview, 'meaningful_progress'),
+    /execute_review reviewer is missing capability meaningful_progress/,
+  );
 });
 
 test('final completion packet summarizes whole-plan completion context', async () => {

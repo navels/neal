@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
@@ -12,7 +12,10 @@ import {
   computeNextScopeStateAfterSquash,
   finalizeBlockedPlanReviewResponse,
   flushDerivedPlanNotifications,
+  getExecuteResponsePhaseWithoutOpenFindings,
+  getExecuteResponseRetryPhase,
   getExecuteReviewBlockReason,
+  getPlanningResponseRetryPhase,
   loadOrInitialize,
   resolveExecuteReviewDisposition,
   recordInteractiveBlockedRecoveryGuidance,
@@ -22,6 +25,7 @@ import {
   runOnePass,
   startDiagnosticRecovery,
 } from '../src/neal/orchestrator.js';
+import { resolveExecuteAdjudicationContext } from '../src/neal/adjudicator/execute.js';
 import {
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
@@ -48,14 +52,19 @@ import type { ExecuteScopeProgressJustification, OrchestrationState, ReviewerMea
 const execFileAsync = promisify(execFile);
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator');
 
-async function writeRepoConfig(cwd: string, overrides?: { notifyBin?: string; finalCompletionContinueExecutionMax?: number }) {
+async function writeRepoConfig(
+  cwd: string,
+  overrides?: { notifyBin?: string; finalCompletionContinueExecutionMax?: number; phaseHeartbeatMs?: number },
+) {
   const extraConfig =
     typeof overrides?.finalCompletionContinueExecutionMax === 'number'
       ? `  final_completion_continue_execution_max: ${overrides.finalCompletionContinueExecutionMax}\n`
       : '';
+  const heartbeatConfig =
+    typeof overrides?.phaseHeartbeatMs === 'number' ? `  phase_heartbeat_ms: ${overrides.phaseHeartbeatMs}\n` : '';
   await writeFile(
     join(cwd, 'config.yml'),
-    `neal:\n  notify_bin: ${overrides?.notifyBin ?? '/usr/bin/true'}\n${extraConfig}`,
+    `neal:\n  notify_bin: ${overrides?.notifyBin ?? '/usr/bin/true'}\n${heartbeatConfig}${extraConfig}`,
     'utf8',
   );
   clearConfigCache(cwd);
@@ -135,6 +144,10 @@ async function readRunEvents(runDir: string) {
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function createFinalSquashFixture(overrides: Partial<OrchestrationState>) {
@@ -608,6 +621,17 @@ test('resume preserves diagnostic recovery sessions for inspection without manua
   assert.equal(state.status, 'running');
   assert.equal(state.diagnosticRecovery?.sequence, 2);
   assert.equal(state.diagnosticRecovery?.question, 'What failure mode are we missing?');
+});
+
+test('execute response transition helpers preserve completion and retry routing', () => {
+  assert.deepEqual(getExecuteResponsePhaseWithoutOpenFindings(), {
+    phase: 'final_squash',
+    status: 'running',
+  });
+  assert.equal(getExecuteResponseRetryPhase('required'), 'coder_response');
+  assert.equal(getExecuteResponseRetryPhase('optional'), 'coder_optional_response');
+  assert.equal(getPlanningResponseRetryPhase('required'), 'coder_plan_response');
+  assert.equal(getPlanningResponseRetryPhase('optional'), 'coder_plan_optional_response');
 });
 
 test('diagnostic recovery analyze phase writes the analysis artifact before continuing into recovery-plan review', async () => {
@@ -3469,6 +3493,264 @@ test('runOnePass honors stop-after-current-scope on final completion continue_ex
   }
 });
 
+test('runOnePass honors stop-after-current-scope on the final_squash to coder_scope boundary and refreshes display state on both sides', async () => {
+  const { statePath, state } = await createFinalSquashFixture({
+    lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
+  });
+  const logger = await createRunLogger({
+    cwd: state.cwd,
+    stateDir: dirname(statePath),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+
+  const displayStates: Array<{ phase: string; currentScopeNumber: number; startedAtType: string }> = [];
+  let stopChecks = 0;
+
+  const nextState = await runOnePass(state, statePath, logger, {
+    onDisplayState(currentState, phaseStartedAt) {
+      displayStates.push({
+        phase: currentState.phase,
+        currentScopeNumber: currentState.currentScopeNumber,
+        startedAtType: typeof phaseStartedAt,
+      });
+    },
+    shouldStopAfterCurrentScope() {
+      stopChecks += 1;
+      return true;
+    },
+  });
+
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 6);
+  assert.equal(stopChecks, 1);
+  assert.deepEqual(
+    displayStates.map((entry) => ({
+      phase: entry.phase,
+      currentScopeNumber: entry.currentScopeNumber,
+    })),
+    [
+      { phase: 'final_squash', currentScopeNumber: 5 },
+      { phase: 'coder_scope', currentScopeNumber: 6 },
+    ],
+  );
+  assert.equal(displayStates.every((entry) => entry.startedAtType === 'number'), true);
+
+  const events = await readRunEvents(state.runDir);
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'phase.complete' &&
+        event.data?.phase === 'final_squash' &&
+        event.data?.continueScopes === true,
+    ),
+    true,
+  );
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'run.paused_after_scope' &&
+        event.data?.phase === 'coder_scope' &&
+        event.data?.currentScopeNumber === 6,
+    ),
+    true,
+  );
+});
+
+test('final completion review emits heartbeat and completion events in order before final run completion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-heartbeat-'));
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: true,
+      whatChangedOverall: 'Completed the last scope and paused for whole-plan review.',
+      verificationSummary: 'Ran final completion heartbeat coverage.',
+      remainingKnownGaps: [],
+    },
+  });
+  await writeRepoConfig(fixtureState.cwd, {
+    notifyBin: notifyScriptPath,
+    phaseHeartbeatMs: 10,
+  });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '5',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish scope 5',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  const logger = await createRunLogger({
+    cwd: state.cwd,
+    stateDir: dirname(statePath),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
+          assert.equal(args.label, 'final-completion');
+          await delay(35);
+          return {
+            sessionHandle: 'reviewer-final-completion-heartbeat',
+            structured: {
+              action: 'accept_complete',
+              summary: 'The plan outcome is complete and coherent.',
+              rationale: 'The whole-plan result matches the stated objective after the last accepted scope.',
+              missingWork: null,
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runOnePass(state, statePath, logger);
+    assert.equal(nextState.phase, 'done');
+    assert.equal(nextState.status, 'done');
+
+    const events = await readRunEvents(state.runDir);
+    const startIndex = events.findIndex(
+      (event) => event.type === 'phase.start' && event.data?.phase === 'final_completion_review',
+    );
+    const heartbeatIndex = events.findIndex(
+      (event) => event.type === 'phase.heartbeat' && event.data?.phase === 'final_completion_review',
+    );
+    const completeIndex = events.findIndex(
+      (event) => event.type === 'phase.complete' && event.data?.phase === 'final_completion_review',
+    );
+    const notifyIndex = events.findIndex((event) => event.type === 'notify.complete');
+    const runCompleteIndex = events.findIndex((event) => event.type === 'run.complete');
+
+    assert.notEqual(startIndex, -1);
+    assert.notEqual(heartbeatIndex, -1);
+    assert.notEqual(completeIndex, -1);
+    assert.notEqual(notifyIndex, -1);
+    assert.notEqual(runCompleteIndex, -1);
+    assert.equal(startIndex < heartbeatIndex, true);
+    assert.equal(heartbeatIndex < completeIndex, true);
+    assert.equal(completeIndex < notifyIndex, true);
+    assert.equal(notifyIndex < runCompleteIndex, true);
+
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /plan complete: finish scope 5/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('coder scope inactivity timeout retries once on a fresh session and records retry diagnostics before failing cleanly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-coder-timeout-retry-'));
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
+  const { statePath, state: finalSquashState } = await createFinalSquashFixture({
+    currentScopeNumber: 4,
+    createdCommits: [],
+    phase: 'coder_scope',
+    status: 'running',
+    coderSessionHandle: 'stale-session',
+  });
+  await writeRepoConfig(finalSquashState.cwd, { notifyBin: notifyScriptPath });
+  const fixtureState = await saveState(statePath, {
+    ...finalSquashState,
+    currentScopeNumber: 4,
+    createdCommits: [],
+    phase: 'coder_scope',
+    status: 'running',
+    coderSessionHandle: 'stale-session',
+    blockedFromPhase: null,
+    lastScopeMarker: null,
+    currentScopeProgressJustification: null,
+  });
+  const logger = await createRunLogger({
+    cwd: fixtureState.cwd,
+    stateDir: dirname(statePath),
+    planDoc: fixtureState.planDoc,
+    topLevelMode: fixtureState.topLevelMode,
+    runDir: fixtureState.runDir,
+  });
+
+  let coderCalls = 0;
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt(args: CoderRunPromptArgs) {
+          coderCalls += 1;
+          if (coderCalls === 1) {
+            assert.equal(args.resumeHandle, 'stale-session');
+            throw new OpenAICodexProviderError('Coder timed out after 600000ms of inactivity', 'stale-session');
+          }
+
+          assert.equal(args.resumeHandle, null);
+          await args.onSessionStarted?.('fresh-session');
+          throw new OpenAICodexProviderError('coder retry failed after fresh session', 'fresh-session');
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => runOnePass(fixtureState, statePath, logger),
+      /coder retry failed after fresh session/,
+    );
+
+    assert.equal(coderCalls, 2);
+    const failedState = await loadState(statePath);
+    assert.equal(failedState.phase, 'coder_scope');
+    assert.equal(failedState.status, 'failed');
+    assert.equal(failedState.coderRetryCount, 1);
+    assert.equal(failedState.coderSessionHandle, 'fresh-session');
+
+    const events = await readRunEvents(failedState.runDir);
+    const cleanupIndex = events.findIndex((event) => event.type === 'coder.timeout_cleanup');
+    const retryIndex = events.findIndex(
+      (event) => event.type === 'phase.retry' && event.data?.phase === 'coder_scope',
+    );
+    const notifyIndex = events.findIndex((event) => event.type === 'notify.retry');
+    const failureIndex = events.findIndex(
+      (event) => event.type === 'phase.error' && event.data?.phase === 'coder_scope',
+    );
+    assert.notEqual(cleanupIndex, -1);
+    assert.notEqual(retryIndex, -1);
+    assert.notEqual(notifyIndex, -1);
+    assert.notEqual(failureIndex, -1);
+    assert.equal(cleanupIndex < retryIndex, true);
+    assert.equal(retryIndex < notifyIndex, true);
+    assert.equal(notifyIndex < failureIndex, true);
+
+    const notifyLog = await readFile(notifyLogPath, 'utf8');
+    assert.match(notifyLog, /scope 4 timed out in coder_scope; retrying with a fresh coder session/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
 test('final completion review blocks with an explicit diagnostic hint when continue_execution exceeds its cap', async () => {
   const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-cap-'));
   const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
@@ -4189,6 +4471,25 @@ test('execute review disposition only permits final squash for meaningful-progre
       blockedFromPhase: null,
     },
   );
+});
+
+test('execute adjudication context exposes meaningful-progress through the execute-review capability surface', async () => {
+  const { state } = await createResumeFixture({
+    phase: 'reviewer_scope',
+    currentScopeNumber: 5,
+    currentScopeProgressJustification: {
+      milestoneTargeted: 'Keep the execute-review contract explicit',
+      newEvidence: 'Execute review now resolves meaningful-progress from the adjudication spec.',
+      whyNotRedundant: 'This verifies the shared execute-review family still carries the gating capability.',
+      nextStepUnlocked: 'Reviewer disposition can use the same adjudication family without a separate phase.',
+    },
+  });
+
+  const context = resolveExecuteAdjudicationContext(state);
+  assert.equal(context.spec.id, 'execute_review');
+  assert.equal(context.meaningfulProgressCapability.promptSpecId, 'scope_reviewer');
+  assert.equal(context.meaningfulProgressCapability.variantKind, 'meaningful_progress');
+  assert.equal(context.meaningfulProgressCapability.exportName, 'buildReviewerPrompt');
 });
 
 test('execute review block reason names the parent objective for meaningful-progress operator guidance', () => {
