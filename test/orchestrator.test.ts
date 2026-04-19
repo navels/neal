@@ -26,6 +26,7 @@ import {
   startDiagnosticRecovery,
 } from '../src/neal/orchestrator.js';
 import { resolveExecuteAdjudicationContext } from '../src/neal/adjudicator/execute.js';
+import { assertAdjudicationTransitionSignal, getAdjudicationSpec } from '../src/neal/adjudicator/specs.js';
 import {
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_START,
@@ -4126,6 +4127,12 @@ test('review and progress reports expose derived-plan audit linkage', async () =
   assert.match(reviewMarkdown, /Scope label mappings: 6\.6A -> 1/);
   assert.match(reviewMarkdown, /Derived from scope: 3/);
   assert.match(reviewMarkdown, /Discarded WIP artifact: .*SCOPE_3_DISCARDED\.diff/);
+  assert.match(reviewMarkdown, /## Adjudication Contract/);
+  assert.match(reviewMarkdown, /- Adjudication spec id: derived_plan_review/);
+  assert.match(reviewMarkdown, /- Adjudication family: plan_review/);
+  assert.match(reviewMarkdown, /- Allowed transition outcomes: accept_derived_plan, request_revision, optional_revision, block_for_operator/);
+  assert.match(progressMarkdown, /## Adjudication Contract/);
+  assert.match(progressMarkdown, /- Adjudication spec id: derived_plan_review/);
   assert.match(progressMarkdown, /Parent scope: none/);
   assert.match(progressMarkdown, /Replaced by derived plan: \/tmp\/DERIVED_PLAN_SCOPE_3\.md/);
 });
@@ -4490,6 +4497,15 @@ test('execute adjudication context exposes meaningful-progress through the execu
   assert.equal(context.meaningfulProgressCapability.promptSpecId, 'scope_reviewer');
   assert.equal(context.meaningfulProgressCapability.variantKind, 'meaningful_progress');
   assert.equal(context.meaningfulProgressCapability.exportName, 'buildReviewerPrompt');
+});
+
+test('execute transition assertions reject impossible live outcomes for the active execute-review spec', () => {
+  const spec = getAdjudicationSpec('execute_review');
+
+  assert.throws(
+    () => assertAdjudicationTransitionSignal(spec, 'accept_complete', 'test:execute-boundary'),
+    /test:execute-boundary resolved transition signal accept_complete for adjudication spec execute_review family execute_review/,
+  );
 });
 
 test('execute review block reason names the parent objective for meaningful-progress operator guidance', () => {

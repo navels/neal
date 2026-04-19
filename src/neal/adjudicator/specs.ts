@@ -24,6 +24,8 @@ export type AdjudicationTransitionSignal =
   | 'adopt_recovery_plan'
   | 'leave_adjacent';
 
+type AdjudicationFamily = AdjudicationSpec['family'];
+
 type PromptBuilderExportName =
   | 'buildPlanningPrompt'
   | 'buildCoderPlanResponsePrompt'
@@ -123,6 +125,20 @@ export type AdjudicationAdjacentFlow = {
 };
 
 const TERMINAL_SCOPE_MARKERS = ['AUTONOMY_SCOPE_DONE', 'AUTONOMY_DONE', 'AUTONOMY_BLOCKED', 'AUTONOMY_SPLIT_PLAN'] as const;
+
+const FAMILY_RUNTIME_TRANSITION_SIGNALS = {
+  plan_review: ['accept_plan', 'accept_derived_plan', 'adopt_recovery_plan', 'request_revision', 'optional_revision', 'block_for_operator'],
+  execute_review: ['accept_scope', 'request_revision', 'optional_revision', 'block_for_operator', 'replace_plan'],
+  final_completion: ['accept_complete', 'continue_execution', 'block_for_operator'],
+} as const satisfies Record<AdjudicationFamily, readonly AdjudicationTransitionSignal[]>;
+
+const SPEC_RUNTIME_TRANSITION_SIGNALS = {
+  plan_review: ['accept_plan', 'request_revision', 'optional_revision', 'block_for_operator'],
+  derived_plan_review: ['accept_derived_plan', 'request_revision', 'optional_revision', 'block_for_operator'],
+  execute_review: ['accept_scope', 'request_revision', 'optional_revision', 'block_for_operator', 'replace_plan'],
+  recovery_plan_review: ['adopt_recovery_plan', 'request_revision', 'optional_revision', 'block_for_operator'],
+  final_completion_review: ['accept_complete', 'continue_execution', 'block_for_operator'],
+} as const satisfies Record<AdjudicationSpecId, readonly AdjudicationTransitionSignal[]>;
 
 export const ADJUDICATION_SPECS: readonly AdjudicationSpec[] = [
   {
@@ -505,7 +521,52 @@ function validateOutputSurface(specId: string, label: string, surface: OutputSur
   }
 }
 
-function validateAdjudicationSpecContracts(specs: readonly AdjudicationSpec[]) {
+function validateTransitionSignals(spec: AdjudicationSpec) {
+  const familySignals = new Set<AdjudicationTransitionSignal>(FAMILY_RUNTIME_TRANSITION_SIGNALS[spec.family]);
+  const specSignals = new Set(spec.transitionSignals);
+  const requiredSignals = SPEC_RUNTIME_TRANSITION_SIGNALS[spec.id];
+
+  if (specSignals.size !== spec.transitionSignals.length) {
+    throw new Error(`Adjudication spec ${spec.id} family ${spec.family} declares duplicate transition signals.`);
+  }
+
+  for (const signal of spec.transitionSignals) {
+    if (!familySignals.has(signal)) {
+      throw new Error(`Adjudication spec ${spec.id} family ${spec.family} declares impossible transition signal ${signal}.`);
+    }
+  }
+
+  for (const signal of requiredSignals) {
+    if (!specSignals.has(signal)) {
+      throw new Error(`Adjudication spec ${spec.id} family ${spec.family} is missing runtime transition signal ${signal}.`);
+    }
+  }
+}
+
+function validateFamilyRuntimeCoverage(specs: readonly AdjudicationSpec[]) {
+  const signalsByFamily = new Map<AdjudicationFamily, Set<AdjudicationTransitionSignal>>();
+  for (const spec of specs) {
+    const signals = signalsByFamily.get(spec.family) ?? new Set<AdjudicationTransitionSignal>();
+    for (const signal of SPEC_RUNTIME_TRANSITION_SIGNALS[spec.id]) {
+      signals.add(signal);
+    }
+    signalsByFamily.set(spec.family, signals);
+  }
+
+  for (const [family, allowedSignals] of Object.entries(FAMILY_RUNTIME_TRANSITION_SIGNALS) as [
+    AdjudicationFamily,
+    readonly AdjudicationTransitionSignal[],
+  ][]) {
+    const coveredSignals = signalsByFamily.get(family) ?? new Set<AdjudicationTransitionSignal>();
+    for (const signal of allowedSignals) {
+      if (!coveredSignals.has(signal)) {
+        throw new Error(`Adjudication family ${family} is missing runtime transition coverage for signal ${signal}.`);
+      }
+    }
+  }
+}
+
+export function validateAdjudicationSpecContracts(specs: readonly AdjudicationSpec[]) {
   for (const spec of specs) {
     validatePromptSurfaceReference(spec.id, 'coder.primary.prompt', spec.coder.primary.prompt);
     validateOutputSurface(spec.id, 'coder.primary.output', spec.coder.primary.output);
@@ -520,7 +581,11 @@ function validateAdjudicationSpecContracts(specs: readonly AdjudicationSpec[]) {
     for (const capability of spec.reviewer.capabilities ?? []) {
       validatePromptSurfaceReference(spec.id, 'reviewer.capability', capability);
     }
+
+    validateTransitionSignals(spec);
   }
+
+  validateFamilyRuntimeCoverage(specs);
 }
 
 validateAdjudicationSpecContracts(ADJUDICATION_SPECS);
@@ -535,6 +600,21 @@ export function getAdjudicationSpec(id: AdjudicationSpecId): AdjudicationSpec {
     throw new Error(`Unknown adjudication spec: ${id}`);
   }
   return spec;
+}
+
+export function assertAdjudicationTransitionSignal(
+  spec: AdjudicationSpec,
+  signal: AdjudicationTransitionSignal,
+  callerLabel: string,
+) {
+  if (spec.transitionSignals.includes(signal)) {
+    return;
+  }
+
+  throw new Error(
+    `${callerLabel} resolved transition signal ${signal} for adjudication spec ${spec.id} ` +
+      `family ${spec.family}, but allowed signals are: ${spec.transitionSignals.join(', ')}.`,
+  );
 }
 
 export function getReviewerCapability(

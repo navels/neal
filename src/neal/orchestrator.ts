@@ -35,6 +35,7 @@ import {
   isOpenBlockingFinding,
   isOpenNonBlockingFinding,
   mapDecisionToStatus,
+  resolveExecuteAdjudicationContext,
   resolveExecuteReviewDisposition,
   runExecuteResponseAdjudication,
   runExecuteReviewerAdjudication,
@@ -49,6 +50,7 @@ import {
   runPlanningReviewerAdjudication,
   type PreparedPlanReview,
 } from './adjudicator/planning.js';
+import { assertAdjudicationTransitionSignal } from './adjudicator/specs.js';
 import {
   getChangedFilesForRange,
   getCommitRange,
@@ -1366,7 +1368,14 @@ async function finalizePlanReviewResponseWithoutOpenFindings(
   derivedPlanReview: boolean,
   logger?: RunLogger,
 ) {
-  const { reviewMode } = resolvePlanningAdjudicationContext(state);
+  const { spec, reviewMode } = resolvePlanningAdjudicationContext(state);
+  const signal =
+    reviewMode === 'derived-plan'
+      ? 'accept_derived_plan'
+      : reviewMode === 'recovery-plan'
+        ? 'adopt_recovery_plan'
+        : 'accept_plan';
+  assertAdjudicationTransitionSignal(spec, signal, `orchestrator:${phase}:settled`);
   let nextState = await saveState(statePath, transitionPlanReviewWithoutOpenFindings(state, reviewMode));
   await writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
@@ -1388,6 +1397,8 @@ export async function finalizeBlockedPlanReviewResponse(
   blocker: string,
   logger?: RunLogger,
 ) {
+  const { spec } = resolvePlanningAdjudicationContext(state);
+  assertAdjudicationTransitionSignal(spec, 'block_for_operator', 'orchestrator:planning:block_for_operator');
   const diagnosticRecoveryPlanReview = isDiagnosticRecoveryPlanReviewState(state);
   if (state.topLevelMode !== 'execute') {
     if (!derivedPlanReview) {
@@ -1529,6 +1540,25 @@ export function getExecuteResponsePhaseWithoutOpenFindings() {
     phase: 'final_squash' as const,
     status: 'running' as const,
   };
+}
+
+function getExecuteReviewDispositionSignal(args: {
+  phase: ReturnType<typeof resolveExecuteReviewDisposition>['phase'];
+  meaningfulProgressAction: ReviewerMeaningfulProgressAction;
+}) {
+  if (args.phase === 'final_squash') {
+    return 'accept_scope' as const;
+  }
+
+  if (args.phase === 'coder_response') {
+    return 'request_revision' as const;
+  }
+
+  if (args.phase === 'coder_optional_response') {
+    return 'optional_revision' as const;
+  }
+
+  return args.meaningfulProgressAction === 'replace_plan' ? ('replace_plan' as const) : ('block_for_operator' as const);
 }
 
 async function runCoderScopePhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
@@ -2012,6 +2042,14 @@ async function runReviewPhase(state: OrchestrationState, statePath: string, logg
     `[reviewer:review] meaningful progress: ${claude.meaningfulProgress.action} - ${claude.meaningfulProgress.rationale}\n`,
     logger,
   );
+  assertAdjudicationTransitionSignal(
+    reviewContext.spec,
+    getExecuteReviewDispositionSignal({
+      phase: reviewerSynthesis.disposition.phase,
+      meaningfulProgressAction: claude.meaningfulProgress.action,
+    }),
+    'orchestrator:reviewer_scope',
+  );
 
   const nextState = await saveState(statePath, {
     ...state,
@@ -2121,6 +2159,19 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
       : reachedMaxRounds && hasBlockingFindings
         ? getDerivedPlanBlockedReason(state, `reached max review rounds (${roundLimit}) with blocking findings still open`)
         : null;
+  const planningSignal =
+    shouldBlockForConvergence || (hasBlockingFindings && reachedMaxRounds)
+      ? 'block_for_operator'
+      : hasBlockingFindings
+        ? 'request_revision'
+        : hasOpenNonBlockingFindings
+          ? 'optional_revision'
+          : derivedPlanReview
+            ? 'accept_derived_plan'
+            : diagnosticRecoveryPlanReview
+              ? 'adopt_recovery_plan'
+              : 'accept_plan';
+  assertAdjudicationTransitionSignal(context.spec, planningSignal, 'orchestrator:reviewer_plan');
 
   const nextState = await saveState(statePath, {
     ...state,
@@ -2283,8 +2334,10 @@ async function runExecuteResponsePhase(
 ) {
   const mode = phase === 'coder_optional_response' ? 'optional' : 'required';
   await logger?.event('phase.start', { phase });
+  const { spec } = resolveExecuteAdjudicationContext(state);
   const openFindings = getExecuteResponseOpenFindings(state, mode === 'optional' ? 'optional' : undefined);
   if (openFindings.length === 0) {
+    assertAdjudicationTransitionSignal(spec, 'accept_scope', `orchestrator:${phase}:settled`);
     const settled = getExecuteResponsePhaseWithoutOpenFindings();
     let nextState = await saveState(statePath, {
       ...state,
@@ -2497,7 +2550,7 @@ async function runPlanningResponsePhase(
   const mode = phase === 'coder_plan_optional_response' ? 'optional' : 'required';
   await logger?.event('phase.start', { phase });
   const planningContext = resolvePlanningAdjudicationContext(state);
-  const { derivedPlanReview, diagnosticRecoveryPlanReview } = planningContext;
+  const { spec, derivedPlanReview, diagnosticRecoveryPlanReview } = planningContext;
   const openFindings = state.findings.filter(mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding);
   if (openFindings.length === 0) {
     return finalizePlanReviewResponseWithoutOpenFindings(state, statePath, phase, derivedPlanReview, logger);
@@ -2536,6 +2589,11 @@ async function runPlanningResponsePhase(
     throw error;
   }
   const responseById = new Map(codex.payload.responses.map((response) => [response.id, response]));
+  assertAdjudicationTransitionSignal(
+    spec,
+    codex.payload.outcome === 'blocked' ? 'block_for_operator' : mode === 'optional' ? 'optional_revision' : 'request_revision',
+    `orchestrator:${phase}`,
+  );
 
   const findings = state.findings.map((finding) => {
     const response = responseById.get(finding.id);

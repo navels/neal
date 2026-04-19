@@ -9,6 +9,7 @@ import {
   runPlanningResponseAdjudication,
   runPlanningReviewerAdjudication,
 } from '../src/neal/adjudicator/planning.js';
+import { assertAdjudicationTransitionSignal, getAdjudicationSpec } from '../src/neal/adjudicator/specs.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
 import type { OrchestrationState } from '../src/neal/types.js';
 
@@ -274,4 +275,13 @@ test('planning adjudicator runners preserve recovery-plan review context when th
   assert.equal(responseArgs?.parentPlanDoc, state.planDoc);
   assert.equal(responseArgs?.recoveryParentScopeLabel, '6');
   assert.equal(responseArgs?.sessionHandle, 'coder-session-recovery');
+});
+
+test('planning transition assertions reject impossible live outcomes for the active plan-review spec', () => {
+  const spec = getAdjudicationSpec('plan_review');
+
+  assert.throws(
+    () => assertAdjudicationTransitionSignal(spec, 'accept_scope', 'test:planning-boundary'),
+    /test:planning-boundary resolved transition signal accept_scope for adjudication spec plan_review family plan_review/,
+  );
 });

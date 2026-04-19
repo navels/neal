@@ -2,7 +2,12 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { CoderRoundError, ReviewerRoundError } from '../agents.js';
-import { runFinalCompletionReviewerAdjudication, runFinalCompletionSummaryAdjudication } from '../adjudicator/final-completion.js';
+import {
+  runFinalCompletionReviewerAdjudication,
+  runFinalCompletionSummaryAdjudication,
+  type FinalCompletionAdjudicationContext,
+} from '../adjudicator/final-completion.js';
+import { assertAdjudicationTransitionSignal } from '../adjudicator/specs.js';
 import { getFinalCompletionContinueExecutionMax } from '../config.js';
 import { writeDiagnostic } from '../diagnostic.js';
 import { buildFinalCompletionPacket } from '../final-completion.js';
@@ -277,9 +282,10 @@ export async function runFinalCompletionReviewPhase(
       : null,
   });
 
+  let context: FinalCompletionAdjudicationContext;
   let reviewerResult;
   try {
-    ({ reviewerResult } = await runFinalCompletionReviewerAdjudication({
+    ({ context, reviewerResult } = await runFinalCompletionReviewerAdjudication({
       state,
       packet,
       logger,
@@ -328,6 +334,11 @@ export async function runFinalCompletionReviewPhase(
     finalCompletionContinueExecutionCount: continueExecutionCount,
     finalCompletionContinueExecutionCapReached: capReached,
   };
+  assertAdjudicationTransitionSignal(
+    context.spec,
+    effectiveAction,
+    'orchestrator:final_completion_review',
+  );
 
   const nextState =
     effectiveAction === 'accept_complete'

@@ -65,17 +65,20 @@ The original inventory did not add new product behavior. It recorded the adjudic
   - coder and reviewer schema/parser surfaces
   - artifact/context packet contract
   - convergence rule
-  - documented transition signals handed back to the transition layer
+  - validated allowed transition outcomes declared per spec
+  - import-time contract validation against family-supported runtime behavior
 - Transition layer:
+  - live routing re-checks that the resolved outcome is allowed for the active adjudication spec
   - notification emission
   - split-plan handling
   - consult and interactive blocked-recovery routing
   - adoption/finalization semantics
+  - phase-routing helpers and state mutation in `src/neal/orchestrator.ts`, `src/neal/orchestrator/transitions.ts`, and `src/neal/orchestrator/completion.ts`
   - `createdCommits` and final-commit consequences
 - Prompt-spec layer:
   - prompt identity, builders, and role/task ownership under `src/neal/prompts/`
 
-`transitionSignals` in [src/neal/adjudicator/specs.ts](/Users/lee.nave/code/personal/codex-chunked/src/neal/adjudicator/specs.ts) are currently inventory-level contract labels. They document which transition outcomes each adjudication spec is expected to feed, and the transition layer still maps those outcomes explicitly in runtime code rather than dispatching off `transitionSignals` directly.
+`transitionSignals` in [src/neal/adjudicator/specs.ts](/Users/lee.nave/code/personal/codex-chunked/src/neal/adjudicator/specs.ts) are validated allowed outcomes. Import-time adjudication-spec validation checks them against one explicit family-level runtime contract, live routing re-checks the resolved outcome against the active adjudication spec, and the transition layer still maps those outcomes explicitly in runtime code rather than dispatching off `transitionSignals` directly.
 
 ## In-Scope Adjudication Specs
 

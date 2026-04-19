@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
 import {
   getCurrentScopeLabel,
   getParentScopeLabel,
@@ -236,6 +237,11 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Split plan count: ${progress.currentScope.splitPlanCount}`,
       `- Derived plan depth: ${progress.currentScope.derivedPlanDepth}`,
     );
+  }
+
+  const contractLines = renderAdjudicationContractLines(state);
+  if (contractLines.length > 0) {
+    lines.push('', ...contractLines);
   }
 
   if (state.topLevelMode === 'execute') {

@@ -11,7 +11,13 @@ import {
   buildRecoveryPlanPrompt,
   buildReviewerPrompt,
 } from '../src/neal/agents.js';
-import { ADJUDICATION_ADJACENT_FLOWS, ADJUDICATION_SPECS, getAdjudicationSpec, getReviewerCapability } from '../src/neal/adjudicator/specs.js';
+import {
+  ADJUDICATION_ADJACENT_FLOWS,
+  ADJUDICATION_SPECS,
+  getAdjudicationSpec,
+  getReviewerCapability,
+  validateAdjudicationSpecContracts,
+} from '../src/neal/adjudicator/specs.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { renderConsultMarkdown } from '../src/neal/consult.js';
 import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
@@ -21,6 +27,7 @@ import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/n
 import { getPromptSpec, PROMPT_SPECS } from '../src/neal/prompts/specs.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
+import type { AdjudicationSpec, AdjudicationTransitionSignal } from '../src/neal/adjudicator/specs.js';
 import type { OrchestrationState } from '../src/neal/types.js';
 
 process.env.HOME = join(tmpdir(), 'neal-test-home-review');
@@ -312,10 +319,21 @@ test('adjudication spec inventory maps in-scope loops and leaves consult-style f
   assert.match(inventoryDoc, /runOnePass` handler entries in `src\/neal\/orchestrator\.ts`: `14`/);
   assert.match(inventoryDoc, /reduced from `8` to `4`/);
   assert.match(inventoryDoc, /meaningful-progress remains a capability of this family, not a separate adjudication spec/);
-  assert.match(inventoryDoc, /transitionSignals.*inventory-level contract labels/);
+  assert.match(inventoryDoc, /transitionSignals.*validated allowed outcomes/);
+  assert.match(inventoryDoc, /Import-time adjudication-spec validation checks them against one explicit family-level runtime contract/);
   assert.ok(landedLineCountMatch, 'expected landed-state orchestrator line count in adjudicator inventory');
   const documentedLineCount = Number(landedLineCountMatch[1]);
   assert.ok(documentedLineCount <= 3048, `expected documented orchestrator.ts line count <= 3048, got ${documentedLineCount}`);
+  assert.match(inventoryDoc, /import-time contract validation against family-supported runtime behavior/);
+  assert.match(inventoryDoc, /live routing re-checks that the resolved outcome is allowed for the active adjudication spec/);
+  assert.match(
+    inventoryDoc,
+    /phase-routing helpers and state mutation in `src\/neal\/orchestrator\.ts`, `src\/neal\/orchestrator\/transitions\.ts`, and `src\/neal\/orchestrator\/completion\.ts`/,
+  );
+  assert.match(
+    inventoryDoc,
+    /live routing re-checks the resolved outcome against the active adjudication spec, and the transition layer still maps those outcomes explicitly in runtime code rather than dispatching off `transitionSignals` directly/,
+  );
 
   const orchestratorSource = await readFile(join(process.cwd(), 'src', 'neal', 'orchestrator.ts'), 'utf8');
   const handlersBlock = orchestratorSource.match(/const handlers: RunLoopHandlers = \{([\s\S]*?)\n  \};/);
@@ -330,6 +348,65 @@ test('adjudication spec inventory maps in-scope loops and leaves consult-style f
     'runPlanningResponsePhase',
   ].filter((name) => orchestratorSource.includes(`async function ${name}(`)).length;
   assert.equal(adjudicationWrapperCount, 4);
+});
+
+test('adjudication spec validation rejects impossible family transition signals', () => {
+  const malformedSpecs: readonly AdjudicationSpec[] = ADJUDICATION_SPECS.map((spec) =>
+    spec.id === 'plan_review'
+      ? {
+          ...spec,
+          transitionSignals: [...spec.transitionSignals, 'replace_plan'] as readonly AdjudicationTransitionSignal[],
+        }
+      : spec,
+  );
+
+  assert.throws(
+    () => validateAdjudicationSpecContracts(malformedSpecs),
+    /Adjudication spec plan_review family plan_review declares impossible transition signal replace_plan\./,
+  );
+});
+
+test('adjudication spec validation rejects missing runtime transition signals for a spec', () => {
+  const malformedSpecs: readonly AdjudicationSpec[] = ADJUDICATION_SPECS.map((spec) =>
+    spec.id === 'final_completion_review'
+      ? {
+          ...spec,
+          transitionSignals: spec.transitionSignals.filter(
+            (signal): signal is AdjudicationTransitionSignal => signal !== 'continue_execution',
+          ),
+        }
+      : spec,
+  );
+
+  assert.throws(
+    () => validateAdjudicationSpecContracts(malformedSpecs),
+    /Adjudication spec final_completion_review family final_completion is missing runtime transition signal continue_execution\./,
+  );
+});
+
+test('ordinary plan-review artifacts render the active adjudication contract without implying dispatch ownership', async () => {
+  const { state } = await createState({
+    topLevelMode: 'plan',
+    currentScopeNumber: 1,
+    phase: 'reviewer_plan',
+    executionShape: 'one_shot',
+    coderSessionHandle: 'coder-plan-1',
+    reviewerSessionHandle: 'reviewer-plan-1',
+  });
+
+  const reviewMarkdown = renderReviewMarkdown(state);
+  assert.match(reviewMarkdown, /## Adjudication Contract/);
+  assert.match(reviewMarkdown, /- Adjudication spec id: plan_review/);
+  assert.match(reviewMarkdown, /- Adjudication family: plan_review/);
+  assert.match(reviewMarkdown, /- Allowed transition outcomes: accept_plan, request_revision, optional_revision, block_for_operator/);
+  assert.match(reviewMarkdown, /- Contract role: validated allowed outcomes for debugging; runtime routing remains explicit elsewhere\./);
+
+  const progressMarkdown = renderPlanProgressMarkdown(state);
+  assert.match(progressMarkdown, /## Adjudication Contract/);
+  assert.match(progressMarkdown, /- Adjudication spec id: plan_review/);
+  assert.match(progressMarkdown, /- Adjudication family: plan_review/);
+  assert.match(progressMarkdown, /- Allowed transition outcomes: accept_plan, request_revision, optional_revision, block_for_operator/);
+  assert.match(progressMarkdown, /- Contract role: validated allowed outcomes for debugging; runtime routing remains explicit elsewhere\./);
 });
 
 test('execute review requires meaningful-progress as an adjudication-spec reviewer capability', () => {
@@ -627,6 +704,10 @@ test('final completion review artifact records coder summary, reviewer verdict, 
   const markdown = renderFinalCompletionReviewMarkdown(state);
   assert.match(markdown, /# Final Completion Review/);
   assert.match(markdown, /- What changed overall: Completed the planned scopes, but one final gap remained\./);
+  assert.match(markdown, /## Adjudication Contract/);
+  assert.match(markdown, /- Adjudication spec id: final_completion_review/);
+  assert.match(markdown, /- Adjudication family: final_completion/);
+  assert.match(markdown, /- Allowed transition outcomes: accept_complete, continue_execution, block_for_operator/);
   assert.match(markdown, /- Reviewer action: continue_execution/);
   assert.match(markdown, /- Resulting action: block_for_operator/);
   assert.match(markdown, /- Missing work summary: Add the remaining audit-trail regression case\./);
@@ -827,6 +908,10 @@ test('progress artifact renders current meaningful-progress context and bounded 
 
   assert.match(markdown, /## Meaningful Progress/);
   assert.match(markdown, /- Active parent objective: 8/);
+  assert.match(markdown, /## Adjudication Contract/);
+  assert.match(markdown, /- Adjudication spec id: execute_review/);
+  assert.match(markdown, /- Adjudication family: execute_review/);
+  assert.match(markdown, /- Allowed transition outcomes: accept_scope, request_revision, optional_revision, block_for_operator, replace_plan/);
   assert.match(markdown, /- Coder milestone: Audit trail for meaningful-progress gating/);
   assert.match(markdown, /- Reviewer action: block_for_operator/);
   assert.match(markdown, /- Reviewer rationale: The recent scopes revisit the same hotspot without advancing the parent objective\./);
@@ -974,6 +1059,10 @@ test('review artifact renders derived-parent meaningful-progress history and ver
 
   assert.match(markdown, /## Meaningful Progress/);
   assert.match(markdown, /- Active parent objective: 6/);
+  assert.match(markdown, /## Adjudication Contract/);
+  assert.match(markdown, /- Adjudication spec id: execute_review/);
+  assert.match(markdown, /- Adjudication family: execute_review/);
+  assert.match(markdown, /- Allowed transition outcomes: accept_scope, request_revision, optional_revision, block_for_operator, replace_plan/);
   assert.match(markdown, /- Coder milestone: Derived scope churn detection/);
   assert.match(markdown, /- Reviewer action: replace_plan/);
   assert.match(markdown, /- Reviewer rationale: The sub-scope keeps revisiting the same parent hotspot and should be replaced\./);
@@ -1010,6 +1099,10 @@ test('review artifact labels diagnostic recovery plans as recovery candidates', 
 
   assert.match(markdown, /- Review target: \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
   assert.match(markdown, /- Review target kind: diagnostic recovery plan candidate/);
+  assert.match(markdown, /## Adjudication Contract/);
+  assert.match(markdown, /- Adjudication spec id: recovery_plan_review/);
+  assert.match(markdown, /- Adjudication family: plan_review/);
+  assert.match(markdown, /- Allowed transition outcomes: adopt_recovery_plan, request_revision, optional_revision, block_for_operator/);
   assert.match(markdown, /## Diagnostic Recovery/);
   assert.match(markdown, /- Recovery plan artifact: \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
   assert.match(markdown, /- Next operator step: neal --diagnostic-decision \[state-file\] --action <adopt\|reference\|cancel>/);

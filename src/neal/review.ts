@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
 import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, renderRecentAcceptedScopesSummary } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
@@ -94,6 +95,11 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     for (const line of renderRecentAcceptedScopesSummary(state, parentScopeLabel ?? String(state.currentScopeNumber)).split('\n')) {
       lines.push(line);
     }
+  }
+
+  const contractLines = renderAdjudicationContractLines(state);
+  if (contractLines.length > 0) {
+    lines.push('', ...contractLines);
   }
 
   if (state.finalCompletionSummary) {

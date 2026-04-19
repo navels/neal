@@ -9,6 +9,7 @@ import {
   runFinalCompletionReviewerAdjudication,
   runFinalCompletionSummaryAdjudication,
 } from '../src/neal/adjudicator/final-completion.js';
+import { assertAdjudicationTransitionSignal, getAdjudicationSpec } from '../src/neal/adjudicator/specs.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
 import type { FinalCompletionPacket, OrchestrationState } from '../src/neal/types.js';
 
@@ -171,5 +172,14 @@ test('final completion reviewer adjudication rejects missing summary state befor
         },
       }),
     /Cannot run final completion reviewer adjudication without a final completion summary/,
+  );
+});
+
+test('final completion transition assertions reject impossible live outcomes for the active completion spec', () => {
+  const spec = getAdjudicationSpec('final_completion_review');
+
+  assert.throws(
+    () => assertAdjudicationTransitionSignal(spec, 'request_revision', 'test:final-completion-boundary'),
+    /test:final-completion-boundary resolved transition signal request_revision for adjudication spec final_completion_review family final_completion/,
   );
 });

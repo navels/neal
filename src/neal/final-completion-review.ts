@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
 import type { OrchestrationState } from './types.js';
 
 export function getFinalCompletionReviewArtifactPath(runDir: string) {
@@ -42,6 +43,11 @@ export function renderFinalCompletionReviewMarkdown(state: OrchestrationState) {
     } else {
       lines.push('- Remaining known gaps: none');
     }
+  }
+
+  const contractLines = renderAdjudicationContractLines(state);
+  if (contractLines.length > 0) {
+    lines.push('', ...contractLines);
   }
 
   lines.push('', '## Reviewer Verdict');
