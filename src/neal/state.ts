@@ -77,6 +77,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
   return {
     version: 1,
     planDoc: init.planDoc,
+    planDocBackupPath: init.planDocBackupPath ?? null,
     cwd: init.cwd,
     runDir: init.runDir,
     topLevelMode: init.topLevelMode,

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -197,6 +197,61 @@ test('text-mode bootstrap records the materialized inline plan path in state and
   };
   assert.equal(persistedState.planDoc, resolved.planDoc);
   assert.equal(persistedState.runDir, resolved.runDir);
+});
+
+test('plan-mode initialization creates a timestamped backup copy and persists its path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-index-plan-backup-'));
+  const cwd = join(root, 'repo');
+  await runGit(root, 'init', 'repo');
+  await runGit(cwd, 'config', 'user.name', 'Neal Test');
+  await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+  await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+  await mkdir(join(cwd, 'plans'), { recursive: true });
+  const planDoc = join(cwd, 'plans', 'PLAN.md');
+  await writeFile(planDoc, '## Goal\n\nBack me up.\n', 'utf8');
+  await runGit(cwd, 'add', 'plans/PLAN.md');
+  await runGit(cwd, 'commit', '-m', 'base commit');
+
+  const loaded = await loadOrInitialize(
+    planDoc,
+    cwd,
+    getDefaultAgentConfig(),
+    undefined,
+    'plan',
+  );
+
+  assert.equal(loaded.state.planDoc, planDoc);
+  assert.match(loaded.state.planDocBackupPath ?? '', /\/plans\/archive\/PLAN\.pre-plan\.[^/]+\.md$/);
+  await access(loaded.state.planDocBackupPath!);
+  assert.equal(await readFile(loaded.state.planDocBackupPath!, 'utf8'), '## Goal\n\nBack me up.\n');
+
+  const persistedState = JSON.parse(await readFile(loaded.statePath, 'utf8')) as {
+    planDocBackupPath: string | null;
+  };
+  assert.equal(persistedState.planDocBackupPath, loaded.state.planDocBackupPath);
+});
+
+test('execute-mode initialization does not create a plan backup path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-index-execute-no-backup-'));
+  const cwd = join(root, 'repo');
+  await runGit(root, 'init', 'repo');
+  await runGit(cwd, 'config', 'user.name', 'Neal Test');
+  await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+  await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+  const planDoc = join(cwd, 'PLAN.md');
+  await writeFile(planDoc, '## Execution Shape\n\nexecutionShape: one_shot\n', 'utf8');
+  await runGit(cwd, 'add', 'PLAN.md');
+  await runGit(cwd, 'commit', '-m', 'base commit');
+
+  const loaded = await loadOrInitialize(
+    planDoc,
+    cwd,
+    getDefaultAgentConfig(),
+    undefined,
+    'execute',
+  );
+
+  assert.equal(loaded.state.planDocBackupPath, null);
 });
 
 test('execute startup cleans up a materialized inline run directory when initialization fails', async () => {

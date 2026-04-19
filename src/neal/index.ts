@@ -200,6 +200,7 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
         topLevelMode: finalState.topLevelMode,
         agentConfig: finalState.agentConfig,
         planDoc: finalState.planDoc,
+        planDocBackupPath: finalState.planDocBackupPath,
         statePath,
         runDir: finalState.runDir,
         progressJsonPath: finalState.progressJsonPath,

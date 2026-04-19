@@ -292,6 +292,7 @@ export type ProgressScope = {
 export type OrchestrationState = {
   version: 1;
   planDoc: string;
+  planDocBackupPath: string | null;
   cwd: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';
@@ -349,6 +350,7 @@ export type OrchestrationState = {
 export type OrchestratorInit = {
   cwd: string;
   planDoc: string;
+  planDocBackupPath?: string | null;
   stateDir: string;
   runDir: string;
   topLevelMode: 'plan' | 'execute';

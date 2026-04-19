@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { dirname, join, parse, resolve } from 'node:path';
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, parse, resolve } from 'node:path';
 
 import {
   getFinalCompletionContinueExecutionMax,
@@ -426,10 +426,13 @@ export async function initializeOrchestration(
     topLevelMode,
     runDir: options?.runDir,
   });
+  const planDocBackupPath =
+    topLevelMode === 'plan' ? await createPlanDocumentBackup(absolutePlanDoc, logger.runDir) : null;
 
   const init: OrchestratorInit = {
     cwd,
     planDoc: absolutePlanDoc,
+    planDocBackupPath,
     stateDir,
     runDir: logger.runDir,
     topLevelMode,
@@ -453,6 +456,7 @@ export async function initializeOrchestration(
     statePath,
     baseCommit,
     topLevelMode,
+    planDocBackupPath,
     agentConfig: savedState.agentConfig,
     reviewMarkdownPath: savedState.reviewMarkdownPath,
     progressJsonPath: savedState.progressJsonPath,
@@ -464,6 +468,16 @@ export async function initializeOrchestration(
     statePath,
     logger,
   };
+}
+
+async function createPlanDocumentBackup(planDoc: string, runDir: string) {
+  const parsed = parse(planDoc);
+  const extension = parsed.ext || '.md';
+  const backupDir = join(parsed.dir, 'archive');
+  const backupPath = join(backupDir, `${parsed.name}.pre-plan.${basename(runDir)}${extension}`);
+  await mkdir(backupDir, { recursive: true });
+  await copyFile(planDoc, backupPath);
+  return backupPath;
 }
 
 async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
