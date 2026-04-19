@@ -13,6 +13,12 @@ export type ParsedNewRunArgs = {
   ignoreLocalChanges: boolean;
 };
 
+export type ParsedSquashArgs = {
+  planDoc: string;
+  dryRun: boolean;
+  yes: boolean;
+};
+
 const EXECUTE_SOURCE_FLAGS = new Set(['--execute', '--execute-file', '--execute-text']);
 const TOP_LEVEL_MODE_FLAGS = new Set(['--plan', '--execute', '--execute-file', '--execute-text']);
 
@@ -22,6 +28,7 @@ export function buildUsageLines() {
     '   or: neal --execute-file <plan-doc>         # explicit file mode',
     '   or: neal --execute-text "<plan markdown>"  # explicit inline text mode',
     '   or: neal --plan <plan-doc>',
+    '   or: neal --squash <plan-doc> [--dry-run] [--yes]',
     '   or: neal --resume [state-file]',
     '   or: neal --recover [state-file] --message <guidance>  # then run neal --resume',
     '   or: neal --diagnose [state-file] --question "<diagnostic question>" --target "<files-or-component>" [--baseline <ref>]',
@@ -168,6 +175,43 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
     agentConfig,
     ignoreLocalChanges,
   } satisfies ParsedNewRunArgs;
+}
+
+export function parseSquashArgs(args: string[]): ParsedSquashArgs {
+  if (args[0] !== '--squash') {
+    throw new Error(`Unknown argument: ${args[0] ?? ''}`);
+  }
+
+  const planDoc = args[1];
+  if (!planDoc || planDoc.startsWith('--')) {
+    throw new Error('--squash requires a plan file path argument');
+  }
+
+  let dryRun = false;
+  let yes = false;
+  let index = 2;
+
+  while (index < args.length) {
+    const flag = args[index];
+    switch (flag) {
+      case '--dry-run':
+        dryRun = true;
+        index += 1;
+        break;
+      case '--yes':
+        yes = true;
+        index += 1;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${flag}`);
+    }
+  }
+
+  return {
+    planDoc,
+    dryRun,
+    yes,
+  };
 }
 
 function isAgentProvider(value: string): value is AgentProvider {

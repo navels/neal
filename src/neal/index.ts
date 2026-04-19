@@ -16,11 +16,12 @@ import {
   startDiagnosticRecovery,
   runOnePass,
 } from './orchestrator.js';
-import { buildUsageLines, parseNewRunArgs } from './cli.js';
+import { buildUsageLines, parseNewRunArgs, parseSquashArgs } from './cli.js';
 import { clearDiagnosticFooter, configureDiagnosticFooter, writeDiagnostic } from './diagnostic.js';
 import { resolveExecuteInput } from './input-source.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
+import { buildSquashCommitMessage, executeSquashForRun, selectSquashRunForPlan, validateSelectedRunForSquash } from './squash.js';
 import { StatusFooter } from './status-footer.js';
 import { getDefaultAgentConfig, loadState } from './state.js';
 import { showSummaries } from './summaries.js';
@@ -38,11 +39,76 @@ type SessionLaunchTarget = {
   sessionHandle: string;
 };
 
+type SquashPreviewArgs = {
+  selection: Awaited<ReturnType<typeof selectSquashRunForPlan>>;
+  validation: Awaited<ReturnType<typeof validateSelectedRunForSquash>>;
+  commitMessage: Awaited<ReturnType<typeof buildSquashCommitMessage>>;
+};
+
 function usage(): never {
   for (const line of buildUsageLines()) {
     console.error(line);
   }
   process.exit(1);
+}
+
+function writeSquashPreview({ selection, validation, commitMessage }: SquashPreviewArgs) {
+  const lines = [
+    `[neal] selected squash run: ${selection.selected.runId}`,
+    `[neal] run dir: ${selection.selected.runDir}`,
+    `[neal] plan doc: ${selection.normalizedPlanDoc}`,
+    `[neal] base commit: ${validation.baseCommit}`,
+    `[neal] final commit: ${validation.finalCommit}`,
+    '[neal] commits to replace:',
+    ...validation.createdCommits.map((commit) => `  - ${commit}`),
+    `[neal] commit message source: ${commitMessage.source}`,
+    '[neal] generated commit message:',
+    commitMessage.message,
+  ];
+
+  if (selection.selectionWarning) {
+    lines.splice(2, 0, `[neal] ${selection.selectionWarning}`);
+  }
+
+  process.stderr.write(lines.join('\n') + '\n');
+}
+
+async function confirmSquashRewrite() {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) {
+    process.stderr.write('[neal] Proceed with squash rewrite? [y/N] ');
+    process.stdin.setEncoding('utf8');
+    let buffer = '';
+    for await (const chunk of process.stdin) {
+      buffer += chunk;
+      if (buffer.includes('\n')) {
+        break;
+      }
+    }
+
+    const normalized = buffer.trim().toLowerCase();
+    if (normalized !== 'y' && normalized !== 'yes') {
+      throw new Error('neal --squash aborted; no history was rewritten');
+    }
+    return;
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+    terminal: true,
+  });
+
+  try {
+    const answer = await new Promise<string>((resolve) => {
+      rl.question('[neal] Proceed with squash rewrite? [y/N] ', resolve);
+    });
+    const normalized = answer.trim().toLowerCase();
+    if (normalized !== 'y' && normalized !== 'yes') {
+      throw new Error('neal --squash aborted; no history was rewritten');
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 function getActiveHandleSummary() {
@@ -375,6 +441,92 @@ async function main() {
 
   if (args[0] === '--summaries') {
     await showSummaries(args[1]);
+    return;
+  }
+
+  if (args[0] === '--squash') {
+    const parsed = parseSquashArgs(args);
+    const selection = await selectSquashRunForPlan({
+      cwd: process.cwd(),
+      planDocArg: parsed.planDoc,
+    });
+    const validation = await validateSelectedRunForSquash({
+      cwd: process.cwd(),
+      selected: selection.selected,
+    });
+    const commitMessage = await buildSquashCommitMessage({
+      cwd: process.cwd(),
+      selected: selection.selected,
+    });
+    writeSquashPreview({
+      selection,
+      validation,
+      commitMessage,
+    });
+    if (parsed.dryRun) {
+      process.stderr.write('[neal] dry run only; no history was rewritten\n');
+      process.stdout.write(
+        JSON.stringify(
+          {
+            ok: true,
+            mode: 'squash_selection',
+            dryRun: true,
+            yes: parsed.yes,
+            rewriteReady: true,
+            planDoc: selection.normalizedPlanDoc,
+            selectedRunDir: selection.selected.runDir,
+            selectedRunId: selection.selected.runId,
+            completedMatchCount: selection.completedMatchCount,
+            selectionWarning: selection.selectionWarning,
+            baseCommit: validation.baseCommit,
+            finalCommit: validation.finalCommit,
+            createdCommits: validation.createdCommits,
+            commitMessageSource: commitMessage.source,
+            commitMessage: commitMessage.message,
+            nextStep: 'Re-run with --yes to rewrite the selected run-owned commit range.',
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      return;
+    }
+
+    if (!parsed.yes) {
+      await confirmSquashRewrite();
+    }
+
+    const execution = await executeSquashForRun({
+      cwd: process.cwd(),
+      selected: selection.selected,
+      validation,
+      commitMessage,
+    });
+    process.stdout.write(
+      JSON.stringify(
+        {
+          ok: true,
+          mode: 'squash_result',
+          dryRun: false,
+          yes: true,
+          rewriteReady: true,
+          planDoc: selection.normalizedPlanDoc,
+          selectedRunDir: selection.selected.runDir,
+          selectedRunId: selection.selected.runId,
+          completedMatchCount: selection.completedMatchCount,
+          selectionWarning: selection.selectionWarning,
+          baseCommit: validation.baseCommit,
+          finalCommit: validation.finalCommit,
+          createdCommits: validation.createdCommits,
+          commitMessageSource: commitMessage.source,
+          commitMessage: commitMessage.message,
+          replacementCommit: execution.replacementCommit,
+          squashArtifactPath: execution.artifactPath,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
     return;
   }
 

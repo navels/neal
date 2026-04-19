@@ -500,6 +500,7 @@ async function persistBlockedScope(state: OrchestrationState, statePath: string,
     completedScopes: appendCompletedScope(state, 'blocked', {
       scopeLabel: getCurrentScopeLabel(state),
       finalCommit: null,
+      summary: null,
       commitSubject: null,
       archivedReviewPath: state.archivedReviewPath,
       blocker: reason,

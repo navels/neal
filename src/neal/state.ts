@@ -72,6 +72,10 @@ export function getSessionStatePath(stateDir: string) {
   return join(stateDir, 'session.json');
 }
 
+export function getRunStatePath(runDir: string) {
+  return join(runDir, 'RUN_STATE.json');
+}
+
 export async function createInitialState(init: OrchestratorInit, baseCommit: string): Promise<OrchestrationState> {
   const now = new Date().toISOString();
   return {
@@ -141,6 +145,8 @@ export async function saveState(path: string, state: OrchestrationState): Promis
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(nextState, null, 2) + '\n', 'utf8');
+  await mkdir(nextState.runDir, { recursive: true });
+  await writeFile(getRunStatePath(nextState.runDir), JSON.stringify(nextState, null, 2) + '\n', 'utf8');
 
   return nextState;
 }
@@ -629,6 +635,7 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
     result: scope.result === 'accepted' ? 'accepted' : 'blocked',
     baseCommit: typeof scope.baseCommit === 'string' ? scope.baseCommit : null,
     finalCommit: typeof scope.finalCommit === 'string' ? scope.finalCommit : null,
+    summary: typeof scope.summary === 'string' ? scope.summary : null,
     commitSubject: typeof scope.commitSubject === 'string' ? scope.commitSubject : null,
     changedFiles: isStringArray((scope as { changedFiles?: unknown }).changedFiles)
       ? (scope as { changedFiles: string[] }).changedFiles

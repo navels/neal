@@ -74,6 +74,7 @@ function buildTerminalScopeRecord(
     result: 'accepted',
     baseCommit: state.baseCommit,
     finalCommit: terminalScope.finalCommit,
+    summary: state.currentScopeProgressJustification?.milestoneTargeted ?? null,
     commitSubject: terminalScope.commitSubject,
     changedFiles: [...terminalScope.changedFiles],
     reviewRounds: state.rounds.length,

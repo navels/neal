@@ -279,6 +279,7 @@ export type ProgressScope = {
   result: 'accepted' | 'blocked';
   baseCommit: string | null;
   finalCommit: string | null;
+  summary?: string | null;
   commitSubject: string | null;
   changedFiles: string[];
   reviewRounds: number;

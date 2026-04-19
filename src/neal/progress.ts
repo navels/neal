@@ -58,6 +58,7 @@ type MeaningfulProgressSummary = {
   recentAcceptedScopeHistory: {
     number: string;
     finalCommit: string | null;
+    summary: string | null;
     commitSubject: string | null;
     parentScope: string | null;
     changedFiles: string[];
@@ -104,6 +105,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
           .map((scope) => ({
             number: scope.number,
             finalCommit: scope.finalCommit,
+            summary: scope.summary ?? null,
             commitSubject: scope.commitSubject,
             parentScope: scope.derivedFromParentScope,
             changedFiles: [...scope.changedFiles],

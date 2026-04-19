@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { buildUsageLines, parseNewRunArgs } from '../src/neal/cli.js';
+import { buildUsageLines, parseNewRunArgs, parseSquashArgs } from '../src/neal/cli.js';
 import { loadOrInitialize } from '../src/neal/orchestrator.js';
 import { getDefaultAgentConfig } from '../src/neal/state.js';
 import { resolveExecuteInput } from '../src/neal/input-source.js';
@@ -116,11 +116,25 @@ test('parseNewRunArgs rejects missing execute-file values before option parsing 
   );
 });
 
+test('parseSquashArgs accepts dry-run and yes flags', () => {
+  const parsed = parseSquashArgs(['--squash', 'plans/PLAN.md', '--dry-run', '--yes']);
+  assert.deepEqual(parsed, {
+    planDoc: 'plans/PLAN.md',
+    dryRun: true,
+    yes: true,
+  });
+});
+
+test('parseSquashArgs rejects a missing plan path', () => {
+  assert.throws(() => parseSquashArgs(['--squash', '--dry-run']), /--squash requires a plan file path argument/);
+});
+
 test('buildUsageLines documents the execute input modes clearly', () => {
   const usage = buildUsageLines().join('\n');
   assert.match(usage, /--execute <plan-doc>.*default file mode/);
   assert.match(usage, /--execute-file <plan-doc>.*explicit file mode/);
   assert.match(usage, /--execute-text "<plan markdown>"/);
+  assert.match(usage, /--squash <plan-doc> \[--dry-run\] \[--yes\]/);
   assert.match(usage, /--diagnose \[state-file\] --question/);
   assert.match(usage, /--diagnostic-decision \[state-file\] --action <adopt\|reference\|cancel>/);
 });
@@ -274,6 +288,7 @@ test('neal usage output documents execute-file and execute-text', async () => {
   assert.match(result.stderr, /--execute <plan-doc>.*default file mode/);
   assert.match(result.stderr, /--execute-file <plan-doc>/);
   assert.match(result.stderr, /--execute-text "<plan markdown>"/);
+  assert.match(result.stderr, /--squash <plan-doc> \[--dry-run\] \[--yes\]/);
   assert.match(result.stderr, /--diagnose \[state-file\] --question/);
   assert.match(result.stderr, /--diagnostic-decision \[state-file\] --action <adopt\|reference\|cancel>/);
 });

@@ -4,6 +4,7 @@ import type { OrchestrationState, ScopeMarker } from '../types.js';
 type AppendCompletedScopeDetails = {
   scopeLabel?: string;
   finalCommit: string | null;
+  summary?: string | null;
   commitSubject: string | null;
   changedFiles?: string[];
   archivedReviewPath: string | null;
@@ -28,6 +29,7 @@ export function appendCompletedScope(
       result,
       baseCommit: state.baseCommit,
       finalCommit: details.finalCommit,
+      summary: details.summary ?? null,
       commitSubject: details.commitSubject,
       changedFiles: [...(details.changedFiles ?? [])],
       reviewRounds: state.rounds.length,
@@ -241,6 +243,7 @@ export function appendDerivedSubScopeAndParentCompletion(args: {
   const subScopeCompletedScopes = appendCompletedScope(args.state, 'accepted', {
     scopeLabel: currentScopeLabel,
     finalCommit: args.finalCommit,
+    summary: args.state.currentScopeProgressJustification?.milestoneTargeted ?? null,
     commitSubject: args.finalSubject,
     changedFiles: args.changedFiles,
     archivedReviewPath: args.archivedReviewPath,
@@ -267,6 +270,7 @@ export function appendDerivedSubScopeAndParentCompletion(args: {
         {
           scopeLabel: getParentScopeLabel(args.state),
           finalCommit: args.finalCommit,
+          summary: null,
           commitSubject: args.finalSubject,
           changedFiles: parentScopeChangedFiles,
           archivedReviewPath: args.archivedReviewPath,
