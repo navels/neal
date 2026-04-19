@@ -58,6 +58,8 @@
   },
   "contains": [
     "This is a whole-plan final completion review, not an ordinary last-scope review.",
+    "Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.",
+    "Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.",
     "When you return `continue_execution`, you must provide a non-null `missingWork` object",
     "Use `block_for_operator` when the remaining gap is ambiguous"
   ],

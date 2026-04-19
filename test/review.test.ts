@@ -613,6 +613,7 @@ test('final completion summary prompt requests compact whole-plan completion JSO
   assert.match(prompt, /whatChangedOverall/);
   assert.match(prompt, /verificationOnlyCompletion/);
   assert.match(prompt, /completedScopeSummary/);
+  assert.match(prompt, /regressions, quality concerns, testing gaps/);
   assert.match(prompt, /Do not include markdown fences or prose outside the JSON object/);
 });
 
@@ -661,6 +662,9 @@ test('final completion reviewer prompt requires a structured whole-plan verdict'
   });
 
   assert.match(prompt, /whole-plan final completion review/i);
+  assert.match(prompt, /Evaluate the totality of the work completed for this plan/);
+  assert.match(prompt, /ordinary code review standards/);
+  assert.match(prompt, /Do not treat prior per-scope acceptance as sufficient evidence/);
   assert.match(prompt, /accept_complete/);
   assert.match(prompt, /continue_execution/);
   assert.match(prompt, /block_for_operator/);

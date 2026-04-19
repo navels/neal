@@ -13,11 +13,10 @@
     "## Execution Queue",
     "### Scope 1: Example scope",
     "If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.",
+    "AUTONOMY_SCOPE_DONE",
+    "AUTONOMY_SPLIT_PLAN",
     "AUTONOMY_DONE",
     "AUTONOMY_BLOCKED"
   ],
-  "excludes": [
-    "AUTONOMY_SCOPE_DONE",
-    "AUTONOMY_SPLIT_PLAN"
-  ]
+  "excludes": []
 }
