@@ -2197,11 +2197,13 @@ async function runPlanReviewPhase(state: OrchestrationState, statePath: string, 
         ? reachedMaxRounds
           ? 'blocked'
           : 'running'
-        : derivedPlanReview
+        : hasOpenNonBlockingFindings
           ? 'running'
-          : diagnosticRecoveryPlanReview
+          : derivedPlanReview
             ? 'running'
-          : 'done',
+            : diagnosticRecoveryPlanReview
+              ? 'running'
+            : 'done',
     rounds: [
       ...state.rounds,
       {
