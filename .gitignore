@@ -8,4 +8,8 @@ PROGRESS.md
 tmp/
 *.log
 .env
-/plans/
+
+# Plans and memos are tracked. Ignore only generated/local plan artifacts.
+/plans/**/*.pre-plan.*.md
+/plans/**/*.bak
+/plans/**/*.tmp
