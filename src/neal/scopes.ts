@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+
+import { validatePlanDocument } from './plan-validation.js';
 import type { OrchestrationState, ProgressScope } from './types.js';
 
 export const DEFAULT_PARENT_OBJECTIVE_HISTORY_WINDOW = 5;
@@ -50,6 +53,25 @@ export function getExecutionPlanPath(
 
 export function getCompletedScopeParentObjective(scope: Pick<ProgressScope, 'number' | 'derivedFromParentScope'>) {
   return scope.derivedFromParentScope ?? scope.number;
+}
+
+export async function getExecutionPlanScopeCount(planPath: string): Promise<number | null> {
+  try {
+    const planDocument = await readFile(planPath, 'utf8');
+    const validation = validatePlanDocument(planDocument);
+    if (!validation.ok) {
+      return null;
+    }
+
+    if (validation.executionShape === 'one_shot') {
+      return 1;
+    }
+
+    const matches = validation.normalization.normalizedDocument.match(/^### Scope \d+:/gm);
+    return matches?.length ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function getRecentAcceptedScopesForParentObjective(

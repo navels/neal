@@ -43,6 +43,7 @@ import { createRunLogger } from '../src/neal/logger.js';
 import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import type { CoderRunPromptArgs, StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
 import { OpenAICodexProviderError } from '../src/neal/providers/openai-codex.js';
+import { notifyScopeAccepted } from '../src/neal/orchestrator/notifications.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -3081,6 +3082,58 @@ test('final squash preserves an empty derived scope checkpoint commit without at
   const notifyLog = await readFile(notifyLogPath, 'utf8');
   const notifyLines = notifyLog.trim().split('\n').filter(Boolean);
   assert.deepEqual(notifyLines, ['[neal] PLAN.md: scope 5.1 complete: empty derived scope checkpoint']);
+});
+
+test('notifyScopeAccepted includes total scope count when the execution plan is a valid multi-scope doc', async () => {
+  const { cwd, state } = await createResumeFixture({
+    currentScopeNumber: 2,
+  });
+  const multiScopePlan = [
+    '# Example Plan',
+    '',
+    '## Execution Shape',
+    '',
+    'executionShape: multi_scope',
+    '',
+    '## Execution Queue',
+    '',
+    '### Scope 1: First',
+    '- Goal: Do the first thing.',
+    '- Verification: `pnpm typecheck`',
+    '- Success Condition: First thing done.',
+    '',
+    '### Scope 2: Second',
+    '- Goal: Do the second thing.',
+    '- Verification: `pnpm typecheck`',
+    '- Success Condition: Second thing done.',
+    '',
+    '### Scope 3: Third',
+    '- Goal: Do the third thing.',
+    '- Verification: `pnpm typecheck`',
+    '- Success Condition: Third thing done.',
+    '',
+  ].join('\n');
+  await writeFile(state.planDoc, multiScopePlan, 'utf8');
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
+
+  await notifyScopeAccepted(state, 'wire up scope 2');
+
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.equal(notifyLog.trim(), '[neal] PLAN.md: scope 2/3 complete: wire up scope 2');
+});
+
+test('notifyScopeAccepted falls back to scope label alone when the plan cannot be validated', async () => {
+  const { cwd, state } = await createResumeFixture({
+    currentScopeNumber: 1,
+  });
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
+
+  await notifyScopeAccepted(state, 'scope 1 work');
+
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.equal(notifyLog.trim(), '[neal] PLAN.md: scope 1 complete: scope 1 work');
 });
 
 test('final squash tolerates unrelated local changes when the run was started with ignoreLocalChanges', async () => {

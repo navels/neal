@@ -1,8 +1,6 @@
 import { basename } from 'node:path';
-import { readFile } from 'node:fs/promises';
 
-import { validatePlanDocument } from './plan-validation.js';
-import { getCurrentScopeLabel, getExecutionPlanPath, isExecutingDerivedPlan } from './scopes.js';
+import { getCurrentScopeLabel, getExecutionPlanPath, getExecutionPlanScopeCount, isExecutingDerivedPlan } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 type FooterStream = {
@@ -88,25 +86,6 @@ export function renderStatusFooterLine(args: FooterContext) {
   }
 
   return segments.join(' | ');
-}
-
-async function getExecutionPlanScopeCount(planPath: string) {
-  try {
-    const planDocument = await readFile(planPath, 'utf8');
-    const validation = validatePlanDocument(planDocument);
-    if (!validation.ok) {
-      return null;
-    }
-
-    if (validation.executionShape === 'one_shot') {
-      return 1;
-    }
-
-    const matches = validation.normalization.normalizedDocument.match(/^### Scope \d+:/gm);
-    return matches?.length ?? null;
-  } catch {
-    return null;
-  }
 }
 
 export class StatusFooter {

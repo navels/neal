@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 
 import { notify } from '../../notifier.js';
 import type { RunLogger } from '../logger.js';
-import { getCurrentScopeLabel, getParentScopeLabel } from '../scopes.js';
+import { getCurrentScopeLabel, getExecutionPlanPath, getExecutionPlanScopeCount, getParentScopeLabel } from '../scopes.js';
 import { saveState } from '../state.js';
 import type { OrchestrationState } from '../types.js';
 
@@ -32,12 +32,15 @@ async function notifyComplete(state: OrchestrationState, message: string, logger
 async function notifyScopeAccepted(state: OrchestrationState, message: string, logger?: RunLogger) {
   const planName = basename(state.planDoc);
   const scopeLabel = getCurrentScopeLabel(state);
+  const totalScopeCount = await getExecutionPlanScopeCount(getExecutionPlanPath(state));
+  const scopeSegment = totalScopeCount ? `${scopeLabel}/${totalScopeCount}` : scopeLabel;
   await logger?.event('notify.scope_complete', {
     message,
     planName,
     scopeNumber: scopeLabel,
+    totalScopeCount,
   });
-  await notify('complete', `[neal] ${planName}: scope ${scopeLabel} complete: ${message}`, state.cwd);
+  await notify('complete', `[neal] ${planName}: scope ${scopeSegment} complete: ${message}`, state.cwd);
 }
 
 async function notifyRetry(state: OrchestrationState, message: string, logger?: RunLogger) {
