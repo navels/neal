@@ -1,6 +1,6 @@
 # Sandbox Backlog
 
-Use this file with `notes/testing/CODEX_CLAUDE_SANDBOX_PLAN.md`.
+Use this file only as a local sandbox backlog when you want a safe in-repo validation target.
 
 - [ ] Improve `toSentenceCase()` so it preserves common all-caps acronyms like `CLI`, `API`, and `SDK`.
 - [ ] Add a `compactPath()` helper to shorten long slash-delimited paths for display.

@@ -29,11 +29,11 @@ This means Scope 1 picks a prompt home without preempting the adjudicator shape 
 
 ## Referenced Plan Context
 
-The prompt-spec plan references plans 01 through 03 as prerequisites. In the current repository they are present under `plans/archived/` rather than `plans/`.
+The prompt-spec plan references plans 01 through 03 as prerequisites. In the current repository they live under `plans/implemented/`.
 
-- [plans/archived/01_NEAL_MEANINGFUL_PROGRESS_GATE_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/archived/01_NEAL_MEANINGFUL_PROGRESS_GATE_PLAN.md)
-- [plans/archived/02_NEAL_DIAGNOSTIC_RECOVERY_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/archived/02_NEAL_DIAGNOSTIC_RECOVERY_PLAN.md)
-- [plans/archived/03_NEAL_FINAL_COMPLETION_REVIEW_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/archived/03_NEAL_FINAL_COMPLETION_REVIEW_PLAN.md)
+- [plans/implemented/01_NEAL_MEANINGFUL_PROGRESS_GATE_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/implemented/01_NEAL_MEANINGFUL_PROGRESS_GATE_PLAN.md)
+- [plans/implemented/02_NEAL_DIAGNOSTIC_RECOVERY_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/implemented/02_NEAL_DIAGNOSTIC_RECOVERY_PLAN.md)
+- [plans/implemented/03_NEAL_FINAL_COMPLETION_REVIEW_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/implemented/03_NEAL_FINAL_COMPLETION_REVIEW_PLAN.md)
 - [plans/05_NEAL_ADJUDICATOR_REFACTOR_PLAN.md](/Users/lee.nave/code/personal/codex-chunked/plans/05_NEAL_ADJUDICATOR_REFACTOR_PLAN.md)
 
 That matters because meaningful-progress, diagnostic recovery, and final completion already define real prompt surfaces Neal must preserve.
