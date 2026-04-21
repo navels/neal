@@ -160,7 +160,7 @@ Plan authors should describe execution in terms of scopes:
 
 ## Notifications
 
-The tool no longer depends on the `work-autonomously` skill. By default it runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`. If you do not set that key, `neal` falls back to `~/bin/notify`, which is why the checked-in repo config omits it.
+By default `neal` runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`. If you do not set that key, `neal` falls back to `~/bin/notify`, which is why the checked-in repo config omits it.
 
 ## Retry Behavior
 
