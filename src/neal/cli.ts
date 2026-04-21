@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentProvider } from './types.js';
+import type { AgentConfig } from './types.js';
 
 export type ExecuteInputSource =
   | { mode: 'file_default'; value: string }
@@ -32,6 +32,7 @@ export function buildUsageLines() {
     '   or: neal --recover [state-file] --message <guidance>  # record operator guidance, then run neal --resume',
     '   or: neal --diagnose [state-file] --question "<diagnostic question>" --target "<files-or-component>" [--baseline <ref>]',
     '   or: neal --diagnostic-decision [state-file] --action <adopt|reference|cancel> [--rationale "<note>"]',
+<<<<<<< Updated upstream
     '   or: neal --resume-coder [state-file]       # open persisted coder session in its provider CLI',
     '   or: neal --resume-reviewer [state-file]    # open persisted reviewer session in its provider CLI',
     '   or: neal --squash <plan-doc> [--dry-run] [--yes]      # squash run-owned commits for a completed plan',
@@ -49,6 +50,12 @@ export function buildUsageLines() {
     '  ~/.config/neal/guidance/{coder,reviewer,planner}.md',
     'Notifications: runs neal.notify_bin (default ~/bin/notify) for blocked/complete/done/retry events.',
     'See README.md for full details.',
+=======
+    '   or: neal --resume-coder [state-file]',
+    '   or: neal --resume-reviewer [state-file]',
+    '   or: neal --summaries [runs-dir]',
+    'Optional new-run flags: --ignore-local-changes',
+>>>>>>> Stashed changes
   ];
 }
 
@@ -143,34 +150,6 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
     rejectConflictingTopLevelMode(flag);
     rejectConflictingExecuteSource(flag);
     switch (flag) {
-      case '--coder-provider':
-        if (!value || !isAgentProvider(value)) {
-          throw new Error(`Invalid --coder-provider value: ${String(value)}`);
-        }
-        agentConfig.coder.provider = value;
-        index += 2;
-        break;
-      case '--coder-model':
-        if (!value) {
-          throw new Error('--coder-model requires a value');
-        }
-        agentConfig.coder.model = value;
-        index += 2;
-        break;
-      case '--reviewer-provider':
-        if (!value || !isAgentProvider(value)) {
-          throw new Error(`Invalid --reviewer-provider value: ${String(value)}`);
-        }
-        agentConfig.reviewer.provider = value;
-        index += 2;
-        break;
-      case '--reviewer-model':
-        if (!value) {
-          throw new Error('--reviewer-model requires a value');
-        }
-        agentConfig.reviewer.model = value;
-        index += 2;
-        break;
       case '--ignore-local-changes':
         ignoreLocalChanges = true;
         index += 1;
@@ -224,8 +203,4 @@ export function parseSquashArgs(args: string[]): ParsedSquashArgs {
     dryRun,
     yes,
   };
-}
-
-function isAgentProvider(value: string): value is AgentProvider {
-  return value === 'openai-codex' || value === 'anthropic-claude';
 }

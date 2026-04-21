@@ -591,7 +591,7 @@ async function main() {
     }
 
     await access(statePath);
-    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(process.cwd()), statePath, 'execute');
     assertSupportedAgentConfig(loaded.state.agentConfig);
     if (loaded.state.topLevelMode !== 'execute') {
       throw new Error('--recover is only supported for execute-mode runs');
@@ -691,7 +691,7 @@ async function main() {
     }
 
     await access(statePath);
-    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(process.cwd()), statePath, 'execute');
     assertSupportedAgentConfig(loaded.state.agentConfig);
     const nextState = await startDiagnosticRecovery(
       loaded.statePath,
@@ -768,7 +768,7 @@ async function main() {
     }
 
     await access(statePath);
-    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), statePath, 'execute');
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(process.cwd()), statePath, 'execute');
     assertSupportedAgentConfig(loaded.state.agentConfig);
     const nextState = await resolveDiagnosticRecovery(
       loaded.statePath,
@@ -822,12 +822,12 @@ async function main() {
     }
     const resumeStatePath = resolve(args[1] ?? '.neal/session.json');
     await access(resumeStatePath);
-    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(), resumeStatePath, 'execute');
+    const loaded = await loadOrInitialize(null, process.cwd(), getDefaultAgentConfig(process.cwd()), resumeStatePath, 'execute');
     assertSupportedAgentConfig(loaded.state.agentConfig);
     await executeRun(loaded.state, loaded.statePath, loaded.logger);
     return;
   }
-  const parsed = parseNewRunArgs(args, getDefaultAgentConfig());
+  const parsed = parseNewRunArgs(args, getDefaultAgentConfig(process.cwd()));
   assertSupportedAgentConfig(parsed.agentConfig);
 
   let planDoc = parsed.planDoc;

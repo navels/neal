@@ -2,7 +2,8 @@
 # This file is intentionally fully commented out:
 # - uncomment any setting you want to override for this repository
 # - leave settings commented to use Neal's built-in defaults
-# - put machine-local overrides such as `notify_bin` in ~/.config/neal/config.yml
+# - put machine-local overrides such as `notify_bin` or role-specific model
+#   choices in ~/.config/neal/config.yml
 
 # neal:
 #   # Milliseconds between wrapper heartbeat messages on stderr.
@@ -26,11 +27,32 @@
 #   # before Neal requires a terminal disposition.
 #   interactive_blocked_recovery_max_turns: 3
 #
+#   # Maximum number of times final completion review may send execution back
+#   # for more work before Neal stops reopening the plan.
+#   final_completion_continue_execution_max: 2
+#
 #   # Local notification command override.
 #   # Neal already falls back to ~/bin/notify by default, so this key is omitted
 #   # from the checked-in repo config on purpose. Set it in
 #   # ~/.config/neal/config.yml if your local notify command differs.
 #   # notify_bin: /absolute/path/to/notify
+#
+# agent:
+#   coder:
+#     # Default provider for new plan/execute/research runs.
+#     provider: openai-codex
+#
+#     # Optional default model override for the coder role.
+#     # Leave null to let the provider choose its default model.
+#     model: null
+#
+#   reviewer:
+#     # Default provider for the reviewer role.
+#     provider: anthropic-claude
+#
+#     # Optional default model override for the reviewer role.
+#     # Leave null to let the provider choose its default model.
+#     model: null
 #
 # providers:
 #   anthropic-claude:

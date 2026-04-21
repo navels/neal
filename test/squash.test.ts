@@ -503,7 +503,12 @@ test('executeSquashForRun rewrites the selected commits into one replacement com
   assert.deepEqual(artifact.originalCreatedCommits, [commitOne, finalCommit]);
   assert.equal(artifact.replacementCommit, replacementCommit);
   assert.equal(artifact.generatedCommitMessage, commitMessage.message);
+<<<<<<< Updated upstream
   assert.match(artifact.squashedAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+=======
+  assert.ok(artifact.squashedAt);
+  assert.match(artifact.squashedAt, /^\d{4}-\d{2}-\d{2}T/);
+>>>>>>> Stashed changes
 });
 
 test('neal --squash --yes rewrites history and reports the replacement commit', async () => {

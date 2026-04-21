@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { buildUsageLines, parseNewRunArgs, parseSquashArgs } from '../src/neal/cli.js';
+import { clearConfigCache } from '../src/neal/config.js';
 import { loadOrInitialize } from '../src/neal/orchestrator.js';
 import { getDefaultAgentConfig } from '../src/neal/state.js';
 import { resolveExecuteInput } from '../src/neal/input-source.js';
@@ -137,6 +138,37 @@ test('buildUsageLines documents the execute input modes clearly', () => {
   assert.match(usage, /--squash <plan-doc> \[--dry-run\] \[--yes\]/);
   assert.match(usage, /--diagnose \[state-file\] --question/);
   assert.match(usage, /--diagnostic-decision \[state-file\] --action <adopt\|reference\|cancel>/);
+});
+
+test('getDefaultAgentConfig reads role defaults from repo config', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-index-config-agent-'));
+  await writeFile(
+    join(cwd, 'config.yml'),
+    [
+      'agent:',
+      '  coder:',
+      '    provider: anthropic-claude',
+      '    model: claude-sonnet-4-5',
+      '  reviewer:',
+      '    provider: openai-codex',
+      '    model: gpt-5.4',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  clearConfigCache(cwd);
+  const config = getDefaultAgentConfig(cwd);
+  assert.deepEqual(config, {
+    coder: {
+      provider: 'anthropic-claude',
+      model: 'claude-sonnet-4-5',
+    },
+    reviewer: {
+      provider: 'openai-codex',
+      model: 'gpt-5.4',
+    },
+  });
 });
 
 test('resolveExecuteInput keeps file mode on the provided plan path', async () => {

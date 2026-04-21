@@ -18,24 +18,30 @@ import type {
   ReviewFinding,
   ReviewRound,
 } from './types.js';
+import {
+  getDefaultCoderModel,
+  getDefaultCoderProvider,
+  getDefaultReviewerModel,
+  getDefaultReviewerProvider,
+} from './config.js';
 
 const AGENT_PROVIDERS = new Set(['openai-codex', 'anthropic-claude']);
 
-export function getDefaultAgentConfig(): AgentConfig {
+export function getDefaultAgentConfig(cwd = process.cwd()): AgentConfig {
   return {
     coder: {
-      provider: 'openai-codex',
-      model: null,
+      provider: getDefaultCoderProvider(cwd),
+      model: getDefaultCoderModel(cwd),
     },
     reviewer: {
-      provider: 'anthropic-claude',
-      model: null,
+      provider: getDefaultReviewerProvider(cwd),
+      model: getDefaultReviewerModel(cwd),
     },
   };
 }
 
-function hydrateAgentConfig(value: unknown): AgentConfig {
-  const defaults = getDefaultAgentConfig();
+function hydrateAgentConfig(value: unknown, cwd = process.cwd()): AgentConfig {
+  const defaults = getDefaultAgentConfig(cwd);
   if (!value || typeof value !== 'object') {
     return defaults;
   }
@@ -665,7 +671,7 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
     ignoreLocalChanges: typeof (parsed as { ignoreLocalChanges?: unknown }).ignoreLocalChanges === 'boolean'
       ? (parsed as { ignoreLocalChanges: boolean }).ignoreLocalChanges
       : false,
-    agentConfig: hydrateAgentConfig(parsed.agentConfig),
+    agentConfig: hydrateAgentConfig(parsed.agentConfig, dirname(path)),
     progressJsonPath,
     progressMarkdownPath,
     consultMarkdownPath,

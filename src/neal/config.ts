@@ -14,6 +14,16 @@ export type NealConfigFile = {
     final_completion_continue_execution_max?: number | null;
     notify_bin?: string | null;
   };
+  agent?: {
+    coder?: {
+      provider?: 'openai-codex' | 'anthropic-claude' | null;
+      model?: string | null;
+    };
+    reviewer?: {
+      provider?: 'openai-codex' | 'anthropic-claude' | null;
+      model?: string | null;
+    };
+  };
   providers?: {
     'anthropic-claude'?: {
       max_turns?: number | null;
@@ -33,6 +43,16 @@ type NealResolvedConfig = {
     final_completion_continue_execution_max: number;
     notify_bin: string;
   };
+  agent: {
+    coder: {
+      provider: 'openai-codex' | 'anthropic-claude';
+      model: string | null;
+    };
+    reviewer: {
+      provider: 'openai-codex' | 'anthropic-claude';
+      model: string | null;
+    };
+  };
   providers: {
     'anthropic-claude': {
       max_turns: number;
@@ -51,6 +71,16 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     interactive_blocked_recovery_max_turns: 3,
     final_completion_continue_execution_max: 2,
     notify_bin: resolve(homedir(), 'bin/notify'),
+  },
+  agent: {
+    coder: {
+      provider: 'openai-codex',
+      model: null,
+    },
+    reviewer: {
+      provider: 'anthropic-claude',
+      model: null,
+    },
   },
   providers: {
     'anthropic-claude': {
@@ -90,6 +120,10 @@ function parseStringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function parseProviderValue(value: unknown): 'openai-codex' | 'anthropic-claude' | undefined {
+  return value === 'openai-codex' || value === 'anthropic-claude' ? value : undefined;
+}
+
 function readYamlFileIfPresent(path: string): NealConfigFile | null {
   if (!existsSync(path)) {
     return null;
@@ -111,6 +145,16 @@ function mergeConfig(base: NealConfigFile, override: NealConfigFile | null): Nea
     neal: {
       ...base.neal,
       ...override.neal,
+    },
+    agent: {
+      coder: {
+        ...base.agent?.coder,
+        ...override.agent?.coder,
+      },
+      reviewer: {
+        ...base.agent?.reviewer,
+        ...override.agent?.reviewer,
+      },
     },
     providers: {
       ...base.providers,
@@ -217,4 +261,34 @@ export function getNotifyBin(cwd = process.cwd()) {
     parseStringValue(config.neal?.notify_bin) ??
     DEFAULT_CONFIG.neal.notify_bin
   );
+}
+
+export function getDefaultCoderProvider(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parseProviderValue(config.agent?.coder?.provider) ??
+    DEFAULT_CONFIG.agent.coder.provider
+  );
+}
+
+export function getDefaultCoderModel(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return config.agent?.coder?.model === null
+    ? null
+    : (parseStringValue(config.agent?.coder?.model) ?? DEFAULT_CONFIG.agent.coder.model);
+}
+
+export function getDefaultReviewerProvider(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parseProviderValue(config.agent?.reviewer?.provider) ??
+    DEFAULT_CONFIG.agent.reviewer.provider
+  );
+}
+
+export function getDefaultReviewerModel(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return config.agent?.reviewer?.model === null
+    ? null
+    : (parseStringValue(config.agent?.reviewer?.model) ?? DEFAULT_CONFIG.agent.reviewer.model);
 }

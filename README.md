@@ -32,7 +32,6 @@ cd /path/to/repo
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md
 pnpm --dir ~/code/personal/codex-chunked start -- --execute-file /absolute/or/relative/PLAN.md
 pnpm --dir ~/code/personal/codex-chunked start -- --execute-text "# Inline Plan"
-pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --coder-model gpt-5.4 --reviewer-model claude-opus-4-6
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --ignore-local-changes
 ```
 
@@ -42,12 +41,17 @@ pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relativ
 
 `neal` reads wrapper runtime settings with this precedence:
 
-1. CLI flags
-2. `~/.config/neal/config.yml`
-3. repo `config.yml`
-4. built-in defaults
+1. `~/.config/neal/config.yml`
+2. repo `config.yml`
+3. built-in defaults
 
-The supported runtime shape lives under `neal.*`:
+The supported config surface is:
+
+- `neal.*` for wrapper/runtime behavior
+- `agent.*` for default coder/reviewer provider and model selection on new runs
+- `providers.*` for provider-specific settings
+
+Current shape:
 
 ```yaml
 # config.yml is a commented template in this repo.
@@ -60,6 +64,15 @@ The supported runtime shape lives under `neal.*`:
 #   inactivity_timeout_ms: 600000
 #   api_retry_limit: 10
 #   interactive_blocked_recovery_max_turns: 3
+#   final_completion_continue_execution_max: 2
+#
+# agent:
+#   coder:
+#     provider: openai-codex
+#     model: null
+#   reviewer:
+#     provider: anthropic-claude
+#     model: null
 #
 # providers:
 #   anthropic-claude:
@@ -67,9 +80,9 @@ The supported runtime shape lives under `neal.*`:
 #     continuation_limit: 2
 ```
 
-In this slice, `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout, retry budget, blocked-recovery cap, heartbeat cadence, review loop limits, and notification command all live under `neal.*`.
+`agent.*` holds the default coder/reviewer provider and model selection for new runs. `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout, retry budget, blocked-recovery cap, heartbeat cadence, review loop limits, and notification command all live under `neal.*`.
 
-The checked-in [`config.yml`](/Users/lee.nave/code/personal/codex-chunked/config.yml) is a fully commented template showing the supported keys, their defaults, and what each one does. Machine-local overrides such as `neal.notify_bin` belong in `~/.config/neal/config.yml`; when that key is omitted, `neal` falls back to its built-in `~/bin/notify` default.
+The checked-in [`config.yml`](/Users/lee.nave/code/personal/codex-chunked/config.yml) is a fully commented template showing the supported keys, their defaults, and what each one does. Machine-local overrides such as `neal.notify_bin` and per-role model selection belong in `~/.config/neal/config.yml`; when `neal.notify_bin` is omitted, `neal` falls back to its built-in `~/bin/notify` default.
 
 ## Sandbox E2E
 
@@ -86,12 +99,6 @@ Execution semantics:
 - `neal --resume [state-file]` resumes the Neal orchestration loop from saved wrapper state
 - `neal --resume-coder [state-file]` opens the persisted coder session directly in the matching provider CLI
 - `neal --resume-reviewer [state-file]` opens the persisted reviewer session directly in the matching provider CLI
-- new runs also accept:
-  - `--coder-provider <provider>`
-  - `--coder-model <model>`
-  - `--reviewer-provider <provider>`
-  - `--reviewer-model <model>`
-  - these flags apply only to new `--plan` / `--execute` runs, not `--resume`
 - `neal --summaries [runs-dir]` pages through retrospective reports written under `.neal/runs`
 - after an accepted scope, `neal` continues into the next scope automatically when the marker is `AUTONOMY_SCOPE_DONE` (or legacy `AUTONOMY_CHUNK_DONE`) until the plan completes or blocks
 
@@ -104,7 +111,7 @@ Current provider support in this slice is:
   - `openai-codex`
   - `anthropic-claude`
 
-Model overrides are supported for both roles. The config surface is symmetric: the same provider can be used for coder and reviewer with different models when that provider implements both capabilities. In this slice, the configured OpenAI and Anthropic providers both support both roles. Unsupported provider-role combinations fail fast.
+Provider and model defaults are configured per role under `agent.coder` and `agent.reviewer`. The config surface is symmetric: the same provider can be used for coder and reviewer with different models when that provider implements both capabilities. In this slice, the configured OpenAI and Anthropic providers both support both roles. Unsupported provider-role combinations fail fast.
 
 Fresh `neal --execute ...` runs require a clean worktree by default. If you intentionally want to start a fresh execute run on top of local changes, pass `--ignore-local-changes`. If a scope was interrupted with in-progress local changes, prefer `neal --resume` instead of starting a new execute run. If a run stopped in `blocked` state and you manually unblocked the persisted coder session, `neal --resume` will automatically re-enter the last blocked coder phase when that phase is resumable.
 
