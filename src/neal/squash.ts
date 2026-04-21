@@ -272,13 +272,6 @@ export async function validateSelectedRunForSquash(args: {
     throw new Error(`Run ${args.selected.runId} has duplicate commit entries in createdCommits`);
   }
 
-  const lastCreatedCommit = args.selected.createdCommits.at(-1) ?? null;
-  if (lastCreatedCommit !== args.selected.finalCommit) {
-    throw new Error(
-      `Run ${args.selected.runId} is inconsistent: final created commit ${lastCreatedCommit} does not match finalCommit ${args.selected.finalCommit}`,
-    );
-  }
-
   const headCommit = await getHeadCommit(args.cwd);
   if (headCommit !== args.selected.finalCommit) {
     throw new Error(
@@ -293,10 +286,16 @@ export async function validateSelectedRunForSquash(args: {
     );
   }
 
-  if (actualRange.join('\n') !== args.selected.createdCommits.join('\n')) {
+  const exactRecordedRange = actualRange.join('\n') === args.selected.createdCommits.join('\n');
+  const finalizedSingleCommitRange =
+    actualRange.length === 1 &&
+    actualRange[0] === args.selected.finalCommit &&
+    args.selected.createdCommits.at(-1) !== args.selected.finalCommit;
+
+  if (!exactRecordedRange && !finalizedSingleCommitRange) {
     throw new Error(
       [
-        `Run ${args.selected.runId} does not form a contiguous linear range from ${args.selected.baseCommit} to ${args.selected.finalCommit}`,
+        `Run ${args.selected.runId} does not form a squashable range from ${args.selected.baseCommit} to ${args.selected.finalCommit}`,
         `Recorded commits: ${args.selected.createdCommits.join(', ')}`,
         `Actual range: ${actualRange.join(', ')}`,
       ].join('\n'),

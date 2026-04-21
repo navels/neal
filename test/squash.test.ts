@@ -267,9 +267,44 @@ test('validateSelectedRunForSquash rejects non-linear created commit metadata', 
         cwd: fixture.cwd,
         selected: selection.selected,
       }),
-    /does not form a contiguous linear range/,
+    /does not form a squashable range/,
   );
   assert.notEqual(commitOne, commitTwo);
+});
+
+test('validateSelectedRunForSquash accepts Neal final-squash metadata where finalCommit differs from createdCommits', async () => {
+  const fixture = await createRepoFixture();
+  const createdCommit = await createCommit(fixture.cwd, 'feature.txt', 'one\n', 'scope work');
+  const squashedFinalCommit = await runGit(fixture.cwd, 'rev-parse', 'HEAD');
+  await runGit(fixture.cwd, 'reset', '--soft', fixture.baseCommit);
+  await runGit(fixture.cwd, 'commit', '-m', 'squashed scope');
+  const finalCommit = await runGit(fixture.cwd, 'rev-parse', 'HEAD');
+
+  await createRunSnapshot({
+    cwd: fixture.cwd,
+    runId: '2026-04-18T15-05-00.000Z-finalized-single',
+    planDoc: fixture.planDoc,
+    baseCommit: fixture.baseCommit,
+    finalCommit,
+    createdCommits: [createdCommit],
+  });
+
+  const selection = await selectSquashRunForPlan({
+    cwd: fixture.cwd,
+    planDocArg: 'plans/PLAN.md',
+  });
+
+  const validation = await validateSelectedRunForSquash({
+    cwd: fixture.cwd,
+    selected: selection.selected,
+  });
+
+  assert.equal(validation.baseCommit, fixture.baseCommit);
+  assert.equal(validation.finalCommit, finalCommit);
+  assert.deepEqual(validation.createdCommits, [createdCommit]);
+  assert.equal(validation.headCommit, finalCommit);
+  assert.notEqual(createdCommit, finalCommit);
+  assert.equal(squashedFinalCommit, createdCommit);
 });
 
 test('buildSquashCommitMessage prefers accepted scope summaries recorded in run state', async () => {
