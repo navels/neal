@@ -1,6 +1,6 @@
 import type { AgentConfig } from './types.js';
 
-export type ExecuteInputSource =
+export type FileOrTextInputSource =
   | { mode: 'file_default'; value: string }
   | { mode: 'file_explicit'; value: string }
   | { mode: 'text_explicit'; value: string };
@@ -8,7 +8,7 @@ export type ExecuteInputSource =
 export type ParsedNewRunArgs = {
   topLevelMode: 'plan' | 'execute';
   planDoc: string | null;
-  executeInputSource: ExecuteInputSource | null;
+  inputSource: FileOrTextInputSource | null;
   agentConfig: AgentConfig;
   ignoreLocalChanges: boolean;
 };
@@ -20,7 +20,8 @@ export type ParsedSquashArgs = {
 };
 
 const EXECUTE_SOURCE_FLAGS = new Set(['--execute', '--execute-file', '--execute-text']);
-const TOP_LEVEL_MODE_FLAGS = new Set(['--plan', '--execute', '--execute-file', '--execute-text']);
+const PLAN_SOURCE_FLAGS = new Set(['--plan', '--plan-file', '--plan-text']);
+const TOP_LEVEL_MODE_FLAGS = new Set([...EXECUTE_SOURCE_FLAGS, ...PLAN_SOURCE_FLAGS]);
 
 export function buildUsageLines() {
   return [
@@ -28,6 +29,8 @@ export function buildUsageLines() {
     '   or: neal --execute-file <plan-doc>         # explicit file mode',
     '   or: neal --execute-text "<plan markdown>"  # explicit inline text mode',
     '   or: neal --plan <plan-doc>                 # refine plan in place via coder+reviewer loop; backs up original, overwrites input, does not implement',
+    '   or: neal --plan-file <plan-doc>            # explicit file mode for planning',
+    '   or: neal --plan-text "<plan markdown>"     # explicit inline text mode for planning',
     '   or: neal --resume [state-file]             # resume a crashed/paused run from persisted state (default: .neal/session.json)',
     '   or: neal --recover [state-file] --message <guidance>  # record operator guidance, then run neal --resume',
     '   or: neal --diagnose [state-file] --question "<diagnostic question>" --target "<files-or-component>" [--baseline <ref>]',
@@ -48,7 +51,7 @@ export function buildUsageLines() {
   ];
 }
 
-function requireFilePathValue(flag: '--plan' | '--execute' | '--execute-file', value: string | undefined) {
+function requireFilePathValue(flag: '--plan' | '--plan-file' | '--execute' | '--execute-file', value: string | undefined) {
   if (value !== undefined && !value.startsWith('--')) {
     return value;
   }
@@ -56,6 +59,8 @@ function requireFilePathValue(flag: '--plan' | '--execute' | '--execute-file', v
   switch (flag) {
     case '--plan':
       throw new Error('--plan requires a plan file path argument');
+    case '--plan-file':
+      throw new Error('--plan-file requires a plan file path argument');
     case '--execute':
       throw new Error('--execute requires a plan file path argument');
     case '--execute-file':
@@ -63,9 +68,9 @@ function requireFilePathValue(flag: '--plan' | '--execute' | '--execute-file', v
   }
 }
 
-function requireTextValue(value: string | undefined) {
+function requireTextValue(flag: '--plan-text' | '--execute-text', value: string | undefined) {
   if (value === undefined || value === '') {
-    throw new Error('--execute-text requires a non-empty inline plan string argument');
+    throw new Error(`${flag} requires a non-empty inline plan string argument`);
   }
 
   return value;
@@ -73,13 +78,21 @@ function requireTextValue(value: string | undefined) {
 
 function rejectConflictingTopLevelMode(flag: string) {
   if (TOP_LEVEL_MODE_FLAGS.has(flag)) {
-    throw new Error('Choose exactly one execute input source: --execute, --execute-file, or --execute-text');
+    throw new Error(
+      'Choose exactly one top-level input source: --plan, --plan-file, --plan-text, --execute, --execute-file, or --execute-text',
+    );
   }
 }
 
 function rejectConflictingExecuteSource(flag: string) {
   if (EXECUTE_SOURCE_FLAGS.has(flag)) {
     throw new Error('Choose exactly one execute input source: --execute, --execute-file, or --execute-text');
+  }
+}
+
+function rejectConflictingPlanSource(flag: string) {
+  if (PLAN_SOURCE_FLAGS.has(flag)) {
+    throw new Error('Choose exactly one plan input source: --plan, --plan-file, or --plan-text');
   }
 }
 
@@ -92,7 +105,7 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
   const firstArg = args[index];
   let topLevelMode: 'plan' | 'execute';
   let planDoc: string | null = null;
-  let executeInputSource: ExecuteInputSource | null = null;
+  let inputSource: FileOrTextInputSource | null = null;
   const agentConfig: AgentConfig = {
     coder: { ...defaults.coder },
     reviewer: { ...defaults.reviewer },
@@ -102,12 +115,33 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
   switch (firstArg) {
     case '--plan':
       topLevelMode = 'plan';
-      planDoc = requireFilePathValue('--plan', args[index + 1]);
+      inputSource = {
+        mode: 'file_default',
+        value: requireFilePathValue('--plan', args[index + 1]),
+      };
+      planDoc = inputSource.value;
+      index += 2;
+      break;
+    case '--plan-file':
+      topLevelMode = 'plan';
+      inputSource = {
+        mode: 'file_explicit',
+        value: requireFilePathValue('--plan-file', args[index + 1]),
+      };
+      planDoc = inputSource.value;
+      index += 2;
+      break;
+    case '--plan-text':
+      topLevelMode = 'plan';
+      inputSource = {
+        mode: 'text_explicit',
+        value: requireTextValue('--plan-text', args[index + 1]),
+      };
       index += 2;
       break;
     case '--execute':
       topLevelMode = 'execute';
-      executeInputSource = {
+      inputSource = {
         mode: 'file_default',
         value: requireFilePathValue('--execute', args[index + 1]),
       };
@@ -115,7 +149,7 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
       break;
     case '--execute-file':
       topLevelMode = 'execute';
-      executeInputSource = {
+      inputSource = {
         mode: 'file_explicit',
         value: requireFilePathValue('--execute-file', args[index + 1]),
       };
@@ -123,9 +157,9 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
       break;
     case '--execute-text':
       topLevelMode = 'execute';
-      executeInputSource = {
+      inputSource = {
         mode: 'text_explicit',
-        value: requireTextValue(args[index + 1]),
+        value: requireTextValue('--execute-text', args[index + 1]),
       };
       index += 2;
       break;
@@ -135,9 +169,17 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
 
   while (index < args.length) {
     const flag = args[index];
-    const value = args[index + 1];
-    rejectConflictingTopLevelMode(flag);
-    rejectConflictingExecuteSource(flag);
+    if (topLevelMode === 'execute') {
+      rejectConflictingExecuteSource(flag);
+      if (PLAN_SOURCE_FLAGS.has(flag)) {
+        rejectConflictingTopLevelMode(flag);
+      }
+    } else {
+      rejectConflictingPlanSource(flag);
+      if (EXECUTE_SOURCE_FLAGS.has(flag)) {
+        rejectConflictingTopLevelMode(flag);
+      }
+    }
     switch (flag) {
       case '--ignore-local-changes':
         ignoreLocalChanges = true;
@@ -151,7 +193,7 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
   return {
     topLevelMode,
     planDoc,
-    executeInputSource,
+    inputSource,
     agentConfig,
     ignoreLocalChanges,
   } satisfies ParsedNewRunArgs;

@@ -10,7 +10,7 @@ import { buildUsageLines, parseNewRunArgs, parseSquashArgs } from '../src/neal/c
 import { clearConfigCache } from '../src/neal/config.js';
 import { loadOrInitialize } from '../src/neal/orchestrator.js';
 import { getDefaultAgentConfig } from '../src/neal/state.js';
-import { resolveExecuteInput } from '../src/neal/input-source.js';
+import { resolveInput } from '../src/neal/input-source.js';
 
 const execFileAsync = promisify(execFile);
 process.env.HOME = join(tmpdir(), 'neal-test-home-index');
@@ -59,15 +59,42 @@ async function runNealCliFailureInCwd(cwd: string, ...args: string[]) {
 test('parseNewRunArgs treats bare --execute as default file mode', () => {
   const parsed = parseNewRunArgs(['--execute', 'plans/PLAN.md'], getDefaultAgentConfig());
   assert.equal(parsed.topLevelMode, 'execute');
-  assert.deepEqual(parsed.executeInputSource, {
+  assert.deepEqual(parsed.inputSource, {
     mode: 'file_default',
     value: 'plans/PLAN.md',
   });
 });
 
+test('parseNewRunArgs treats bare --plan as default file mode', () => {
+  const parsed = parseNewRunArgs(['--plan', 'plans/PLAN.md'], getDefaultAgentConfig());
+  assert.equal(parsed.topLevelMode, 'plan');
+  assert.deepEqual(parsed.inputSource, {
+    mode: 'file_default',
+    value: 'plans/PLAN.md',
+  });
+});
+
+test('parseNewRunArgs supports explicit plan file mode', () => {
+  const parsed = parseNewRunArgs(['--plan-file', 'plans/PLAN.md'], getDefaultAgentConfig());
+  assert.equal(parsed.topLevelMode, 'plan');
+  assert.deepEqual(parsed.inputSource, {
+    mode: 'file_explicit',
+    value: 'plans/PLAN.md',
+  });
+});
+
+test('parseNewRunArgs supports explicit plan text mode', () => {
+  const parsed = parseNewRunArgs(['--plan-text', '# Draft Plan'], getDefaultAgentConfig());
+  assert.equal(parsed.topLevelMode, 'plan');
+  assert.deepEqual(parsed.inputSource, {
+    mode: 'text_explicit',
+    value: '# Draft Plan',
+  });
+});
+
 test('parseNewRunArgs supports explicit execute file mode', () => {
   const parsed = parseNewRunArgs(['--execute-file', 'plans/PLAN.md'], getDefaultAgentConfig());
-  assert.deepEqual(parsed.executeInputSource, {
+  assert.deepEqual(parsed.inputSource, {
     mode: 'file_explicit',
     value: 'plans/PLAN.md',
   });
@@ -75,7 +102,7 @@ test('parseNewRunArgs supports explicit execute file mode', () => {
 
 test('parseNewRunArgs supports explicit execute text mode', () => {
   const parsed = parseNewRunArgs(['--execute-text', '# Plan'], getDefaultAgentConfig());
-  assert.deepEqual(parsed.executeInputSource, {
+  assert.deepEqual(parsed.inputSource, {
     mode: 'text_explicit',
     value: '# Plan',
   });
@@ -83,7 +110,15 @@ test('parseNewRunArgs supports explicit execute text mode', () => {
 
 test('parseNewRunArgs allows execute-text values that begin with --', () => {
   const parsed = parseNewRunArgs(['--execute-text', '--foo bar'], getDefaultAgentConfig());
-  assert.deepEqual(parsed.executeInputSource, {
+  assert.deepEqual(parsed.inputSource, {
+    mode: 'text_explicit',
+    value: '--foo bar',
+  });
+});
+
+test('parseNewRunArgs allows plan-text values that begin with --', () => {
+  const parsed = parseNewRunArgs(['--plan-text', '--foo bar'], getDefaultAgentConfig());
+  assert.deepEqual(parsed.inputSource, {
     mode: 'text_explicit',
     value: '--foo bar',
   });
@@ -96,6 +131,13 @@ test('parseNewRunArgs rejects empty execute-text values directly', () => {
   );
 });
 
+test('parseNewRunArgs rejects empty plan-text values directly', () => {
+  assert.throws(
+    () => parseNewRunArgs(['--plan-text', ''], getDefaultAgentConfig()),
+    /--plan-text requires a non-empty inline plan string argument/,
+  );
+});
+
 test('parseNewRunArgs rejects conflicting execute-input flags', () => {
   assert.throws(
     () => parseNewRunArgs(['--execute', 'plans/PLAN.md', '--execute-text', '# Plan'], getDefaultAgentConfig()),
@@ -103,10 +145,17 @@ test('parseNewRunArgs rejects conflicting execute-input flags', () => {
   );
 });
 
+test('parseNewRunArgs rejects conflicting plan-input flags', () => {
+  assert.throws(
+    () => parseNewRunArgs(['--plan', 'plans/PLAN.md', '--plan-text', '# Plan'], getDefaultAgentConfig()),
+    /Choose exactly one plan input source/,
+  );
+});
+
 test('parseNewRunArgs rejects mixed top-level plan and execute modes consistently', () => {
   assert.throws(
     () => parseNewRunArgs(['--execute-text', '# Plan', '--plan', 'PLAN.md'], getDefaultAgentConfig()),
-    /Choose exactly one execute input source/,
+    /Choose exactly one top-level input source/,
   );
 });
 
@@ -132,6 +181,9 @@ test('parseSquashArgs rejects a missing plan path', () => {
 
 test('buildUsageLines documents the execute input modes clearly', () => {
   const usage = buildUsageLines().join('\n');
+  assert.match(usage, /--plan <plan-doc>/);
+  assert.match(usage, /--plan-file <plan-doc>/);
+  assert.match(usage, /--plan-text "<plan markdown>"/);
   assert.match(usage, /--execute <plan-doc>.*default file mode/);
   assert.match(usage, /--execute-file <plan-doc>.*explicit file mode/);
   assert.match(usage, /--execute-text "<plan markdown>"/);
@@ -171,24 +223,25 @@ test('getDefaultAgentConfig reads role defaults from repo config', async () => {
   });
 });
 
-test('resolveExecuteInput keeps file mode on the provided plan path', async () => {
+test('resolveInput keeps file mode on the provided plan path', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'neal-index-file-'));
   const planDoc = join(cwd, 'PLAN.md');
   await writeFile(planDoc, '# Plan\n', 'utf8');
 
-  const resolved = await resolveExecuteInput({ mode: 'file_explicit', value: 'PLAN.md' }, cwd);
+  const resolved = await resolveInput({ mode: 'file_explicit', value: 'PLAN.md' }, cwd, 'execute');
   assert.equal(resolved.planDoc, planDoc);
   assert.equal(resolved.runDir, undefined);
 });
 
-test('resolveExecuteInput materializes text mode into a run-owned plan artifact', async () => {
+test('resolveInput materializes execute text mode into a run-owned plan artifact', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'neal-index-text-'));
-  const resolved = await resolveExecuteInput(
+  const resolved = await resolveInput(
     {
       mode: 'text_explicit',
       value: '# Inline Plan\n\n## Execution Shape\n\nexecutionShape: one_shot\n',
     },
     cwd,
+    'execute',
   );
 
   assert.ok(resolved.runDir);
@@ -196,6 +249,24 @@ test('resolveExecuteInput materializes text mode into a run-owned plan artifact'
   assert.equal(resolved.planDoc, join(resolved.runDir!, 'INLINE_EXECUTE_PLAN.md'));
   await access(resolved.planDoc);
   assert.equal(await readFile(resolved.planDoc, 'utf8'), '# Inline Plan\n\n## Execution Shape\n\nexecutionShape: one_shot\n');
+});
+
+test('resolveInput materializes plan text mode into a run-owned draft artifact', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-index-plan-text-'));
+  const resolved = await resolveInput(
+    {
+      mode: 'text_explicit',
+      value: '# Draft Plan\n\nImplement X.\n',
+    },
+    cwd,
+    'plan',
+  );
+
+  assert.ok(resolved.runDir);
+  assert.match(resolved.planDoc, /\.neal\/runs\/[^/]+\/INLINE_PLAN\.md$/);
+  assert.equal(resolved.planDoc, join(resolved.runDir!, 'INLINE_PLAN.md'));
+  await access(resolved.planDoc);
+  assert.equal(await readFile(resolved.planDoc, 'utf8'), '# Draft Plan\n\nImplement X.\n');
 });
 
 test('text-mode bootstrap records the materialized inline plan path in state and run artifacts', async () => {
@@ -209,12 +280,13 @@ test('text-mode bootstrap records the materialized inline plan path in state and
   await runGit(cwd, 'add', 'README.md');
   await runGit(cwd, 'commit', '-m', 'base commit');
 
-  const resolved = await resolveExecuteInput(
+  const resolved = await resolveInput(
     {
       mode: 'text_explicit',
       value: '# Inline Plan\n\n## Execution Shape\n\nexecutionShape: one_shot\n',
     },
     cwd,
+    'execute',
   );
 
   const loaded = await loadOrInitialize(
@@ -243,6 +315,48 @@ test('text-mode bootstrap records the materialized inline plan path in state and
   };
   assert.equal(persistedState.planDoc, resolved.planDoc);
   assert.equal(persistedState.runDir, resolved.runDir);
+});
+
+test('plan-text bootstrap records the materialized inline plan path in state and run artifacts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-index-plan-text-bootstrap-'));
+  const cwd = join(root, 'repo');
+  await runGit(root, 'init', 'repo');
+  await runGit(cwd, 'config', 'user.name', 'Neal Test');
+  await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+  await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+  await writeFile(join(cwd, 'README.md'), 'bootstrap\n', 'utf8');
+  await runGit(cwd, 'add', 'README.md');
+  await runGit(cwd, 'commit', '-m', 'base commit');
+
+  const resolved = await resolveInput(
+    {
+      mode: 'text_explicit',
+      value: '# Draft Plan\n\nImplement X.\n',
+    },
+    cwd,
+    'plan',
+  );
+
+  const loaded = await loadOrInitialize(
+    resolved.planDoc,
+    cwd,
+    getDefaultAgentConfig(),
+    undefined,
+    'plan',
+    { runDir: resolved.runDir },
+  );
+
+  assert.equal(loaded.state.planDoc, resolved.planDoc);
+  assert.equal(loaded.state.runDir, resolved.runDir);
+  assert.equal(loaded.logger.runDir, resolved.runDir);
+  assert.match(loaded.state.planDocBackupPath ?? '', /INLINE_PLAN\.pre-plan\.[^/]+\.md$/);
+
+  const meta = JSON.parse(await readFile(join(resolved.runDir!, 'meta.json'), 'utf8')) as {
+    planDoc: string;
+    runDir: string;
+  };
+  assert.equal(meta.planDoc, resolved.planDoc);
+  assert.equal(meta.runDir, resolved.runDir);
 });
 
 test('plan-mode initialization creates a timestamped backup copy and persists its path', async () => {
@@ -317,6 +431,9 @@ test('execute startup cleans up a materialized inline run directory when initial
 test('neal usage output documents execute-file and execute-text', async () => {
   const result = await runNealCliFailure();
   assert.equal(result.code, 1);
+  assert.match(result.stderr, /--plan <plan-doc>/);
+  assert.match(result.stderr, /--plan-file <plan-doc>/);
+  assert.match(result.stderr, /--plan-text "<plan markdown>"/);
   assert.match(result.stderr, /--execute <plan-doc>.*default file mode/);
   assert.match(result.stderr, /--execute-file <plan-doc>/);
   assert.match(result.stderr, /--execute-text "<plan markdown>"/);
@@ -712,7 +829,10 @@ test('neal rejects conflicting execute-input source flags clearly', async () => 
 test('neal rejects mixed top-level plan and execute modes clearly regardless of ordering', async () => {
   const result = await runNealCliFailure('--execute-text', '# Plan', '--plan', 'PLAN.md');
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Choose exactly one execute input source: --execute, --execute-file, or --execute-text/);
+  assert.match(
+    result.stderr,
+    /Choose exactly one top-level input source: --plan, --plan-file, --plan-text, --execute, --execute-file, or --execute-text/,
+  );
 });
 
 test('neal points file-mode misses at execute-text explicitly', async () => {

@@ -18,7 +18,7 @@ import {
 } from './orchestrator.js';
 import { buildUsageLines, parseNewRunArgs, parseSquashArgs } from './cli.js';
 import { clearDiagnosticFooter, configureDiagnosticFooter, writeDiagnostic } from './diagnostic.js';
-import { resolveExecuteInput } from './input-source.js';
+import { resolveInput } from './input-source.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
 import {
@@ -832,15 +832,8 @@ async function main() {
 
   let planDoc = parsed.planDoc;
   let runDir: string | undefined;
-  if (parsed.topLevelMode === 'plan') {
-    try {
-      planDoc = resolve(process.cwd(), parsed.planDoc ?? '');
-      await access(planDoc);
-    } catch {
-      throw new Error(`Plan file not found: ${parsed.planDoc}`);
-    }
-  } else if (parsed.executeInputSource) {
-    const resolvedInput = await resolveExecuteInput(parsed.executeInputSource, process.cwd());
+  if (parsed.inputSource) {
+    const resolvedInput = await resolveInput(parsed.inputSource, process.cwd(), parsed.topLevelMode);
     planDoc = resolvedInput.planDoc;
     runDir = resolvedInput.runDir;
   }
@@ -852,7 +845,7 @@ async function main() {
       runDir,
     });
   } catch (error) {
-    if (parsed.topLevelMode === 'execute' && runDir) {
+    if (runDir) {
       await rm(runDir, { recursive: true, force: true });
     }
     throw error;
