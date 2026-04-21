@@ -86,6 +86,7 @@ import {
   shouldNotifyDerivedPlanAcceptance,
   transitionPlanReviewWithoutOpenFindings,
 } from './orchestrator/transitions.js';
+import { formatPlanRefinementRoundLine, isPlanRefinementState } from './plan-refinement.js';
 import { validatePlanDocument } from './plan-validation.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
 import { renderReviewMarkdown } from './review.js';
@@ -1949,6 +1950,12 @@ async function runInteractiveBlockedRecoveryPhase(state: OrchestrationState, sta
 
 async function runCoderPlanPhase(state: OrchestrationState, statePath: string, logger?: RunLogger) {
   await logger?.event('phase.start', { phase: 'coder_plan' });
+  if (isPlanRefinementState(state)) {
+    writeDiagnostic(
+      `${formatPlanRefinementRoundLine({ round: state.rounds.length + 1, maxRounds: state.maxRounds })}\n`,
+      logger,
+    );
+  }
   let workingState = state;
   let codex;
   try {
@@ -2566,6 +2573,12 @@ async function runPlanningResponsePhase(
 
   const mode = phase === 'coder_plan_optional_response' ? 'optional' : 'required';
   await logger?.event('phase.start', { phase });
+  if (isPlanRefinementState(state)) {
+    writeDiagnostic(
+      `${formatPlanRefinementRoundLine({ round: state.rounds.length + 1, maxRounds: state.maxRounds })}\n`,
+      logger,
+    );
+  }
   const planningContext = resolvePlanningAdjudicationContext(state);
   const { spec, derivedPlanReview, diagnosticRecoveryPlanReview } = planningContext;
   const openFindings = state.findings.filter(mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding);

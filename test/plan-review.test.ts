@@ -34,6 +34,46 @@ test('planning prompt requires an explicit execution-shape declaration', () => {
   assert.match(prompt, /Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact/);
 });
 
+test('planning prompt frames the task as iterative plan refinement', () => {
+  const prompt = buildPlanningPrompt('/tmp/PLAN.md');
+
+  assert.match(prompt, /Refine the existing plan document at \/tmp\/PLAN\.md/);
+  assert.match(prompt, /Underdeveloped scopes that need more implementation detail/);
+  assert.match(prompt, /Vague or missing acceptance criteria/);
+  assert.match(prompt, /Ambiguous scope boundaries or hidden assumptions/);
+  assert.match(prompt, /Poor or unclear sequencing between scopes/);
+  assert.match(prompt, /Verification that is not executable or not concrete/);
+  assert.match(prompt, /Produce a substantively improved revision in the same file\./);
+  assert.match(prompt, /If the current plan is already strong, do not invent new weaknesses/);
+  assert.doesNotMatch(prompt, /Rewrite the draft plan document/);
+});
+
+test('plan-mode coder response prompt frames follow-up rounds as continued refinement', () => {
+  const prompt = buildCoderPlanResponsePrompt({
+    planDoc: '/tmp/PLAN.md',
+    openFindings: [],
+  });
+
+  assert.match(prompt, /Continue refining the plan document at \/tmp\/PLAN\.md/);
+  assert.doesNotMatch(prompt, /Continue rewriting the draft plan document/);
+});
+
+test('plan-mode reviewer prompt calls out plan-refinement quality dimensions', () => {
+  const prompt = buildPlanReviewerPrompt({
+    planDoc: '/tmp/PLAN.md',
+    round: 1,
+    reviewMarkdownPath: '/tmp/REVIEW.md',
+  });
+
+  assert.match(prompt, /Focus on plan quality for refinement/);
+  assert.match(prompt, /scopes that need more detail/);
+  assert.match(prompt, /acceptance criteria that are vague or missing/);
+  assert.match(prompt, /ambiguous boundaries/);
+  assert.match(prompt, /hidden assumptions about the repository/);
+  assert.match(prompt, /weak sequencing/);
+  assert.match(prompt, /non-executable verification/);
+});
+
 test('derived-plan prompts require the same canonical Neal-executable contract', () => {
   const scopePrompt = buildScopePrompt('/tmp/PLAN.md', 'Current scope: 1');
   const coderResponsePrompt = buildCoderResponsePrompt({

@@ -7,7 +7,7 @@
     "planDoc": "/tmp/PLAN.md"
   },
   "contains": [
-    "Rewrite the draft plan document at /tmp/PLAN.md into a future execution plan for neal.",
+    "Refine the existing plan document at /tmp/PLAN.md into a stronger future execution plan for neal.",
     "Choose exactly one execution shape: `one_shot` or `multi_scope`.",
     "Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot` or `executionShape: multi_scope`.",
     "## Execution Queue",

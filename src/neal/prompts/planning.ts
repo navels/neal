@@ -59,7 +59,7 @@ function getPlanReviewerModeLines(args: {
         ? 'Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.'
         : mode === 'recovery-plan'
           ? 'Focus on whether the recovery plan directly answers the diagnostic analysis, remains narrow enough to adopt back into the active run, and preserves the canonical Neal-executable plan shape.'
-          : 'Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
+          : 'Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
     contractRule:
       mode === 'derived-plan'
         ? 'The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
@@ -77,18 +77,28 @@ export function buildPlanningPrompt(planDoc: string) {
   }
 
   return [
-    `Rewrite the draft plan document at ${planDoc} into a future execution plan for neal.`,
+    `Refine the existing plan document at ${planDoc} into a stronger future execution plan for neal.`,
     '',
     'Before doing anything else:',
     `1. Read ${planDoc}.`,
     '2. Read any companion docs explicitly referenced by that plan.',
     '3. Reset your instructions for this turn from the current contents of the plan and referenced context.',
     '',
-    'Then revise only plan-related artifacts.',
+    'Then identify weaknesses in the current plan and improve it. Look specifically for:',
+    '- Underdeveloped scopes that need more implementation detail.',
+    '- Vague or missing acceptance criteria / completion criteria.',
+    '- Ambiguous scope boundaries or hidden assumptions about the repository.',
+    '- Poor or unclear sequencing between scopes.',
+    '- Verification that is not executable or not concrete.',
+    '- Planning-task scaffolding left over from an earlier draft.',
+    'Produce a substantively improved revision in the same file.',
+    'If the current plan is already strong, do not invent new weaknesses; revise only what actually improves it.',
+    '',
+    'Revise only plan-related artifacts.',
     'Do not edit runtime source code outside the plan itself and adjacent planning notes.',
     'Do not make git commits.',
     'Your output must be a pure future execution plan, not a planning-task checklist.',
-    'Replace the draft in place so the resulting file is meant to be run later with neal --execute, not neal --plan.',
+    'Replace the plan in place so the resulting file is meant to be run later with neal --execute, not neal --plan.',
     'Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.',
     'Ground the plan in the actual current repository state. Inspect the real target files and write steps against the symbols, exports, and file structure that actually exist.',
     'Do not leave avoidable ambiguity in the plan when the repository already answers the question. Name concrete target functions, files, and exports when they are knowable from the repo.',
@@ -182,7 +192,7 @@ export function buildCoderPlanResponsePrompt(args: {
       ? `Continue refining the derived implementation plan at ${args.planDoc} for scope ${args.derivedFromScopeNumber ?? 'unknown'} in parent plan ${args.parentPlanDoc ?? args.planDoc}.`
       : reviewMode === 'recovery-plan'
         ? `Continue refining the diagnostic recovery plan candidate at ${args.planDoc} for parent objective ${args.recoveryParentScopeLabel ?? 'unknown'} in active plan ${args.parentPlanDoc ?? args.planDoc}.`
-        : `Continue rewriting the draft plan document at ${args.planDoc} into a future execution plan.`,
+        : `Continue refining the plan document at ${args.planDoc} into a stronger future execution plan.`,
     '',
     mode === 'blocking'
       ? 'Address the currently open review findings provided below.'

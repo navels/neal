@@ -21,6 +21,13 @@ import { clearDiagnosticFooter, configureDiagnosticFooter, writeDiagnostic } fro
 import { resolveExecuteInput } from './input-source.js';
 import type { RunLogger } from './logger.js';
 import { assertSupportedAgentConfig } from './providers/registry.js';
+import {
+  countOpenNonBlockingFindings,
+  determinePlanRefinementConvergence,
+  formatPlanRefinementSummary,
+  isPlanRefinementState,
+  planRefinementExitCode,
+} from './plan-refinement.js';
 import { buildSquashCommitMessage, executeSquashForRun, selectSquashRunForPlan, validateSelectedRunForSquash } from './squash.js';
 import { StatusFooter } from './status-footer.js';
 import { getDefaultAgentConfig, loadState } from './state.js';
@@ -291,6 +298,29 @@ async function executeRun(state: Awaited<ReturnType<typeof loadOrInitialize>>['s
     waitingForOperatorGuidance,
     runDir: finalState.runDir,
   });
+
+  if (isPlanRefinementState(finalState)) {
+    const convergenceReason = determinePlanRefinementConvergence(finalState);
+    if (convergenceReason !== null) {
+      const summary = formatPlanRefinementSummary({
+        rounds: finalState.rounds.length,
+        backupPath: finalState.planDocBackupPath,
+        convergenceReason,
+        residualNonBlocking: countOpenNonBlockingFindings(finalState),
+      });
+      writeDiagnostic(`${summary}\n`);
+      await logger.event('plan_refinement.summary', {
+        rounds: finalState.rounds.length,
+        backupPath: finalState.planDocBackupPath,
+        convergenceReason,
+        residualNonBlocking: countOpenNonBlockingFindings(finalState),
+      });
+      const exitCode = planRefinementExitCode(convergenceReason);
+      if (exitCode !== 0) {
+        process.exitCode = exitCode;
+      }
+    }
+  }
 
   const clearShutdownWatchdog = armShutdownWatchdog(finalState, logger);
 
