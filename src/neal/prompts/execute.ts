@@ -9,6 +9,7 @@ import {
   getExecuteScopeProgressPayloadContractLines,
   getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
+import { getUserGuidanceLines } from './guidance.js';
 import { getPromptSpec } from './specs.js';
 
 function assertPromptBuilder(id: 'scope_coder' | 'scope_reviewer', exportName: string) {
@@ -54,6 +55,7 @@ export function buildScopePrompt(planDoc: string, progressText: string) {
     'Create real git commit(s) for completed work.',
     'Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.',
     'Treat AUTONOMY_BLOCKED as a last resort, not an early exit.',
+    ...getUserGuidanceLines('coder'),
     '',
     'Current progress state:',
     buildProgressSection(progressText),
@@ -120,6 +122,7 @@ export function buildReviewerPrompt(args: {
     'Set `meaningfulProgressAction` to `block_for_operator` when the code may be locally correct but the run needs operator guidance before more work on this objective.',
     'Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.',
     'Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history.',
+    ...getUserGuidanceLines('reviewer'),
     '',
     'Coder progress justification for this scope:',
     JSON.stringify(args.progressJustification, null, 2),
@@ -180,6 +183,7 @@ export function buildCoderResponsePrompt(args: {
     'If the target remains viable but the current scope has proven to be the wrong execution shape, return outcome=`split_plan` with a concrete derived plan in `derivedPlan`.',
     'A derived plan must use the same Neal-executable contract as a top-level plan. Derived-plan-specific rationale sections are optional additive context only; they must not replace or rename `## Execution Shape`, `executionShape: ...`, `## Execution Queue`, or the required `### Scope N:` entries.',
     ...getCanonicalPlanContractLines(),
+    ...getUserGuidanceLines('coder'),
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),

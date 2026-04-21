@@ -5,6 +5,7 @@ import {
   getCanonicalPlanContractLines,
   getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
+import { getUserGuidanceLines } from './guidance.js';
 import { getPromptSpec } from './specs.js';
 
 function assertPromptBuilder(id: 'plan_author' | 'plan_reviewer' | 'recovery_plan_author' | 'recovery_plan_reviewer', exportName: string) {
@@ -98,6 +99,7 @@ export function buildPlanningPrompt(planDoc: string) {
     ...getTerminalMarkerArtifactBoundaryLines(),
     ...getCanonicalPlanContractLines(),
     'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
+    ...getUserGuidanceLines('planner'),
     '',
     'Final line must be exactly one of:',
     `- ${AUTONOMY_DONE}`,
@@ -152,6 +154,7 @@ export function buildPlanReviewerPrompt(args: {
     modeLines.contractRule,
     'If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.',
     `Read ${args.reviewMarkdownPath} before finalizing findings so you can inspect prior review history and coder responses.`,
+    ...getUserGuidanceLines('reviewer'),
     '',
     'Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings.',
   ].join('\n');
@@ -215,6 +218,7 @@ export function buildCoderPlanResponsePrompt(args: {
     mode === 'blocking'
       ? 'If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.'
       : 'Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.',
+    ...getUserGuidanceLines('planner'),
     '',
     'Open findings:',
     JSON.stringify(args.openFindings, null, 2),

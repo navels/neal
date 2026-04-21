@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import {
   buildCoderResponsePrompt,
@@ -13,6 +15,10 @@ import {
   buildScopePrompt,
 } from '../src/neal/agents.js';
 import { getPromptSpec } from '../src/neal/prompts/specs.js';
+import { clearUserGuidanceCache } from '../src/neal/prompts/guidance.js';
+
+process.env.NEAL_GUIDANCE_DIR = join(tmpdir(), 'neal-guidance-fixture-tests-does-not-exist');
+clearUserGuidanceCache();
 
 type PromptFixture = {
   name: string;

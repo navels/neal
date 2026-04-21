@@ -232,3 +232,21 @@ Those layers now exist in mixed depth:
 - inventory assertions in `test/review.test.ts` pin module ownership, schema targets, and current-home metadata
 
 The remaining deliberate gap is adjacent consult / blocked-recovery prompt surfaces, which still live outside the first curated prompt-spec set.
+
+## User Guidance Injection
+
+Users can layer their own guidance onto Neal's built-in coder, reviewer, and planner prompts without forking the prompt source. The injection surface is deliberately additive — built-in sections still own the terminal markers (`AUTONOMY_DONE`, `AUTONOMY_SCOPE_DONE`, `AUTONOMY_SPLIT_PLAN`, `AUTONOMY_BLOCKED`), the reviewer verdict JSON schema, and the canonical plan contract.
+
+Guidance files (all optional):
+
+- `~/.config/neal/guidance/coder.md` — injected into scope coder, scope response, diagnostic analysis, and final completion summary prompts
+- `~/.config/neal/guidance/reviewer.md` — injected into scope reviewer, plan reviewer, and final completion reviewer prompts
+- `~/.config/neal/guidance/planner.md` — injected into plan author, plan response, and recovery plan author prompts
+
+Each file is optional; a missing or whitespace-only file is a no-op and nothing is injected. When present, the file contents are appended under a fixed `## User Guidance` section placed after the built-in instructions and before any terminal-marker / output-format lines.
+
+Diagnostics: when a Neal run initializes (or resumes), it logs which roles have guidance applied and the byte count to the run's `stderr.log` and as a `run.user_guidance_applied` / `run.user_guidance_scanned` event. That is enough to confirm a guidance file was picked up without dumping contents.
+
+Non-goals for v1: no repo-local `.neal/guidance/` override, no full-prompt replacement, no per-scope guidance variants, and no substitution of built-in sections.
+
+The module lives in [src/neal/prompts/guidance.ts](/Users/lee.nave/code/personal/codex-chunked/src/neal/prompts/guidance.ts). Tests in [test/user-guidance.test.ts](/Users/lee.nave/code/personal/codex-chunked/test/user-guidance.test.ts) cover presence, absence, empty-file no-op, and that completion markers plus the plan contract survive injection.

@@ -5,6 +5,7 @@ import {
   buildProgressSection,
   getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
+import { getUserGuidanceLines } from './guidance.js';
 import { getPromptSpec } from './specs.js';
 
 function assertPromptBuilder(
@@ -73,6 +74,7 @@ export function buildFinalCompletionSummaryPrompt(args: {
     '',
     'If the completion is verification-only, say so directly in `whatChangedOverall` or `remainingKnownGaps` instead of pretending there was a terminal implementation diff.',
     'Do not include markdown fences or prose outside the JSON object.',
+    ...getUserGuidanceLines('coder'),
     '',
     'Last non-empty implementation scope reference:',
     lastImplementationScope,
@@ -139,6 +141,7 @@ export function buildFinalCompletionReviewerPrompt(args: {
     '',
     'If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.',
     'Do not include markdown fences or prose outside the JSON object.',
+    ...getUserGuidanceLines('reviewer'),
     '',
     'Last non-empty implementation scope reference:',
     lastImplementationScope,
@@ -199,6 +202,7 @@ export function buildDiagnosticAnalysisPrompt(args: {
     ...getTerminalMarkerArtifactBoundaryLines(),
     `End your response with exactly one terminal marker on the final line: ${AUTONOMY_DONE} or ${AUTONOMY_BLOCKED}.`,
     'Use AUTONOMY_BLOCKED only if you cannot produce the diagnostic analysis artifact from the available repository and baseline context.',
+    ...getUserGuidanceLines('coder'),
     '',
     'Current progress state:',
     buildProgressSection(args.progressText),
@@ -260,6 +264,7 @@ export function buildRecoveryPlanPrompt(args: {
     ...getTerminalMarkerArtifactBoundaryLines(),
     `End your response with exactly one terminal marker on the final line: ${AUTONOMY_DONE} or ${AUTONOMY_BLOCKED}.`,
     'Use AUTONOMY_BLOCKED only if the diagnostic analysis does not provide enough grounded information to author a safe recovery plan.',
+    ...getUserGuidanceLines('planner'),
     '',
     'Current progress state:',
     buildProgressSection(args.progressText),

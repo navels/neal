@@ -61,6 +61,7 @@ import {
 } from './git.js';
 import { createRunLogger, type RunLogger } from './logger.js';
 import { writeDiagnostic } from './diagnostic.js';
+import { collectGuidanceDiagnostics } from './prompts/guidance.js';
 import {
   flushDerivedPlanNotifications,
   notifyBlocked,
@@ -409,6 +410,18 @@ function buildConsultRequest(args: {
   };
 }
 
+async function logUserGuidanceApplied(logger: RunLogger) {
+  const entries = collectGuidanceDiagnostics();
+  if (entries.length === 0) {
+    await logger.event('run.user_guidance_scanned', { appliedRoles: [] });
+    return;
+  }
+  const summary = entries.map((entry) => ({ role: entry.role, bytes: entry.bytes, path: entry.path }));
+  await logger.event('run.user_guidance_applied', { entries: summary });
+  const parts = entries.map((entry) => `${entry.role}=${entry.bytes}B`);
+  await logger.stderr(`[neal] user guidance applied: ${parts.join(', ')}\n`);
+}
+
 export async function initializeOrchestration(
   planDoc: string,
   cwd: string,
@@ -464,6 +477,7 @@ export async function initializeOrchestration(
     progressJsonPath: savedState.progressJsonPath,
     progressMarkdownPath: savedState.progressMarkdownPath,
   });
+  await logUserGuidanceApplied(logger);
 
   return {
     state: savedState,
@@ -2788,6 +2802,7 @@ export async function loadOrInitialize(
       status: state.status,
       agentConfig: state.agentConfig,
     });
+    await logUserGuidanceApplied(logger);
 
     if (state.status === 'blocked' && state.coderSessionHandle && isResumableBlockedPhase(state.blockedFromPhase)) {
       state = await saveState(resumeStatePath, {
