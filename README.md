@@ -34,7 +34,7 @@ pnpm --dir ~/code/personal/codex-chunked start -- --execute-file /absolute/or/re
 pnpm --dir ~/code/personal/codex-chunked start -- --execute-text "# Inline Plan"
 pnpm --dir ~/code/personal/codex-chunked start -- --plan /absolute/or/relative/PLAN.md
 pnpm --dir ~/code/personal/codex-chunked start -- --plan-file /absolute/or/relative/PLAN.md
-pnpm --dir ~/code/personal/codex-chunked start -- --plan-text "# Draft Plan"
+pnpm --dir ~/code/personal/codex-chunked start -- --plan-text "# Draft Plan" /absolute/or/relative/PLAN.md
 pnpm --dir ~/code/personal/codex-chunked start -- --execute /absolute/or/relative/PLAN.md --ignore-local-changes
 ```
 
@@ -91,7 +91,7 @@ Execution semantics:
 
 - `neal --plan PLAN.md` revises a draft plan in place without making commits
 - `neal --plan-file PLAN.md` is the explicit file-mode spelling for planning
-- `neal --plan-text "..."` treats the argument as inline draft markdown, writes a run-owned `INLINE_PLAN.md` artifact under `.neal/runs/<timestamp>-<id>/`, and runs the normal planning loop against that generated plan file
+- `neal --plan-text "..." PLAN.md` writes the inline draft markdown to the requested plan file path, then runs the normal planning loop against that file
 - `neal --execute PLAN.md` executes the plan scope by scope until it completes or blocks; this remains the default file-mode spelling
 - `neal --execute-file PLAN.md` is the explicit file-mode spelling for execution
 - `neal --execute-text "..."` treats the argument as inline plan markdown, writes a run-owned `INLINE_EXECUTE_PLAN.md` artifact under `.neal/runs/<timestamp>-<id>/`, and runs the normal execute loop against that generated plan file

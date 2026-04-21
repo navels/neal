@@ -1,5 +1,5 @@
 import { access, mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { createRunId } from './logger.js';
 import type { FileOrTextInputSource } from './cli.js';
@@ -21,7 +21,9 @@ export async function resolveInput(
         planDoc: await resolveFilePath(source.value, cwd, mode),
       };
     case 'text_explicit':
-      return materializeInlinePlan(source.value, cwd, mode);
+      return mode === 'plan'
+        ? materializeInlinePlanDraft(source.targetPath, source.value, cwd)
+        : materializeInlineExecutePlan(source.value, cwd);
   }
 }
 
@@ -37,17 +39,26 @@ async function resolveFilePath(inputPath: string, cwd: string, mode: 'plan' | 'e
   }
 }
 
-async function materializeInlinePlan(planText: string, cwd: string, mode: 'plan' | 'execute'): Promise<ResolvedInput> {
-  if (planText.trim() === '') {
-    throw new Error(`--${mode}-text requires a non-empty inline plan string argument`);
-  }
-
+async function materializeInlineExecutePlan(planText: string, cwd: string): Promise<ResolvedInput> {
   const runDir = join(cwd, '.neal', 'runs', createRunId());
-  const planDoc = join(runDir, mode === 'execute' ? 'INLINE_EXECUTE_PLAN.md' : 'INLINE_PLAN.md');
+  const planDoc = join(runDir, 'INLINE_EXECUTE_PLAN.md');
   await mkdir(runDir, { recursive: true });
   await writeFile(planDoc, planText, 'utf8');
   return {
     planDoc,
     runDir,
+  };
+}
+
+async function materializeInlinePlanDraft(targetPath: string | undefined, planText: string, cwd: string): Promise<ResolvedInput> {
+  if (!targetPath) {
+    throw new Error('--plan-text requires an inline plan string followed by a target plan file path argument');
+  }
+
+  const planDoc = resolve(cwd, targetPath);
+  await mkdir(dirname(planDoc), { recursive: true });
+  await writeFile(planDoc, planText, 'utf8');
+  return {
+    planDoc,
   };
 }

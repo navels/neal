@@ -3,7 +3,7 @@ import type { AgentConfig } from './types.js';
 export type FileOrTextInputSource =
   | { mode: 'file_default'; value: string }
   | { mode: 'file_explicit'; value: string }
-  | { mode: 'text_explicit'; value: string };
+  | { mode: 'text_explicit'; value: string; targetPath?: string };
 
 export type ParsedNewRunArgs = {
   topLevelMode: 'plan' | 'execute';
@@ -30,7 +30,7 @@ export function buildUsageLines() {
     '   or: neal --execute-text "<plan markdown>"  # explicit inline text mode',
     '   or: neal --plan <plan-doc>                 # refine plan in place via coder+reviewer loop; backs up original, overwrites input, does not implement',
     '   or: neal --plan-file <plan-doc>            # explicit file mode for planning',
-    '   or: neal --plan-text "<plan markdown>"     # explicit inline text mode for planning',
+    '   or: neal --plan-text "<plan markdown>" <plan-doc>  # write inline draft to plan file, then refine it',
     '   or: neal --resume [state-file]             # resume a crashed/paused run from persisted state (default: .neal/session.json)',
     '   or: neal --recover [state-file] --message <guidance>  # record operator guidance, then run neal --resume',
     '   or: neal --diagnose [state-file] --question "<diagnostic question>" --target "<files-or-component>" [--baseline <ref>]',
@@ -66,6 +66,14 @@ function requireFilePathValue(flag: '--plan' | '--plan-file' | '--execute' | '--
     case '--execute-file':
       throw new Error('--execute-file requires a plan file path argument');
   }
+}
+
+function requirePlanTextTargetPath(value: string | undefined) {
+  if (value !== undefined && !value.startsWith('--')) {
+    return value;
+  }
+
+  throw new Error('--plan-text requires an inline plan string followed by a target plan file path argument');
 }
 
 function requireTextValue(flag: '--plan-text' | '--execute-text', value: string | undefined) {
@@ -136,8 +144,9 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
       inputSource = {
         mode: 'text_explicit',
         value: requireTextValue('--plan-text', args[index + 1]),
+        targetPath: requirePlanTextTargetPath(args[index + 2]),
       };
-      index += 2;
+      index += 3;
       break;
     case '--execute':
       topLevelMode = 'execute';

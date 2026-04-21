@@ -84,11 +84,12 @@ test('parseNewRunArgs supports explicit plan file mode', () => {
 });
 
 test('parseNewRunArgs supports explicit plan text mode', () => {
-  const parsed = parseNewRunArgs(['--plan-text', '# Draft Plan'], getDefaultAgentConfig());
+  const parsed = parseNewRunArgs(['--plan-text', '# Draft Plan', 'plans/DRAFT.md'], getDefaultAgentConfig());
   assert.equal(parsed.topLevelMode, 'plan');
   assert.deepEqual(parsed.inputSource, {
     mode: 'text_explicit',
     value: '# Draft Plan',
+    targetPath: 'plans/DRAFT.md',
   });
 });
 
@@ -117,10 +118,11 @@ test('parseNewRunArgs allows execute-text values that begin with --', () => {
 });
 
 test('parseNewRunArgs allows plan-text values that begin with --', () => {
-  const parsed = parseNewRunArgs(['--plan-text', '--foo bar'], getDefaultAgentConfig());
+  const parsed = parseNewRunArgs(['--plan-text', '--foo bar', 'plans/DRAFT.md'], getDefaultAgentConfig());
   assert.deepEqual(parsed.inputSource, {
     mode: 'text_explicit',
     value: '--foo bar',
+    targetPath: 'plans/DRAFT.md',
   });
 });
 
@@ -133,8 +135,15 @@ test('parseNewRunArgs rejects empty execute-text values directly', () => {
 
 test('parseNewRunArgs rejects empty plan-text values directly', () => {
   assert.throws(
-    () => parseNewRunArgs(['--plan-text', ''], getDefaultAgentConfig()),
+    () => parseNewRunArgs(['--plan-text', '', 'plans/DRAFT.md'], getDefaultAgentConfig()),
     /--plan-text requires a non-empty inline plan string argument/,
+  );
+});
+
+test('parseNewRunArgs rejects missing plan-text target paths directly', () => {
+  assert.throws(
+    () => parseNewRunArgs(['--plan-text', '# Draft Plan', '--ignore-local-changes'], getDefaultAgentConfig()),
+    /--plan-text requires an inline plan string followed by a target plan file path argument/,
   );
 });
 
@@ -147,7 +156,7 @@ test('parseNewRunArgs rejects conflicting execute-input flags', () => {
 
 test('parseNewRunArgs rejects conflicting plan-input flags', () => {
   assert.throws(
-    () => parseNewRunArgs(['--plan', 'plans/PLAN.md', '--plan-text', '# Plan'], getDefaultAgentConfig()),
+    () => parseNewRunArgs(['--plan', 'plans/PLAN.md', '--plan-text', '# Plan', 'plans/DRAFT.md'], getDefaultAgentConfig()),
     /Choose exactly one plan input source/,
   );
 });
@@ -183,7 +192,7 @@ test('buildUsageLines documents the execute input modes clearly', () => {
   const usage = buildUsageLines().join('\n');
   assert.match(usage, /--plan <plan-doc>/);
   assert.match(usage, /--plan-file <plan-doc>/);
-  assert.match(usage, /--plan-text "<plan markdown>"/);
+  assert.match(usage, /--plan-text "<plan markdown>" <plan-doc>/);
   assert.match(usage, /--execute <plan-doc>.*default file mode/);
   assert.match(usage, /--execute-file <plan-doc>.*explicit file mode/);
   assert.match(usage, /--execute-text "<plan markdown>"/);
@@ -251,20 +260,20 @@ test('resolveInput materializes execute text mode into a run-owned plan artifact
   assert.equal(await readFile(resolved.planDoc, 'utf8'), '# Inline Plan\n\n## Execution Shape\n\nexecutionShape: one_shot\n');
 });
 
-test('resolveInput materializes plan text mode into a run-owned draft artifact', async () => {
+test('resolveInput writes plan text mode to the requested draft path', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'neal-index-plan-text-'));
   const resolved = await resolveInput(
     {
       mode: 'text_explicit',
       value: '# Draft Plan\n\nImplement X.\n',
+      targetPath: 'plans/DRAFT.md',
     },
     cwd,
     'plan',
   );
 
-  assert.ok(resolved.runDir);
-  assert.match(resolved.planDoc, /\.neal\/runs\/[^/]+\/INLINE_PLAN\.md$/);
-  assert.equal(resolved.planDoc, join(resolved.runDir!, 'INLINE_PLAN.md'));
+  assert.equal(resolved.runDir, undefined);
+  assert.equal(resolved.planDoc, join(cwd, 'plans', 'DRAFT.md'));
   await access(resolved.planDoc);
   assert.equal(await readFile(resolved.planDoc, 'utf8'), '# Draft Plan\n\nImplement X.\n');
 });
@@ -317,7 +326,7 @@ test('text-mode bootstrap records the materialized inline plan path in state and
   assert.equal(persistedState.runDir, resolved.runDir);
 });
 
-test('plan-text bootstrap records the materialized inline plan path in state and run artifacts', async () => {
+test('plan-text bootstrap records the requested plan path in state and writes the draft file', async () => {
   const root = await mkdtemp(join(tmpdir(), 'neal-index-plan-text-bootstrap-'));
   const cwd = join(root, 'repo');
   await runGit(root, 'init', 'repo');
@@ -332,6 +341,7 @@ test('plan-text bootstrap records the materialized inline plan path in state and
     {
       mode: 'text_explicit',
       value: '# Draft Plan\n\nImplement X.\n',
+      targetPath: 'plans/DRAFT.md',
     },
     cwd,
     'plan',
@@ -347,16 +357,17 @@ test('plan-text bootstrap records the materialized inline plan path in state and
   );
 
   assert.equal(loaded.state.planDoc, resolved.planDoc);
-  assert.equal(loaded.state.runDir, resolved.runDir);
-  assert.equal(loaded.logger.runDir, resolved.runDir);
-  assert.match(loaded.state.planDocBackupPath ?? '', /INLINE_PLAN\.pre-plan\.[^/]+\.md$/);
+  assert.equal(loaded.state.runDir, loaded.logger.runDir);
+  assert.equal(resolved.planDoc, join(cwd, 'plans', 'DRAFT.md'));
+  assert.match(loaded.state.planDocBackupPath ?? '', /DRAFT\.pre-plan\.[^/]+\.md$/);
+  assert.equal(await readFile(resolved.planDoc, 'utf8'), '# Draft Plan\n\nImplement X.\n');
 
-  const meta = JSON.parse(await readFile(join(resolved.runDir!, 'meta.json'), 'utf8')) as {
+  const meta = JSON.parse(await readFile(join(loaded.state.runDir, 'meta.json'), 'utf8')) as {
     planDoc: string;
     runDir: string;
   };
   assert.equal(meta.planDoc, resolved.planDoc);
-  assert.equal(meta.runDir, resolved.runDir);
+  assert.equal(meta.runDir, loaded.state.runDir);
 });
 
 test('plan-mode initialization creates a timestamped backup copy and persists its path', async () => {
@@ -433,7 +444,7 @@ test('neal usage output documents execute-file and execute-text', async () => {
   assert.equal(result.code, 1);
   assert.match(result.stderr, /--plan <plan-doc>/);
   assert.match(result.stderr, /--plan-file <plan-doc>/);
-  assert.match(result.stderr, /--plan-text "<plan markdown>"/);
+  assert.match(result.stderr, /--plan-text "<plan markdown>" <plan-doc>/);
   assert.match(result.stderr, /--execute <plan-doc>.*default file mode/);
   assert.match(result.stderr, /--execute-file <plan-doc>/);
   assert.match(result.stderr, /--execute-text "<plan markdown>"/);
