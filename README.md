@@ -113,3 +113,11 @@ Notes:
 ## Notifications
 
 By default `neal` runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`.
+
+## Name
+
+The name comes from `anneal`.
+
+To anneal, in metallurgy and optimization, is to converge on a stable solution through repeated, controlled adjustment: heating and cooling a material to remove internal stresses and toughen it.
+
+`neal` keeps the process and drops the `an`.
