@@ -32,30 +32,19 @@ export function buildUsageLines() {
     '   or: neal --recover [state-file] --message <guidance>  # record operator guidance, then run neal --resume',
     '   or: neal --diagnose [state-file] --question "<diagnostic question>" --target "<files-or-component>" [--baseline <ref>]',
     '   or: neal --diagnostic-decision [state-file] --action <adopt|reference|cancel> [--rationale "<note>"]',
-<<<<<<< Updated upstream
     '   or: neal --resume-coder [state-file]       # open persisted coder session in its provider CLI',
     '   or: neal --resume-reviewer [state-file]    # open persisted reviewer session in its provider CLI',
     '   or: neal --squash <plan-doc> [--dry-run] [--yes]      # squash run-owned commits for a completed plan',
     '   or: neal --summaries [runs-dir]            # page past-run retrospective summaries',
     '',
     'Optional new-run flags (--plan / --execute*):',
-    '  --coder-provider <openai-codex|anthropic-claude>       (default: openai-codex)',
-    '  --coder-model <model>',
-    '  --reviewer-provider <openai-codex|anthropic-claude>    (default: anthropic-claude)',
-    '  --reviewer-model <model>',
     '  --ignore-local-changes                                 start a fresh execute run on a dirty worktree',
     '',
-    'Config precedence: CLI flags > ~/.config/neal/config.yml > repo config.yml > built-in defaults.',
+    'Config precedence: ~/.config/neal/config.yml > repo config.yml > built-in defaults.',
     'Optional prompt guidance (injected into built-in prompts if present):',
     '  ~/.config/neal/guidance/{coder,reviewer,planner}.md',
     'Notifications: runs neal.notify_bin (default ~/bin/notify) for blocked/complete/done/retry events.',
     'See README.md for full details.',
-=======
-    '   or: neal --resume-coder [state-file]',
-    '   or: neal --resume-reviewer [state-file]',
-    '   or: neal --summaries [runs-dir]',
-    'Optional new-run flags: --ignore-local-changes',
->>>>>>> Stashed changes
   ];
 }
 

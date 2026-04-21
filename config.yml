@@ -54,11 +54,3 @@
 #     # Leave null to let the provider choose its default model.
 #     model: null
 #
-# providers:
-#   anthropic-claude:
-#     # Maximum turns allowed in a single Claude reviewer session.
-#     max_turns: 100
-#
-#     # Maximum number of times Neal will continue the same Claude reviewer
-#     # session after it hits the provider's max-turns limit.
-#     continuation_limit: 2

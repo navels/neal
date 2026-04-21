@@ -49,7 +49,6 @@ The supported config surface is:
 
 - `neal.*` for wrapper/runtime behavior
 - `agent.*` for default coder/reviewer provider and model selection on new runs
-- `providers.*` for provider-specific settings
 
 Current shape:
 
@@ -73,14 +72,9 @@ Current shape:
 #   reviewer:
 #     provider: anthropic-claude
 #     model: null
-#
-# providers:
-#   anthropic-claude:
-#     max_turns: 100
-#     continuation_limit: 2
 ```
 
-`agent.*` holds the default coder/reviewer provider and model selection for new runs. `providers.*` should only hold genuinely provider-specific settings. `providers.anthropic-claude.max_turns` and `providers.anthropic-claude.continuation_limit` remain provider-specific; the shared inactivity timeout, retry budget, blocked-recovery cap, heartbeat cadence, review loop limits, and notification command all live under `neal.*`.
+`agent.*` holds the default coder/reviewer provider and model selection for new runs. Shared retry budgets, inactivity timeouts, blocked-recovery caps, heartbeat cadence, review loop limits, final-completion reopen limits, and notification command all live under `neal.*`.
 
 The checked-in [`config.yml`](/Users/lee.nave/code/personal/codex-chunked/config.yml) is a fully commented template showing the supported keys, their defaults, and what each one does. Machine-local overrides such as `neal.notify_bin` and per-role model selection belong in `~/.config/neal/config.yml`; when `neal.notify_bin` is omitted, `neal` falls back to its built-in `~/bin/notify` default.
 
@@ -124,7 +118,7 @@ The direct session-resume commands dispatch by persisted provider:
 
 `neal` also writes wrapper-generated consult and retrospective artifacts into the run directory. `CONSULT.md` reflects the latest blocker consultation state, and `RETROSPECTIVE.md` always reflects the latest accepted scope, blocked stop, or completed plan, with checkpoint-specific archives written alongside them so you can inspect whether the review loop is adding value or exposing inefficiencies.
 
-Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Anthropic reviewer sessions default to `100` turns and `neal` will continue the same reviewer session up to `2` times by default when it hits `error_max_turns` before returning structured findings. Transient Anthropic API/internal failures are retried up to `10` times by default. Tune those values in `config.yml`.
+Anthropic reviewer rounds now emit progress to stderr and fail with a clear inactivity timeout instead of silently appearing hung. Transient Anthropic API/internal failures are retried up to `10` times by default. Tune that retry budget in `config.yml`.
 
 Execute and planning review loops now default to `20` rounds. `neal` also detects `review_stuck` conditions and blocks early when blocking findings keep reopening or the open blocking count fails to decrease across multiple consecutive review rounds. Tune that non-reduction window in `config.yml`.
 

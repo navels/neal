@@ -1,6 +1,6 @@
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
-import { getApiRetryLimit, getClaudeContinuationLimit, getClaudeMaxTurns, getInactivityTimeoutMs } from '../config.js';
+import { getApiRetryLimit, getInactivityTimeoutMs } from '../config.js';
 import { writeDiagnostic } from '../diagnostic.js';
 import type { RunLogger } from '../logger.js';
 import type {
@@ -195,7 +195,6 @@ async function collectClaudeResult(stream: AsyncGenerator<SDKMessage, void>, cwd
 }
 
 function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?: string | null) {
-  const maxTurns = getClaudeMaxTurns(args.cwd);
   return query({
     prompt: args.prompt,
     options: {
@@ -204,7 +203,6 @@ function buildClaudeQueryStream(args: StructuredAdvisorRoundArgs, defaultModel?:
       tools: ['Read', 'Grep', 'Glob', 'Bash'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      maxTurns,
       ...(args.resumeHandle ? { resume: args.resumeHandle } : {}),
       stderr: (data) => {
         writeDiagnostic(`[claude:${args.label}:stderr] ${data}`, args.logger);
@@ -255,23 +253,11 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
 
   async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs): Promise<StructuredAdvisorRoundResult<TStructured>> {
     let sessionHandle: string | null = args.resumeHandle ?? null;
-    let attempt = 0;
     let apiRetryCount = 0;
-    let lastResult: SDKResultMessage | null = null;
-    const continuationLimit = getClaudeContinuationLimit(args.cwd);
     const apiRetryLimit = getApiRetryLimit(args.cwd);
 
-    while (attempt <= continuationLimit) {
-      const prompt =
-        attempt === 0
-          ? args.prompt
-          : [
-              'Continue the same review session.',
-              'Do not restart the investigation from scratch.',
-              'Present your final structured findings now. If there are no findings, return an empty findings array.',
-            ].join('\n');
-
-      const stream = buildClaudeQueryStream({ ...args, prompt, resumeHandle: sessionHandle }, this.options.model);
+    while (true) {
+      const stream = buildClaudeQueryStream(args, this.options.model);
       let result;
       try {
         result = await collectClaudeResult(stream, args.cwd, args.label, args.logger);
@@ -297,7 +283,7 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
       }
 
       sessionHandle = result.sessionHandle ?? sessionHandle;
-      lastResult = result.lastResult;
+      const lastResult = result.lastResult;
       const structured = (lastResult as { structured_output?: TStructured } | null)?.structured_output;
       if (structured) {
         return {
@@ -325,31 +311,14 @@ class AnthropicClaudeStructuredAdvisorAdapter implements StructuredAdvisorAdapte
         });
         continue;
       }
-      if (subtype !== 'error_max_turns' || !sessionHandle || attempt === continuationLimit) {
-        throw new AnthropicClaudeProviderError(
-          resultErrorMessage
-            ? `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}: ${resultErrorMessage}`
-            : `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}`,
-          sessionHandle,
-          subtype,
-        );
-      }
-
-      writeDiagnostic(
-        `[claude:${args.label}] max turns reached without structured findings; continuing same session (${attempt + 1}/${continuationLimit})\n`,
-        args.logger,
-      );
-      void args.logger?.event('advisor.round_continuation', {
-        label: args.label,
+      throw new AnthropicClaudeProviderError(
+        resultErrorMessage
+          ? `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}: ${resultErrorMessage}`
+          : `Claude ${args.label} did not return a successful result${subtype ? ` (${subtype})` : ''}`,
         sessionHandle,
-        attempt: attempt + 1,
-        continuationLimit,
-        provider: 'anthropic-claude',
-      });
-      attempt += 1;
+        subtype,
+      );
     }
-
-    throw new AnthropicClaudeProviderError(`Claude ${args.label} did not return structured output`, sessionHandle, lastResult?.subtype ?? null);
   }
 }
 

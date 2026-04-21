@@ -24,12 +24,6 @@ export type NealConfigFile = {
       model?: string | null;
     };
   };
-  providers?: {
-    'anthropic-claude'?: {
-      max_turns?: number | null;
-      continuation_limit?: number | null;
-    };
-  };
 };
 
 type NealResolvedConfig = {
@@ -53,12 +47,6 @@ type NealResolvedConfig = {
       model: string | null;
     };
   };
-  providers: {
-    'anthropic-claude': {
-      max_turns: number;
-      continuation_limit: number;
-    };
-  };
 };
 
 const DEFAULT_CONFIG: NealResolvedConfig = {
@@ -80,12 +68,6 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     reviewer: {
       provider: 'anthropic-claude',
       model: null,
-    },
-  },
-  providers: {
-    'anthropic-claude': {
-      max_turns: 100,
-      continuation_limit: 2,
     },
   },
 };
@@ -156,13 +138,6 @@ function mergeConfig(base: NealConfigFile, override: NealConfigFile | null): Nea
         ...override.agent?.reviewer,
       },
     },
-    providers: {
-      ...base.providers,
-      'anthropic-claude': {
-        ...base.providers?.['anthropic-claude'],
-        ...override.providers?.['anthropic-claude'],
-      },
-    },
   };
 }
 
@@ -196,22 +171,6 @@ export function getApiRetryLimit(cwd = process.cwd()) {
   return (
     parseNumberValue(config.neal?.api_retry_limit) ??
     DEFAULT_CONFIG.neal.api_retry_limit
-  );
-}
-
-export function getClaudeMaxTurns(cwd = process.cwd()) {
-  const config = loadConfigFile(cwd);
-  return (
-    parseNumberValue(config.providers?.['anthropic-claude']?.max_turns) ??
-    DEFAULT_CONFIG.providers['anthropic-claude'].max_turns
-  );
-}
-
-export function getClaudeContinuationLimit(cwd = process.cwd()) {
-  const config = loadConfigFile(cwd);
-  return (
-    parseNumberValue(config.providers?.['anthropic-claude']?.continuation_limit) ??
-    DEFAULT_CONFIG.providers['anthropic-claude'].continuation_limit
   );
 }
 
