@@ -42,6 +42,10 @@ neal --execute-text "# Goal\n\n## Execution Shape\n\nexecutionShape: one_shot\n"
 
 # Resume a stopped or interrupted run.
 neal --resume
+
+# Give guidance to a blocked run, then resume it.
+neal --recover .neal/session.json --message "Keep the change bounded to the failing test and rerun the required validation gate."
+neal --resume .neal/session.json
 ```
 
 Other useful commands:
