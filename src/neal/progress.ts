@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
+import { summarizeInteractiveBlockedRecoveryHistory } from './recovery-artifacts.js';
 import {
   getCurrentScopeLabel,
   getParentScopeLabel,
@@ -24,6 +25,9 @@ type InteractiveBlockedRecoveryHistorySummary = {
   sessions: number;
   lastAction: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resolvedByAction'] | null;
   lastResultPhase: OrchestrationState['interactiveBlockedRecoveryHistory'][number]['resultPhase'] | null;
+  lastBlockedReason: string | null;
+  lastOperatorGuidance: string | null;
+  lastCoderSummary: string | null;
 };
 
 type DiagnosticRecoverySummary = {
@@ -189,14 +193,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
           pendingDirective: state.interactiveBlockedRecovery.pendingDirective?.operatorGuidance ?? null,
         }
       : null,
-    interactiveBlockedRecoveryHistory:
-      state.interactiveBlockedRecoveryHistory.length > 0
-        ? {
-            sessions: state.interactiveBlockedRecoveryHistory.length,
-            lastAction: state.interactiveBlockedRecoveryHistory.at(-1)?.resolvedByAction ?? null,
-            lastResultPhase: state.interactiveBlockedRecoveryHistory.at(-1)?.resultPhase ?? null,
-          }
-        : null,
+    interactiveBlockedRecoveryHistory: summarizeInteractiveBlockedRecoveryHistory(state.interactiveBlockedRecoveryHistory),
     completedScopes: state.completedScopes,
   };
 }
@@ -381,6 +378,9 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Sessions: ${progress.interactiveBlockedRecoveryHistory.sessions}`,
       `- Latest action: ${progress.interactiveBlockedRecoveryHistory.lastAction ?? 'none'}`,
       `- Latest result phase: ${progress.interactiveBlockedRecoveryHistory.lastResultPhase ?? 'none'}`,
+      `- Latest blocked reason: ${progress.interactiveBlockedRecoveryHistory.lastBlockedReason ?? 'none'}`,
+      `- Latest operator guidance: ${progress.interactiveBlockedRecoveryHistory.lastOperatorGuidance ?? 'none'}`,
+      `- Latest coder summary: ${progress.interactiveBlockedRecoveryHistory.lastCoderSummary ?? 'none'}`,
     );
   }
 

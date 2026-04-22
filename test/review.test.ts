@@ -25,6 +25,7 @@ import { getFinalCompletionReviewArtifactPath, renderFinalCompletionReviewMarkdo
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
 import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/neal/progress.js';
 import { getPromptSpec, PROMPT_SPECS } from '../src/neal/prompts/specs.js';
+import { writeCheckpointRetrospective } from '../src/neal/retrospective.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
 import { createInitialState, getDefaultAgentConfig } from '../src/neal/state.js';
 import type { AdjudicationSpec, AdjudicationTransitionSignal } from '../src/neal/adjudicator/specs.js';
@@ -111,6 +112,9 @@ test('consult and progress artifacts preserve completed interactive blocked reco
   assert.match(progressMarkdown, /Sessions: 1/);
   assert.match(progressMarkdown, /Latest action: resume_current_scope/);
   assert.match(progressMarkdown, /Latest result phase: coder_response/);
+  assert.match(progressMarkdown, /Latest blocked reason: Review findings stopped converging\./);
+  assert.match(progressMarkdown, /Latest operator guidance: Apply the reviewer feedback and continue this scope\./);
+  assert.match(progressMarkdown, /Latest coder summary: The scope can continue\./);
 });
 
 test('interactive blocked recovery notification is distinct from a terminal blocked notification', async () => {
@@ -717,6 +721,70 @@ test('final completion review artifact records coder summary, reviewer verdict, 
   assert.match(markdown, /- Missing work summary: Add the remaining audit-trail regression case\./);
   assert.match(markdown, /Run blocked for operator guidance\./);
   assert.equal(getFinalCompletionReviewArtifactPath(state.runDir), join(state.runDir, 'FINAL_COMPLETION_REVIEW.md'));
+});
+
+test('final completion review and retrospective surface interactive blocked recovery details', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 3,
+    phase: 'done',
+    status: 'done',
+    baseCommit: null,
+    finalCommit: 'final-3',
+    interactiveBlockedRecoveryHistory: [
+      {
+        enteredAt: '2026-04-16T00:00:00.000Z',
+        sourcePhase: 'coder_scope',
+        blockedReason: 'The validation gate hit an unrelated baseline failure.',
+        maxTurns: 3,
+        lastHandledTurn: 1,
+        resolvedAt: '2026-04-16T00:03:00.000Z',
+        resolvedByAction: 'resume_current_scope',
+        resultPhase: 'coder_scope',
+        turns: [
+          {
+            number: 1,
+            recordedAt: '2026-04-16T00:01:00.000Z',
+            operatorGuidance: 'Broaden the scope to include the blocking test fix.',
+            disposition: {
+              recordedAt: '2026-04-16T00:02:00.000Z',
+              sessionHandle: 'coder-session-3',
+              action: 'resume_current_scope',
+              summary: 'The blocker is now authorized inside the current scope.',
+              rationale: 'The operator folded the test fix into the current scope.',
+              blocker: '',
+              replacementPlan: '',
+              resultingPhase: 'coder_scope',
+            },
+          },
+        ],
+      },
+    ],
+    finalCompletionSummary: {
+      planGoalSatisfied: true,
+      whatChangedOverall: 'Completed all requested cleanup work.',
+      verificationSummary: 'Lint and the required test suites passed.',
+      remainingKnownGaps: [],
+    },
+    finalCompletionReviewVerdict: {
+      action: 'accept_complete',
+      summary: 'The plan is complete.',
+      rationale: 'All required work landed cleanly.',
+      missingWork: null,
+    },
+    finalCompletionResolvedAction: 'accept_complete',
+  });
+
+  const completionMarkdown = renderFinalCompletionReviewMarkdown(state);
+  assert.match(completionMarkdown, /## Interactive Blocked Recovery History/);
+  assert.match(completionMarkdown, /Blocked reason: The validation gate hit an unrelated baseline failure\./);
+  assert.match(completionMarkdown, /Turn 1 guidance: Broaden the scope to include the blocking test fix\./);
+  assert.match(completionMarkdown, /Turn 1 coder summary: The blocker is now authorized inside the current scope\./);
+
+  const { archivedPath } = await writeCheckpointRetrospective(state, 'done');
+  const retrospective = await readFile(archivedPath, 'utf8');
+  assert.match(retrospective, /## Interactive Blocked Recovery History/);
+  assert.match(retrospective, /Resolution: resume_current_scope/);
+  assert.match(retrospective, /Turn 1 guidance: Broaden the scope to include the blocking test fix\./);
 });
 
 test('final completion packet rolls derived sub-scope history into the whole-plan summary', async () => {

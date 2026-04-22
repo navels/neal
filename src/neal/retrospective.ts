@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { getChangedFilesForRange } from './git.js';
+import { renderInteractiveBlockedRecoveryHistoryLines } from './recovery-artifacts.js';
 import { getCurrentScopeLabel, getParentScopeLabel, isExecutingDerivedPlan } from './scopes.js';
 import type { FindingSeverity, OrchestrationState } from './types.js';
 
@@ -341,6 +342,7 @@ async function renderRetrospective(state: OrchestrationState, kind: Retrospectiv
           completedScopesSummary,
         ]
       : []),
+    ...renderInteractiveBlockedRecoveryHistoryLines(state.interactiveBlockedRecoveryHistory),
     '',
   ].join('\n');
 }

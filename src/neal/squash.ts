@@ -30,9 +30,11 @@ export type SquashCandidate = {
   status: OrchestrationState['status'] | null;
   createdAt: string | null;
   updatedAt: string | null;
+  initialBaseCommit: string | null;
   baseCommit: string | null;
   finalCommit: string | null;
   createdCommits: string[] | null;
+  acceptedScopeCount: number | null;
   source: 'run_state' | 'artifacts_only';
   metadataIssues: string[];
 };
@@ -124,9 +126,11 @@ async function loadCandidateFromRunDir(runDir: string): Promise<SquashCandidate 
       status: state.status,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
+      initialBaseCommit: state.initialBaseCommit,
       baseCommit: state.baseCommit,
       finalCommit: state.finalCommit,
       createdCommits: [...state.createdCommits],
+      acceptedScopeCount: state.completedScopes.filter((scope) => scope.result === 'accepted').length,
       source: 'run_state',
       metadataIssues: [],
     };
@@ -153,9 +157,11 @@ async function loadCandidateFromRunDir(runDir: string): Promise<SquashCandidate 
           : null,
       createdAt: typeof meta?.createdAt === 'string' ? meta.createdAt : null,
       updatedAt: null,
+      initialBaseCommit: null,
       baseCommit: null,
       finalCommit: typeof progress?.finalCommit === 'string' ? progress.finalCommit : null,
       createdCommits: null,
+      acceptedScopeCount: null,
       source: 'artifacts_only',
       metadataIssues,
     };
@@ -255,7 +261,9 @@ export async function validateSelectedRunForSquash(args: {
     );
   }
 
-  if (!args.selected.baseCommit) {
+  const squashBaseCommit = args.selected.initialBaseCommit ?? args.selected.baseCommit;
+
+  if (!squashBaseCommit) {
     throw new Error(`Run ${args.selected.runId} is missing baseCommit`);
   }
 
@@ -279,10 +287,10 @@ export async function validateSelectedRunForSquash(args: {
     );
   }
 
-  const actualRange = await getCommitRange(args.cwd, args.selected.baseCommit, args.selected.finalCommit);
+  const actualRange = await getCommitRange(args.cwd, squashBaseCommit, args.selected.finalCommit);
   if (actualRange.length === 0) {
     throw new Error(
-      `Run ${args.selected.runId} has no reachable commits between ${args.selected.baseCommit} and ${args.selected.finalCommit}`,
+      `Run ${args.selected.runId} has no reachable commits between ${squashBaseCommit} and ${args.selected.finalCommit}`,
     );
   }
 
@@ -291,11 +299,17 @@ export async function validateSelectedRunForSquash(args: {
     actualRange.length === 1 &&
     actualRange[0] === args.selected.finalCommit &&
     args.selected.createdCommits.at(-1) !== args.selected.finalCommit;
+  const fullPlanAcceptedRange =
+    args.selected.source === 'run_state' &&
+    args.selected.topLevelMode === 'execute' &&
+    args.selected.status === 'done' &&
+    (args.selected.acceptedScopeCount ?? 0) > 1 &&
+    actualRange.at(-1) === args.selected.finalCommit;
 
-  if (!exactRecordedRange && !finalizedSingleCommitRange) {
+  if (!exactRecordedRange && !finalizedSingleCommitRange && !fullPlanAcceptedRange) {
     throw new Error(
       [
-        `Run ${args.selected.runId} does not form a squashable range from ${args.selected.baseCommit} to ${args.selected.finalCommit}`,
+        `Run ${args.selected.runId} does not form a squashable range from ${squashBaseCommit} to ${args.selected.finalCommit}`,
         `Recorded commits: ${args.selected.createdCommits.join(', ')}`,
         `Actual range: ${actualRange.join(', ')}`,
       ].join('\n'),
@@ -303,9 +317,9 @@ export async function validateSelectedRunForSquash(args: {
   }
 
   return {
-    baseCommit: args.selected.baseCommit,
+    baseCommit: squashBaseCommit,
     finalCommit: args.selected.finalCommit,
-    createdCommits: [...args.selected.createdCommits],
+    createdCommits: [...actualRange],
     headCommit,
   };
 }

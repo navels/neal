@@ -301,10 +301,78 @@ test('validateSelectedRunForSquash accepts Neal final-squash metadata where fina
 
   assert.equal(validation.baseCommit, fixture.baseCommit);
   assert.equal(validation.finalCommit, finalCommit);
-  assert.deepEqual(validation.createdCommits, [createdCommit]);
+  assert.deepEqual(validation.createdCommits, [finalCommit]);
   assert.equal(validation.headCommit, finalCommit);
   assert.notEqual(createdCommit, finalCommit);
   assert.equal(squashedFinalCommit, createdCommit);
+});
+
+test('validateSelectedRunForSquash uses the whole accepted run range for multi-scope runs', async () => {
+  const fixture = await createRepoFixture();
+  const commitOne = await createCommit(fixture.cwd, 'feature-1.txt', 'one\n', 'scope 1');
+  const commitTwo = await createCommit(fixture.cwd, 'feature-2.txt', 'two\n', 'scope 2');
+  await createRunSnapshot({
+    cwd: fixture.cwd,
+    runId: '2026-04-18T15-10-00.000Z-multi-scope',
+    planDoc: fixture.planDoc,
+    baseCommit: commitTwo,
+    finalCommit: commitTwo,
+    createdCommits: [commitTwo],
+  });
+
+  await updateRunState(fixture.cwd, '2026-04-18T15-10-00.000Z-multi-scope', (state) => ({
+    ...state,
+    initialBaseCommit: fixture.baseCommit,
+    baseCommit: commitOne,
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: fixture.baseCommit,
+        finalCommit: commitOne,
+        summary: 'First scope',
+        commitSubject: 'scope 1',
+        changedFiles: ['feature-1.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: null,
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+      {
+        number: '2',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: commitOne,
+        finalCommit: commitTwo,
+        summary: 'Second scope',
+        commitSubject: 'scope 2',
+        changedFiles: ['feature-2.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: null,
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  }));
+
+  const selection = await selectSquashRunForPlan({
+    cwd: fixture.cwd,
+    planDocArg: 'plans/PLAN.md',
+  });
+
+  const validation = await validateSelectedRunForSquash({
+    cwd: fixture.cwd,
+    selected: selection.selected,
+  });
+
+  assert.equal(validation.baseCommit, fixture.baseCommit);
+  assert.equal(validation.finalCommit, commitTwo);
+  assert.deepEqual(validation.createdCommits, [commitOne, commitTwo]);
 });
 
 test('buildSquashCommitMessage prefers accepted scope summaries recorded in run state', async () => {

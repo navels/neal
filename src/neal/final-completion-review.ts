@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
+import { renderInteractiveBlockedRecoveryHistoryLines } from './recovery-artifacts.js';
 import type { OrchestrationState } from './types.js';
 
 export function getFinalCompletionReviewArtifactPath(runDir: string) {
@@ -49,6 +50,8 @@ export function renderFinalCompletionReviewMarkdown(state: OrchestrationState) {
   if (contractLines.length > 0) {
     lines.push('', ...contractLines);
   }
+
+  lines.push(...renderInteractiveBlockedRecoveryHistoryLines(state.interactiveBlockedRecoveryHistory));
 
   lines.push('', '## Reviewer Verdict');
   if (!state.finalCompletionReviewVerdict) {
