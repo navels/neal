@@ -276,6 +276,112 @@ async function createEmptyFinalSquashFixture(overrides: Partial<OrchestrationSta
   return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
 }
 
+async function createDerivedPlanExecutionFixture(overrides: Partial<OrchestrationState> = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'neal-derived-plan-execution-'));
+  const cwd = join(root, 'repo');
+  const stateDir = join(cwd, '.neal');
+  const runDir = join(stateDir, 'runs', 'test-run');
+  const planDoc = join(cwd, 'PLAN.md');
+  const trackedFile = join(cwd, 'scope.txt');
+
+  await mkdir(runDir, { recursive: true });
+  await writeRepoConfig(cwd);
+  await writeFile(planDoc, '# Plan\n', 'utf8');
+  await writeFile(trackedFile, 'base\n', 'utf8');
+
+  await runGit(root, 'init', 'repo');
+  await runGit(cwd, 'config', 'user.name', 'Neal Test');
+  await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+  await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+  await runGit(cwd, 'add', 'PLAN.md', 'config.yml', 'scope.txt');
+  await runGit(cwd, 'commit', '-m', 'base commit');
+
+  const baseCommit = await runGit(cwd, 'rev-parse', 'HEAD');
+  const initialState = await createInitialState(
+    {
+      cwd,
+      planDoc,
+      stateDir,
+      runDir,
+      topLevelMode: 'execute',
+      ignoreLocalChanges: false,
+      agentConfig: getDefaultAgentConfig(),
+      progressJsonPath: join(runDir, 'plan-progress.json'),
+      progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
+      reviewMarkdownPath: join(runDir, 'REVIEW.md'),
+      consultMarkdownPath: join(runDir, 'CONSULT.md'),
+      maxRounds: 3,
+    },
+    baseCommit,
+  );
+
+  const derivedPlanPath = join(runDir, 'DERIVED_PLAN_SCOPE_5.md');
+  await writeFile(
+    derivedPlanPath,
+    [
+      '## Execution Shape',
+      '',
+      'executionShape: multi_scope',
+      '',
+      '## Execution Queue',
+      '',
+      '### Scope 1: Adopt the derived execution boundary',
+      '- Goal: Run the first derived sub-scope after the accepted plan is adopted.',
+      '- Verification: `pnpm exec tsx --test test/orchestrator.test.ts`',
+      '- Success Condition: The first derived sub-scope is ready to execute.',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const statePath = join(stateDir, 'session.json');
+  const state = await saveState(statePath, {
+    ...initialState,
+    currentScopeNumber: 5,
+    phase: 'awaiting_derived_plan_execution',
+    status: 'running',
+    coderSessionHandle: 'stale-coder-session',
+    reviewerSessionHandle: 'reviewer-session-derived-pass',
+    derivedPlanPath,
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 5,
+    derivedScopeIndex: null,
+    blockedFromPhase: 'reviewer_plan',
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-session-derived-pass',
+        reviewedPlanPath: derivedPlanPath,
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: baseCommit, head: baseCommit },
+        openBlockingCanonicalCount: 0,
+        findings: [],
+      },
+    ],
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'C1',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: [derivedPlanPath],
+        claim: 'Clarify the first derived execution step.',
+        requiredAction: 'Accept the plan and begin execution at derived scope 1.',
+        status: 'fixed',
+        roundSummary: 'Derived plan is ready for execution.',
+        coderDisposition: 'Accepted the execution shape and verification.',
+        coderCommit: null,
+      },
+    ],
+    createdCommits: [],
+    ...overrides,
+  });
+
+  return { cwd, statePath, state, baseCommit, derivedPlanPath };
+}
+
 test('resume restores blocked derived-plan coder response sessions', async () => {
   const derivedPlanPath = '/tmp/DERIVED_PLAN_SCOPE_4.md';
   const { cwd, statePath } = await createResumeFixture({
@@ -3611,6 +3717,115 @@ test('runOnePass honors stop-after-current-scope on the final_squash to coder_sc
     ),
     true,
   );
+});
+
+test('runOnePass pauses after accepted derived-plan adoption before derived coder scope execution starts', async () => {
+  const { statePath, state, derivedPlanPath } = await createDerivedPlanExecutionFixture();
+  const logger = await createRunLogger({
+    cwd: state.cwd,
+    stateDir: dirname(statePath),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+
+  const nextState = await runOnePass(state, statePath, logger, {
+    shouldStopAfterCurrentScope() {
+      return true;
+    },
+  });
+
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 5);
+  assert.equal(nextState.derivedPlanPath, derivedPlanPath);
+  assert.equal(nextState.derivedPlanStatus, 'accepted');
+  assert.equal(nextState.derivedFromScopeNumber, 5);
+  assert.equal(nextState.derivedScopeIndex, 1);
+  assert.equal(nextState.coderSessionHandle, null);
+  assert.equal(nextState.blockedFromPhase, null);
+  assert.deepEqual(nextState.rounds, []);
+  assert.deepEqual(nextState.findings, []);
+  assert.deepEqual(nextState.createdCommits, []);
+
+  const reloadedState = await loadState(statePath);
+  assert.equal(reloadedState.phase, 'coder_scope');
+  assert.equal(reloadedState.status, 'running');
+  assert.equal(reloadedState.derivedScopeIndex, 1);
+  assert.equal(reloadedState.derivedPlanPath, derivedPlanPath);
+
+  const events = await readRunEvents(state.runDir);
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'phase.complete' &&
+        event.data?.phase === 'awaiting_derived_plan_execution' &&
+        event.data?.nextPhase === 'coder_scope' &&
+        event.data?.planDoc === derivedPlanPath,
+    ),
+    true,
+  );
+  assert.equal(
+    events.some((event) => event.type === 'phase.start' && event.data?.phase === 'coder_scope'),
+    false,
+  );
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'run.paused_after_scope' &&
+        event.data?.phase === 'coder_scope' &&
+        event.data?.currentScopeNumber === 5,
+    ),
+    true,
+  );
+});
+
+test('runOnePass continues into derived coder scope execution when stop-after-current-scope is not requested', async () => {
+  const { statePath, state } = await createDerivedPlanExecutionFixture();
+  const logger = await createRunLogger({
+    cwd: state.cwd,
+    stateDir: dirname(statePath),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          throw new Error('derived-coder-scope-reached');
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(() => runOnePass(state, statePath, logger), /derived-coder-scope-reached/);
+
+    const reloadedState = await loadState(statePath);
+    assert.equal(reloadedState.phase, 'coder_scope');
+    assert.equal(reloadedState.status, 'running');
+    assert.equal(reloadedState.derivedScopeIndex, 1);
+
+    const events = await readRunEvents(state.runDir);
+    assert.equal(
+      events.some(
+        (event) =>
+          event.type === 'phase.complete' &&
+          event.data?.phase === 'awaiting_derived_plan_execution' &&
+          event.data?.nextPhase === 'coder_scope',
+      ),
+      true,
+    );
+    assert.equal(
+      events.some((event) => event.type === 'phase.start' && event.data?.phase === 'coder_scope'),
+      true,
+    );
+    assert.equal(events.some((event) => event.type === 'run.paused_after_scope'), false);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
 });
 
 test('final completion review emits heartbeat and completion events in order before final run completion', async () => {

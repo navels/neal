@@ -145,7 +145,11 @@ export async function runOnePass(args: {
       const pausedAfterScopeBoundary =
         currentState.phase === 'coder_scope' &&
         currentState.status === 'running' &&
-        (currentPhase === 'final_squash' || currentPhase === 'final_completion_review') &&
+        (
+          currentPhase === 'final_squash' ||
+          currentPhase === 'final_completion_review' ||
+          currentPhase === 'awaiting_derived_plan_execution'
+        ) &&
         options?.shouldStopAfterCurrentScope?.();
       if (pausedAfterScopeBoundary) {
         await logger?.event('run.paused_after_scope', {
