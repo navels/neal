@@ -24,11 +24,13 @@ function hasTopLevelRequiredProperty(schema: ReturnType<typeof buildPlanReviewer
 test('planning prompt requires an explicit execution-shape declaration', () => {
   const prompt = buildPlanningPrompt('/tmp/PLAN.md');
 
-  assert.match(prompt, /Choose exactly one execution shape: `one_shot` or `multi_scope`\./);
+  assert.match(prompt, /Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`\./);
   assert.match(prompt, /Declare that choice in the plan document with a literal `## Execution Shape` section/);
   assert.match(prompt, /executionShape: one_shot/);
   assert.match(prompt, /executionShape: multi_scope/);
+  assert.match(prompt, /executionShape: multi_scope_unknown/);
   assert.match(prompt, /Choose `multi_scope` when the work changes orchestration or state-machine behavior/);
+  assert.match(prompt, /Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time/);
   assert.match(prompt, /Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope/);
   assert.match(prompt, /Protocol markers are terminal-response control signals, not artifact content/);
   assert.match(prompt, /Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact/);
@@ -103,6 +105,9 @@ test('derived-plan prompts require the same canonical Neal-executable contract',
     assert.match(prompt, /## Execution Shape/);
     assert.match(prompt, /executionShape: multi_scope/);
     assert.match(prompt, /## Execution Queue/);
+    assert.match(prompt, /executionShape: multi_scope_unknown/);
+    assert.match(prompt, /## Execution Loop/);
+    assert.match(prompt, /## Completion Condition/);
     assert.match(prompt, /### Scope 1: Example scope/);
     assert.doesNotMatch(prompt, /Ordered Derived Scopes/);
   }
@@ -116,7 +121,7 @@ test('derived-plan prompts require the same canonical Neal-executable contract',
   assert.match(scopePrompt, /Protocol markers are terminal-response control signals, not artifact content/);
   assert.match(planResponsePrompt, /Protocol markers are terminal-response control signals, not artifact content/);
 
-  assert.match(reviewerPrompt, /same canonical `## Execution Shape` \/ `## Execution Queue` contract as a top-level plan/);
+  assert.match(reviewerPrompt, /same canonical Neal-executable shape contract as a top-level plan/);
   assert.match(reviewerPrompt, /canonical Neal-executable plan shape/);
 });
 
@@ -140,7 +145,7 @@ test('recovery-plan prompts keep review and response anchored to the active run'
   assert.match(reviewerPrompt, /diagnostic recovery plan candidate at \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md/);
   assert.match(reviewerPrompt, /parent objective 4/);
   assert.match(reviewerPrompt, /candidate recovery plan, not as a brand-new top-level initiative/);
-  assert.match(reviewerPrompt, /same canonical `## Execution Shape` \/ `## Execution Queue` contract as a top-level plan/);
+  assert.match(reviewerPrompt, /same canonical Neal-executable shape contract as a top-level plan/);
 
   assert.match(planResponsePrompt, /Continue refining the diagnostic recovery plan candidate at \/tmp\/DIAGNOSTIC_RECOVERY_1_PLAN\.md for parent objective 4/);
   assert.match(planResponsePrompt, /Edit only the diagnostic recovery plan artifact/);
@@ -158,7 +163,7 @@ test('plan reviewer schema and prompt require executionShape confirmation', () =
   });
 
   assert.equal(hasTopLevelRequiredProperty(schema, 'executionShape'), true);
-  assert.deepEqual(schema.properties.executionShape.enum, ['one_shot', 'multi_scope']);
+  assert.deepEqual(schema.properties.executionShape.enum, ['one_shot', 'multi_scope', 'multi_scope_unknown']);
   assert.equal(hasTopLevelRequiredProperty(schema, 'summary'), true);
   assert.equal(hasTopLevelRequiredProperty(schema, 'findings'), true);
   assert.equal(hasTopLevelRequiredProperty(schema, 'missingKey'), false);
@@ -200,14 +205,14 @@ test('executionShape persists through state round-trip and wrapper artifacts', a
 
   await saveState(statePath, {
     ...initialState,
-    executionShape: 'multi_scope',
+    executionShape: 'multi_scope_unknown',
   });
 
   const loaded = await loadState(statePath);
 
-  assert.equal(loaded.executionShape, 'multi_scope');
-  assert.match(renderPlanProgressMarkdown(loaded), /- Execution shape: multi_scope/);
-  assert.match(renderReviewMarkdown(loaded), /- Execution shape: multi_scope/);
+  assert.equal(loaded.executionShape, 'multi_scope_unknown');
+  assert.match(renderPlanProgressMarkdown(loaded), /- Execution shape: multi_scope_unknown/);
+  assert.match(renderReviewMarkdown(loaded), /- Execution shape: multi_scope_unknown/);
 });
 
 test('plan-review synthesis appends structural failures as blocking findings with a distinct source', async () => {
@@ -320,6 +325,44 @@ executionShape: multi_scope
   });
 
   assert.equal(synthesis.executionShape, 'multi_scope');
+  assert.equal(synthesis.reviewedPlanPath, planDoc);
+  assert.deepEqual(synthesis.findings, []);
+});
+
+test('plan-review synthesis accepts a valid multi-scope-unknown plan without synthetic findings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-plan-review-'));
+  const planDoc = join(root, 'PLAN.md');
+
+  await writeFile(
+    planDoc,
+    `# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Complete one bounded recurring slice.
+- Verification: \`pnpm typecheck\`
+- Success Condition: The slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit completion condition is satisfied.
+`,
+    'utf8',
+  );
+
+  const synthesis = await synthesizePlanReviewFindings({
+    planPath: planDoc,
+    round: 1,
+    roundSummary: 'Looks good.',
+    findings: [],
+  });
+
+  assert.equal(synthesis.executionShape, 'multi_scope_unknown');
   assert.equal(synthesis.reviewedPlanPath, planDoc);
   assert.deepEqual(synthesis.findings, []);
 });

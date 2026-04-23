@@ -50,6 +50,62 @@ executionShape: multi_scope
   assert.match(result.normalization.normalizedDocument, /- Goal: Cover failure cases\./);
 });
 
+test('accepts a valid multi-scope-unknown plan document', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Resolve one bounded backlog slice.
+- Verification: \`pnpm typecheck\`
+- Success Condition: One recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the backlog no longer contains any unresolved scope-worthy slices.
+`);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.executionShape, 'multi_scope_unknown');
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.normalization.applied, false);
+});
+
+test('accepts alias bullet labels inside a recurring scope', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Resolve one bounded backlog slice.
+- Verification strategy: \`pnpm typecheck\`
+- Exit criteria: One recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the backlog no longer contains any unresolved scope-worthy slices.
+`);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.executionShape, 'multi_scope_unknown');
+  assert.deepEqual(result.errors, []);
+  assert.match(result.normalization.normalizedDocument, /- Verification: `pnpm typecheck`/);
+  assert.match(
+    result.normalization.normalizedDocument,
+    /- Success Condition: One recurring slice is complete and reviewable\./,
+  );
+});
+
 test('rejects plans that omit the execution shape header', () => {
   const result = validatePlanDocument(`
 # Example Plan
@@ -76,6 +132,77 @@ executionShape: multi_scope
   assert.match(result.errors.join('\n'), /requires a `## Execution Queue` section/);
 });
 
+test('rejects multi-scope-unknown plans without an execution loop and completion condition', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope_unknown
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'multi_scope_unknown');
+  assert.match(result.errors.join('\n'), /requires a `## Execution Loop` section/);
+  assert.match(result.errors.join('\n'), /requires a `## Completion Condition` section/);
+});
+
+test('rejects multi-scope-unknown plans without the recurring scope bullets', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Complete one bounded slice.
+
+## Completion Condition
+
+Stop when the explicit completion condition is satisfied.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'multi_scope_unknown');
+  assert.match(result.errors.join('\n'), /Recurring scope is missing required bullet `- Verification:`/);
+  assert.match(result.errors.join('\n'), /Recurring scope is missing required bullet `- Success Condition:`/);
+});
+
+test('rejects multi-scope-unknown plans that still use an execution queue', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Queue
+
+### Scope 1: Invalid fixed queue
+- Goal: This should fail.
+- Verification: \`pnpm typecheck\`
+- Success Condition: Validation rejects the mixed shape.
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Do one bounded recurring slice.
+- Verification: \`pnpm typecheck\`
+- Success Condition: The slice is reviewable.
+
+## Completion Condition
+
+Stop when the recurring work is exhausted.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'multi_scope_unknown');
+  assert.match(result.errors.join('\n'), /must not include a `## Execution Queue` section/);
+});
+
 test('rejects one-shot plans that also include an execution queue', () => {
   const result = validatePlanDocument(`
 # Example Plan
@@ -95,6 +222,56 @@ executionShape: one_shot
   assert.equal(result.ok, false);
   assert.equal(result.executionShape, 'one_shot');
   assert.match(result.errors.join('\n'), /must not include a `## Execution Queue` section/);
+});
+
+test('rejects multi-scope plans that include an execution loop', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Valid queue
+- Goal: Do the bounded fixed scope.
+- Verification: \`pnpm typecheck\`
+- Success Condition: The bounded fixed scope is reviewable.
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: This should not exist on a fixed multi-scope plan.
+- Verification: \`pnpm typecheck\`
+- Success Condition: Validation rejects the mixed shape.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'multi_scope');
+  assert.match(result.errors.join('\n'), /`executionShape: multi_scope` must not include a `## Execution Loop` section\./);
+});
+
+test('rejects one-shot plans that include a completion condition', () => {
+  const result = validatePlanDocument(`
+# Example Plan
+
+## Execution Shape
+
+executionShape: one_shot
+
+## Goal
+
+Ship a focused change.
+
+## Completion Condition
+
+This should not exist on a one-shot plan.
+`);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionShape, 'one_shot');
+  assert.match(result.errors.join('\n'), /`executionShape: one_shot` must not include a `## Completion Condition` section\./);
 });
 
 test('rejects execution queues with numbering gaps', () => {

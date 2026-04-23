@@ -114,6 +114,57 @@ Notes:
 - `--plan-text` writes the supplied text to the target plan filename you provide, then runs the normal planning loop against that file.
 - run artifacts live under `.neal/runs/<run-id>/`
 
+## Choosing A Plan Shape
+
+Every executable Neal plan must declare exactly one execution shape in a literal `## Execution Shape` section.
+
+- Use `executionShape: one_shot` when the full task can be implemented, reviewed, and verified as one bounded scope.
+- Use `executionShape: multi_scope` when the work is a finite ordered queue with a known scope count at authoring time. These plans use `## Execution Queue` plus numbered `### Scope N:` entries.
+- Use `executionShape: multi_scope_unknown` when the work repeats one bounded recurring slice at a time, but the total number of slices is intentionally unknown until an explicit stop rule becomes true. These plans use `## Execution Loop`, exactly one `### Recurring Scope`, and a `## Completion Condition`.
+
+Minimal examples:
+
+```md
+## Execution Shape
+
+executionShape: one_shot
+```
+
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Add parser support
+- Goal: Parse the new contract safely.
+- Verification: `pnpm typecheck`
+- Success Condition: The parser accepts valid input and rejects malformed input.
+
+### Scope 2: Add regression coverage
+- Goal: Lock the new behavior in with tests.
+- Verification: `tsx --test test/plan-validation.test.ts`
+- Success Condition: The new path is covered without regressing existing shapes.
+```
+
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Complete one bounded backlog slice.
+- Verification: `pnpm typecheck`
+- Success Condition: One recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the backlog no longer contains any unresolved scope-worthy slices.
+```
+
 ## Notifications
 
 By default `neal` runs the command configured at `neal.notify_bin` for `blocked`, `complete`, `done`, and `retry`.

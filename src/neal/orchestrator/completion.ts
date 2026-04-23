@@ -27,7 +27,7 @@ import { appendDerivedSubScopeAndParentCompletion, computeNextScopeStateAfterSqu
 import { writePlanProgressArtifacts } from '../progress.js';
 import { writeCheckpointRetrospective } from '../retrospective.js';
 import { renderReviewMarkdown, writeReviewMarkdown } from '../review.js';
-import { getCurrentScopeLabel } from '../scopes.js';
+import { getCurrentScopeLabel, shouldAdvanceTopLevelScopeNumber } from '../scopes.js';
 import { saveState } from '../state.js';
 import type { FinalCompletionReviewerAction, OrchestrationState } from '../types.js';
 import { shouldNotifyFailure } from './failures.js';
@@ -356,7 +356,9 @@ export async function runFinalCompletionReviewPhase(
             archivedReviewPath: null,
             coderSessionHandle: null,
             coderRetryCount: 0,
-            currentScopeNumber: state.currentScopeNumber + 1,
+            currentScopeNumber: shouldAdvanceTopLevelScopeNumber(state)
+              ? state.currentScopeNumber + 1
+              : state.currentScopeNumber,
             lastScopeMarker: null,
             currentScopeProgressJustification: null,
             currentScopeMeaningfulProgressVerdict: null,

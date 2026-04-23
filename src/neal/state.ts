@@ -690,7 +690,8 @@ function normalizeStateV1(parsed: OrchestrationState, path: string): Orchestrati
         : null,
     executionShape:
       (parsed as { executionShape?: unknown }).executionShape === 'one_shot' ||
-      (parsed as { executionShape?: unknown }).executionShape === 'multi_scope'
+      (parsed as { executionShape?: unknown }).executionShape === 'multi_scope' ||
+      (parsed as { executionShape?: unknown }).executionShape === 'multi_scope_unknown'
         ? (parsed as { executionShape: OrchestrationState['executionShape'] }).executionShape
         : null,
     currentScopeNumber: typeof parsed.currentScopeNumber === 'number' ? parsed.currentScopeNumber : 1,

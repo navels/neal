@@ -8,9 +8,11 @@
   },
   "contains": [
     "Refine the existing plan document at /tmp/PLAN.md into a stronger future execution plan for neal.",
-    "Choose exactly one execution shape: `one_shot` or `multi_scope`.",
-    "Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot` or `executionShape: multi_scope`.",
+    "Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.",
+    "Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.",
     "## Execution Queue",
+    "## Execution Loop",
+    "## Completion Condition",
     "### Scope 1: Example scope",
     "If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.",
     "AUTONOMY_SCOPE_DONE",

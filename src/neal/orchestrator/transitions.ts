@@ -1,4 +1,11 @@
-import { getCurrentScopeLabel, getParentScopeLabel, hasAcceptedDerivedPlan, isExecutingDerivedPlan } from '../scopes.js';
+import {
+  getCurrentScopeLabel,
+  getParentScopeLabel,
+  hasAcceptedDerivedPlan,
+  isExecutingDerivedPlan,
+  shouldAdvanceTopLevelScopeNumber,
+  shouldContinueTopLevelExecutionAfterAcceptedScope,
+} from '../scopes.js';
 import type { OrchestrationState, ScopeMarker } from '../types.js';
 
 type AppendCompletedScopeDetails = {
@@ -118,9 +125,10 @@ export function computeNextScopeStateAfterSquash({
 }: FinalSquashNextStateArgs): OrchestrationState {
   const derivedExecution = isExecutingDerivedPlan(state);
   const derivedPlanCompleted = derivedExecution && state.lastScopeMarker === 'AUTONOMY_DONE';
-  const continueScopes = derivedExecution
-    ? true
-    : state.lastScopeMarker !== 'AUTONOMY_DONE' && state.lastScopeMarker !== 'AUTONOMY_BLOCKED';
+  const continueScopes = derivedExecution ? true : shouldContinueTopLevelExecutionAfterAcceptedScope(state);
+  const nextTopLevelScopeNumber = shouldAdvanceTopLevelScopeNumber(state)
+    ? state.currentScopeNumber + 1
+    : state.currentScopeNumber;
 
   if (derivedExecution && derivedPlanCompleted) {
     return {
@@ -128,7 +136,7 @@ export function computeNextScopeStateAfterSquash({
       baseCommit: finalCommit,
       finalCommit: null,
       coderSessionHandle: null,
-      currentScopeNumber: state.currentScopeNumber + 1,
+      currentScopeNumber: nextTopLevelScopeNumber,
       lastScopeMarker: null,
       currentScopeProgressJustification: null,
       currentScopeMeaningfulProgressVerdict: null,
@@ -189,7 +197,7 @@ export function computeNextScopeStateAfterSquash({
       baseCommit: finalCommit,
       finalCommit: null,
       coderSessionHandle: null,
-      currentScopeNumber: state.currentScopeNumber + 1,
+      currentScopeNumber: nextTopLevelScopeNumber,
       lastScopeMarker: null,
       currentScopeProgressJustification: null,
       currentScopeMeaningfulProgressVerdict: null,

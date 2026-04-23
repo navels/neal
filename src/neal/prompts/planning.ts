@@ -62,9 +62,9 @@ function getPlanReviewerModeLines(args: {
           : 'Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.',
     contractRule:
       mode === 'derived-plan'
-        ? 'The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
+        ? 'The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan, including the appropriate `## Execution Queue` or `## Execution Loop` / `## Completion Condition` sections for the declared shape.'
         : mode === 'recovery-plan'
-          ? 'The recovery plan should remain a candidate replacement for the active parent objective, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.'
+          ? 'The recovery plan should remain a candidate replacement for the active parent objective, and it must use the same canonical Neal-executable shape contract as a top-level plan, including the appropriate `## Execution Queue` or `## Execution Loop` / `## Completion Condition` sections for the declared shape.'
           : 'Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.',
   };
 }
@@ -105,6 +105,7 @@ export function buildPlanningPrompt(planDoc: string) {
     'Do not ask the future executor to perform redundant edits. If an export already propagates through an existing barrel file, say to verify that behavior instead of adding a fake extra edit step.',
     'Make the final plan explicit about scope boundaries, allowed scope, forbidden paths, implementation steps, verification, completion criteria, blocker handling, and any repeated-scope selection rules.',
     'Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.',
+    'Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time and the total number of scopes is intentionally unknown until an explicit completion condition is satisfied.',
     'Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.',
     ...getTerminalMarkerArtifactBoundaryLines(),
     ...getCanonicalPlanContractLines(),
@@ -147,7 +148,7 @@ export function buildPlanReviewerPrompt(args: {
     `Review round: ${args.round}.`,
     '',
     'Produce only structured review findings.',
-    'The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot` or `multi_scope`.',
+    'The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.',
     'You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.',
     'Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.',
     'Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.',
@@ -156,6 +157,7 @@ export function buildPlanReviewerPrompt(args: {
     'Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.',
     'Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.',
     'A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.',
+    'A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.',
     modeLines.blockingRule,
     modeLines.scaffoldingRule,
     modeLines.wideningRule,

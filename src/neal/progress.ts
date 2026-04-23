@@ -4,10 +4,12 @@ import { dirname } from 'node:path';
 import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
 import { summarizeInteractiveBlockedRecoveryHistory } from './recovery-artifacts.js';
 import {
+  getExecutionPlanScopeCountForShape,
   getCurrentScopeLabel,
   getParentScopeLabel,
   getRecentAcceptedScopesForParentObjective,
   isExecutingDerivedPlan,
+  renderScopeProgressSummary,
   renderRecentAcceptedScopesSummary,
 } from './scopes.js';
 import type { OrchestrationState } from './types.js';
@@ -84,6 +86,7 @@ type PlanProgressState = {
   finalCompletionContinueExecutionCapReached: boolean;
   currentScope: {
     number: string;
+    progress: string;
     parentScope: string | null;
     phase: OrchestrationState['phase'];
     marker: OrchestrationState['lastScopeMarker'];
@@ -134,6 +137,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
         ? null
         : {
             number: getCurrentScopeLabel(state),
+            progress: renderScopeProgressSummary(state, getExecutionPlanScopeCountForShape(state.executionShape)),
             parentScope: isExecutingDerivedPlan(state) ? getParentScopeLabel(state) : null,
             phase: state.phase,
             marker: state.lastScopeMarker,
@@ -227,6 +231,7 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       '',
       '## Current Scope',
       `- Number: ${progress.currentScope.number}`,
+      `- Progress: ${progress.currentScope.progress}`,
       `- Parent scope: ${progress.currentScope.parentScope ?? 'none'}`,
       `- Phase: ${progress.currentScope.phase}`,
       `- Marker: ${progress.currentScope.marker ?? 'pending'}`,

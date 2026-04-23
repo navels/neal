@@ -93,7 +93,7 @@ test('renderStatusFooterLine shows scope totals when knowable', async () => {
   const line = renderStatusFooterLine({
     state,
     phaseStartedAt: 0,
-    totalScopeCount: 2,
+    totalScopeCount: { kind: 'known', total: 2 },
     now: 125_000,
   });
 
@@ -119,13 +119,55 @@ test('renderStatusFooterLine shows derived execution context separately from the
   const line = renderStatusFooterLine({
     state,
     phaseStartedAt: 0,
-    totalScopeCount: 3,
+    totalScopeCount: { kind: 'known', total: 3 },
     now: 30_000,
   });
 
   assert.match(line, /scope 5\.2/);
   assert.match(line, /derived 2\/3/);
   assert.doesNotMatch(line, /scope 5\.2\/3/);
+});
+
+test('renderStatusFooterLine shows unknown totals explicitly for recurring unknown-total plans', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 2,
+    phase: 'coder_scope',
+    status: 'running',
+    executionShape: 'multi_scope_unknown',
+  });
+
+  const line = renderStatusFooterLine({
+    state,
+    phaseStartedAt: 0,
+    totalScopeCount: { kind: 'unknown_by_contract' },
+    now: 15_000,
+  });
+
+  assert.match(line, /scope 2\/\?/);
+});
+
+test('renderStatusFooterLine shows derived unknown totals explicitly for recurring derived plans', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 7,
+    phase: 'coder_scope',
+    status: 'running',
+    executionShape: 'multi_scope_unknown',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_7.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 7,
+    derivedScopeIndex: 3,
+  });
+
+  const line = renderStatusFooterLine({
+    state,
+    phaseStartedAt: 0,
+    totalScopeCount: { kind: 'unknown_by_contract' },
+    now: 15_000,
+  });
+
+  assert.match(line, /scope 7\.3/);
+  assert.match(line, /derived 3\/\?/);
+  assert.doesNotMatch(line, /scope 7\.3\/\?/);
 });
 
 test('StatusFooter is disabled when the diagnostic stream is not a TTY', async () => {

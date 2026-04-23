@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 
-import { getCurrentScopeLabel, getExecutionPlanPath, getExecutionPlanScopeCount, isExecutingDerivedPlan } from './scopes.js';
+import { getExecutionPlanPath, getExecutionPlanScopeCount, isExecutingDerivedPlan, renderScopeProgressSegments } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 type FooterStream = {
@@ -12,7 +12,7 @@ type FooterStream = {
 type FooterContext = {
   state: OrchestrationState;
   phaseStartedAt: number;
-  totalScopeCount: number | null;
+  totalScopeCount: Awaited<ReturnType<typeof getExecutionPlanScopeCount>>;
   now?: number;
 };
 
@@ -51,15 +51,10 @@ export function renderStatusFooterLine(args: FooterContext) {
   const now = args.now ?? Date.now();
   const state = args.state;
   const segments = [`[neal] ${basename(state.planDoc)}`];
-
-  if (isExecutingDerivedPlan(state)) {
-    const derivedIndex = state.derivedScopeIndex ?? 1;
-    const derivedTotal = args.totalScopeCount;
-    segments.push(`scope ${getCurrentScopeLabel(state)}`);
-    segments.push(`derived ${derivedTotal ? `${derivedIndex}/${derivedTotal}` : `${derivedIndex}`}`);
-  } else {
-    const currentScopeLabel = getCurrentScopeLabel(state);
-    segments.push(`scope ${args.totalScopeCount ? `${currentScopeLabel}/${args.totalScopeCount}` : currentScopeLabel}`);
+  const { scopeSegment, derivedSegment } = renderScopeProgressSegments(state, args.totalScopeCount);
+  segments.push(scopeSegment);
+  if (derivedSegment) {
+    segments.push(derivedSegment);
   }
 
   segments.push(`phase: ${state.phase}`);
@@ -94,7 +89,7 @@ export class StatusFooter {
   private readonly refreshIntervalMs: number;
   private readonly minRedrawIntervalMs: number;
   private readonly minColumns: number;
-  private readonly scopeCountCache = new Map<string, number | null>();
+  private readonly scopeCountCache = new Map<string, Awaited<ReturnType<typeof getExecutionPlanScopeCount>>>();
   private redrawTimer: NodeJS.Timeout | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private resizeListener: (() => void) | null = null;

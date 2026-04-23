@@ -1,9 +1,14 @@
 import { readFile } from 'node:fs/promises';
 
 import { validatePlanDocument } from './plan-validation.js';
-import type { OrchestrationState, ProgressScope } from './types.js';
+import type { ExecutionShape, OrchestrationState, ProgressScope } from './types.js';
 
 export const DEFAULT_PARENT_OBJECTIVE_HISTORY_WINDOW = 5;
+
+export type ExecutionPlanScopeCount =
+  | { kind: 'known'; total: number }
+  | { kind: 'unknown_by_contract' }
+  | { kind: 'unavailable' };
 
 export function hasAcceptedDerivedPlan(state: Pick<OrchestrationState, 'topLevelMode' | 'derivedPlanPath' | 'derivedPlanStatus' | 'derivedFromScopeNumber'>) {
   return (
@@ -55,23 +60,108 @@ export function getCompletedScopeParentObjective(scope: Pick<ProgressScope, 'num
   return scope.derivedFromParentScope ?? scope.number;
 }
 
-export async function getExecutionPlanScopeCount(planPath: string): Promise<number | null> {
+export function shouldAdvanceTopLevelScopeNumber(
+  state: Pick<OrchestrationState, 'executionShape'>,
+) {
+  return state.executionShape !== 'one_shot';
+}
+
+export function shouldContinueTopLevelExecutionAfterAcceptedScope(
+  state: Pick<OrchestrationState, 'executionShape' | 'lastScopeMarker'>,
+) {
+  if (state.lastScopeMarker === 'AUTONOMY_DONE' || state.lastScopeMarker === 'AUTONOMY_BLOCKED') {
+    return false;
+  }
+
+  return shouldAdvanceTopLevelScopeNumber(state);
+}
+
+export function getExecutionPlanScopeCountForShape(
+  executionShape: ExecutionShape | null,
+  options?: { knownTotal?: number | null },
+): ExecutionPlanScopeCount {
+  if (executionShape === 'one_shot') {
+    return { kind: 'known', total: 1 };
+  }
+
+  if (executionShape === 'multi_scope_unknown') {
+    return { kind: 'unknown_by_contract' };
+  }
+
+  if (executionShape === 'multi_scope') {
+    const knownTotal = options?.knownTotal ?? null;
+    if (typeof knownTotal === 'number' && Number.isFinite(knownTotal) && knownTotal > 0) {
+      return { kind: 'known', total: knownTotal };
+    }
+  }
+
+  return { kind: 'unavailable' };
+}
+
+export async function getExecutionPlanScopeCount(planPath: string): Promise<ExecutionPlanScopeCount> {
   try {
     const planDocument = await readFile(planPath, 'utf8');
     const validation = validatePlanDocument(planDocument);
     if (!validation.ok) {
-      return null;
+      return { kind: 'unavailable' };
     }
 
     if (validation.executionShape === 'one_shot') {
-      return 1;
+      return { kind: 'known', total: 1 };
+    }
+
+    if (validation.executionShape === 'multi_scope_unknown') {
+      return { kind: 'unknown_by_contract' };
     }
 
     const matches = validation.normalization.normalizedDocument.match(/^### Scope \d+:/gm);
-    return matches?.length ?? null;
+    if (!matches || matches.length === 0) {
+      return { kind: 'unavailable' };
+    }
+
+    return { kind: 'known', total: matches.length };
   } catch {
-    return null;
+    return { kind: 'unavailable' };
   }
+}
+
+export function renderScopeProgressSegments(
+  state: Pick<
+    OrchestrationState,
+    'currentScopeNumber' | 'derivedFromScopeNumber' | 'topLevelMode' | 'derivedPlanPath' | 'derivedPlanStatus' | 'derivedScopeIndex'
+  >,
+  scopeCount: ExecutionPlanScopeCount,
+) {
+  const scopeLabel = getCurrentScopeLabel(state);
+  const scopeSuffix = scopeCount.kind === 'known' ? `/${scopeCount.total}` : scopeCount.kind === 'unknown_by_contract' ? '/?' : '';
+  const scopeSegment = `scope ${scopeLabel}${scopeSuffix}`;
+
+  if (!isExecutingDerivedPlan(state)) {
+    return {
+      scopeSegment,
+      derivedSegment: null,
+    };
+  }
+
+  const derivedIndex = state.derivedScopeIndex ?? 1;
+  const derivedSuffix =
+    scopeCount.kind === 'known' ? `/${scopeCount.total}` : scopeCount.kind === 'unknown_by_contract' ? '/?' : '';
+
+  return {
+    scopeSegment: `scope ${scopeLabel}`,
+    derivedSegment: `derived ${derivedIndex}${derivedSuffix}`,
+  };
+}
+
+export function renderScopeProgressSummary(
+  state: Pick<
+    OrchestrationState,
+    'currentScopeNumber' | 'derivedFromScopeNumber' | 'topLevelMode' | 'derivedPlanPath' | 'derivedPlanStatus' | 'derivedScopeIndex'
+  >,
+  scopeCount: ExecutionPlanScopeCount,
+) {
+  const { scopeSegment, derivedSegment } = renderScopeProgressSegments(state, scopeCount);
+  return derivedSegment ? `${scopeSegment} | ${derivedSegment}` : scopeSegment;
 }
 
 export function getRecentAcceptedScopesForParentObjective(

@@ -2,7 +2,10 @@ import type { ExecutionShape } from './types.js';
 
 const EXECUTION_SHAPE_HEADER = '## Execution Shape';
 const EXECUTION_QUEUE_HEADER = '## Execution Queue';
+const EXECUTION_LOOP_HEADER = '## Execution Loop';
+const COMPLETION_CONDITION_HEADER = '## Completion Condition';
 const SCOPE_HEADING_PATTERN = /^### Scope (\d+):(.*)$/;
+const RECURRING_SCOPE_HEADING = '### Recurring Scope';
 const REQUIRED_SCOPE_BULLETS = ['goal', 'verification', 'success condition'] as const;
 const EXECUTION_QUEUE_HEADER_ALIASES = new Set(['## Ordered Derived Scopes', '## Derived Execution Queue']);
 const VERIFICATION_LABEL_ALIASES = new Set(['verification', 'verification strategy']);
@@ -44,10 +47,35 @@ export function validatePlanDocument(planDocument: string): PlanValidationResult
 
   if (executionShape === 'multi_scope') {
     validateExecutionQueueSection(lines, errors);
+    validateSectionAbsence(lines, EXECUTION_LOOP_HEADER, '`executionShape: multi_scope` must not include a `## Execution Loop` section.', errors);
+    validateSectionAbsence(
+      lines,
+      COMPLETION_CONDITION_HEADER,
+      '`executionShape: multi_scope` must not include a `## Completion Condition` section.',
+      errors,
+    );
+  }
+
+  if (executionShape === 'multi_scope_unknown') {
+    validateExecutionLoopSection(lines, errors);
+    validateCompletionConditionSection(lines, errors);
+    validateSectionAbsence(
+      lines,
+      EXECUTION_QUEUE_HEADER,
+      '`executionShape: multi_scope_unknown` must not include a `## Execution Queue` section.',
+      errors,
+    );
   }
 
   if (executionShape === 'one_shot') {
     validateOneShotQueueAbsence(lines, errors);
+    validateSectionAbsence(lines, EXECUTION_LOOP_HEADER, '`executionShape: one_shot` must not include a `## Execution Loop` section.', errors);
+    validateSectionAbsence(
+      lines,
+      COMPLETION_CONDITION_HEADER,
+      '`executionShape: one_shot` must not include a `## Completion Condition` section.',
+      errors,
+    );
   }
 
   if (errors.length > 0) {
@@ -83,33 +111,38 @@ function normalizePlanDocument(planDocument: string): PlanNormalizationMetadata 
   const normalizedLines = [...lines];
 
   const queueSection = findSectionByHeaders(lines, [EXECUTION_QUEUE_HEADER, ...EXECUTION_QUEUE_HEADER_ALIASES]);
-  if (queueSection === null) {
-    return {
-      applied: false,
-      normalizedDocument: planDocument,
+  if (queueSection !== null) {
+    const queueHeader = lines[queueSection.start]?.trim();
+    if (queueHeader !== EXECUTION_QUEUE_HEADER && queueHeader !== undefined) {
+      normalizedLines[queueSection.start] = EXECUTION_QUEUE_HEADER;
+      operations.push(`Normalized execution queue header \`${queueHeader}\` to \`${EXECUTION_QUEUE_HEADER}\`.`);
+    }
+
+    const normalizedQueueLines = normalizeExecutionQueueLines(
+      getSectionContentLines(lines, queueSection),
       operations,
       scopeLabelMappings,
-    };
-  }
-
-  const queueHeader = lines[queueSection.start]?.trim();
-  if (queueHeader !== EXECUTION_QUEUE_HEADER && queueHeader !== undefined) {
-    normalizedLines[queueSection.start] = EXECUTION_QUEUE_HEADER;
-    operations.push(`Normalized execution queue header \`${queueHeader}\` to \`${EXECUTION_QUEUE_HEADER}\`.`);
-  }
-
-  const normalizedQueueLines = normalizeExecutionQueueLines(
-    getSectionContentLines(lines, queueSection),
-    operations,
-    scopeLabelMappings,
-  );
-
-  if (normalizedQueueLines !== null) {
-    normalizedLines.splice(
-      queueSection.start + 1,
-      queueSection.end - queueSection.start - 1,
-      ...normalizedQueueLines,
     );
+
+    if (normalizedQueueLines !== null) {
+      normalizedLines.splice(
+        queueSection.start + 1,
+        queueSection.end - queueSection.start - 1,
+        ...normalizedQueueLines,
+      );
+    }
+  }
+
+  const loopSection = findSection(lines, EXECUTION_LOOP_HEADER);
+  if (loopSection !== null) {
+    const normalizedLoopLines = normalizeExecutionLoopLines(getSectionContentLines(lines, loopSection));
+    if (normalizedLoopLines !== null) {
+      normalizedLines.splice(
+        loopSection.start + 1,
+        loopSection.end - loopSection.start - 1,
+        ...normalizedLoopLines,
+      );
+    }
   }
 
   const normalizedDocument = normalizedLines.join('\n');
@@ -177,10 +210,35 @@ function normalizeExecutionQueueLines(
   return normalizedLines;
 }
 
+function normalizeExecutionLoopLines(lines: string[]): string[] | null {
+  const recurringScope = collectNormalizedRecurringScope(lines);
+  if (recurringScope === null) {
+    return null;
+  }
+
+  let applied = false;
+  const normalizedLines = [recurringScope.heading];
+
+  for (const line of recurringScope.body) {
+    const normalizedLine = normalizeScopeBodyLine(line, 'Recurring Scope', 1, false);
+    if (normalizedLine !== line) {
+      applied = true;
+    }
+    normalizedLines.push(normalizedLine);
+  }
+
+  return applied ? normalizedLines : lines;
+}
+
 type NormalizedScopeDraft = {
   heading: string;
   originalLabel: string;
   title: string;
+  body: string[];
+};
+
+type NormalizedRecurringScopeDraft = {
+  heading: string;
   body: string[];
 };
 
@@ -245,6 +303,45 @@ function collectNormalizedScopes(lines: string[]): { scopes: NormalizedScopeDraf
   }
 
   return sawScope ? { scopes, sawAliasScopeHeading } : null;
+}
+
+function collectNormalizedRecurringScope(lines: string[]): NormalizedRecurringScopeDraft | null {
+  let currentScope: NormalizedRecurringScopeDraft | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      if (currentScope !== null) {
+        currentScope.body.push(line);
+      }
+      continue;
+    }
+
+    if (trimmed === RECURRING_SCOPE_HEADING) {
+      if (currentScope !== null) {
+        return null;
+      }
+
+      currentScope = {
+        heading: trimmed,
+        body: [],
+      };
+      continue;
+    }
+
+    if (/^### /.test(trimmed)) {
+      return null;
+    }
+
+    if (currentScope !== null) {
+      currentScope.body.push(line);
+      continue;
+    }
+
+    return null;
+  }
+
+  return currentScope;
 }
 
 function parseAliasScopeHeading(trimmed: string): { originalLabel: string; title: string } | null {
@@ -341,9 +438,12 @@ function validateExecutionShapeSection(
   if (declaredShape === 'executionShape: multi_scope') {
     return 'multi_scope';
   }
+  if (declaredShape === 'executionShape: multi_scope_unknown') {
+    return 'multi_scope_unknown';
+  }
 
   errors.push(
-    '`## Execution Shape` must declare exactly `executionShape: one_shot` or `executionShape: multi_scope`.',
+    '`## Execution Shape` must declare exactly `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.',
   );
   return null;
 }
@@ -377,6 +477,43 @@ function validateOneShotQueueAbsence(lines: string[], errors: string[]) {
   }
 }
 
+function validateExecutionLoopSection(lines: string[], errors: string[]) {
+  const loopSection = findSection(lines, EXECUTION_LOOP_HEADER);
+  if (loopSection === null) {
+    errors.push('`executionShape: multi_scope_unknown` requires a `## Execution Loop` section.');
+    return;
+  }
+
+  const contentLines = getSectionContentLines(lines, loopSection);
+  const recurringScope = collectRecurringScope(contentLines, errors);
+
+  if (recurringScope === null) {
+    errors.push('`## Execution Loop` must contain exactly one literal `### Recurring Scope` entry.');
+    return;
+  }
+
+  validateRecurringScopeBullets(recurringScope, errors);
+}
+
+function validateCompletionConditionSection(lines: string[], errors: string[]) {
+  const section = findSection(lines, COMPLETION_CONDITION_HEADER);
+  if (section === null) {
+    errors.push('`executionShape: multi_scope_unknown` requires a `## Completion Condition` section.');
+    return;
+  }
+
+  const contentLines = getSectionContentLines(lines, section).filter((line) => line.trim() !== '');
+  if (contentLines.length === 0) {
+    errors.push('`## Completion Condition` must contain at least one non-empty line.');
+  }
+}
+
+function validateSectionAbsence(lines: string[], header: string, message: string, errors: string[]) {
+  if (findSection(lines, header) !== null) {
+    errors.push(message);
+  }
+}
+
 type SectionBounds = {
   start: number;
   end: number;
@@ -384,6 +521,11 @@ type SectionBounds = {
 
 type ScopeSection = {
   number: number;
+  heading: string;
+  body: string[];
+};
+
+type RecurringScopeSection = {
   heading: string;
   body: string[];
 };
@@ -462,6 +604,51 @@ function collectScopes(lines: string[], errors: string[]): ScopeSection[] {
   return scopes;
 }
 
+function collectRecurringScope(lines: string[], errors: string[]): RecurringScopeSection | null {
+  let recurringScope: RecurringScopeSection | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      if (recurringScope !== null) {
+        recurringScope.body.push(line);
+      }
+      continue;
+    }
+
+    if (trimmed === RECURRING_SCOPE_HEADING) {
+      if (recurringScope !== null) {
+        errors.push('`## Execution Loop` must contain exactly one literal `### Recurring Scope` entry.');
+        continue;
+      }
+
+      recurringScope = {
+        heading: trimmed,
+        body: [],
+      };
+      continue;
+    }
+
+    if (/^### /.test(trimmed)) {
+      errors.push(
+        `\`## Execution Loop\` contains invalid scope heading \`${trimmed}\`; expected literal \`${RECURRING_SCOPE_HEADING}\`.`,
+      );
+      continue;
+    }
+
+    if (recurringScope !== null) {
+      recurringScope.body.push(line);
+      continue;
+    }
+
+    errors.push(
+      `\`## Execution Loop\` contains content before the recurring scope entry: \`${trimmed}\`.`,
+    );
+  }
+
+  return recurringScope;
+}
+
 function validateScopeOrdering(scopes: ScopeSection[], errors: string[]) {
   scopes.forEach((scope, index) => {
     const expectedNumber = index + 1;
@@ -488,6 +675,25 @@ function validateScopeBullets(scope: ScopeSection, errors: string[]) {
   for (const label of REQUIRED_SCOPE_BULLETS) {
     if (!presentLabels.has(label)) {
       errors.push(`Scope ${scope.number} is missing required bullet \`- ${toDisplayLabel(label)}:\`.`);
+    }
+  }
+}
+
+function validateRecurringScopeBullets(scope: RecurringScopeSection, errors: string[]) {
+  const presentLabels = new Set<string>();
+
+  for (const line of scope.body) {
+    const bulletMatch = line.trim().match(/^- ([^:]+):/);
+    if (bulletMatch === null) {
+      continue;
+    }
+
+    presentLabels.add(bulletMatch[1].trim().toLowerCase());
+  }
+
+  for (const label of REQUIRED_SCOPE_BULLETS) {
+    if (!presentLabels.has(label)) {
+      errors.push(`Recurring scope is missing required bullet \`- ${toDisplayLabel(label)}:\`.`);
     }
   }
 }

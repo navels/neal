@@ -25,6 +25,15 @@ const PLAN_FIXTURES: FixtureExpectation[] = [
   { fileName: 'risky-multi-subsystem.md', expectedShape: 'multi_scope' },
   { fileName: 'ambiguous-but-salvageable.md', expectedShape: 'multi_scope' },
   { fileName: 'already-good-neal-executable.md', expectedShape: 'multi_scope' },
+  { fileName: 'recurring-unknown-total.md', expectedShape: 'multi_scope_unknown' },
+];
+
+const INVALID_PLAN_FIXTURES: NearMissFixtureExpectation[] = [
+  {
+    fileName: 'recurring-unknown-total-invalid.md',
+    expectedOk: false,
+    expectedNormalizationApplied: false,
+  },
 ];
 
 const DERIVED_NEAR_MISS_FIXTURES: NearMissFixtureExpectation[] = [
@@ -71,6 +80,26 @@ test('fixture plans pass plan-review structural synthesis without synthetic find
 
     assert.equal(synthesis.executionShape, fixture.expectedShape);
     assert.deepEqual(synthesis.findings, [], `fixture ${fixture.fileName} should not add synthetic findings`);
+  }
+});
+
+test('invalid unknown-total fixture stays invalid with the expected structural errors', async () => {
+  for (const fixture of INVALID_PLAN_FIXTURES) {
+    const planDocument = await readFixture(fixture.fileName);
+    const result = validatePlanDocument(planDocument);
+
+    assert.equal(
+      result.ok,
+      fixture.expectedOk,
+      `fixture ${fixture.fileName} should match the expected validation outcome`,
+    );
+    assert.equal(result.executionShape, 'multi_scope_unknown');
+    assert.equal(result.normalization.applied, fixture.expectedNormalizationApplied);
+    assert.match(
+      result.errors.join('\n'),
+      /contains invalid scope heading `### Scope 2: Invalid extra scope`; expected literal `### Recurring Scope`\./,
+    );
+    assert.match(result.errors.join('\n'), /`## Completion Condition` must contain at least one non-empty line\./);
   }
 });
 
@@ -166,6 +195,27 @@ test('derived near-miss fixtures stay aligned with plan-review synthesis behavio
   assert.match(
     rejectedSynthesis.findings.map((finding) => finding.claim).join('\n'),
     /must contain at least one `### Scope N:` entry|contains content before the first scope entry/,
+  );
+});
+
+test('invalid unknown-total fixture produces blocking structural findings during plan review synthesis', async () => {
+  const planPath = getFixturePath('recurring-unknown-total-invalid.md');
+  const synthesis = await synthesizePlanReviewFindings({
+    planPath,
+    round: 1,
+    roundSummary: 'Invalid recurring unknown-total fixture remains structurally invalid.',
+    findings: [],
+  });
+
+  assert.equal(synthesis.executionShape, 'multi_scope_unknown');
+  assert.equal(synthesis.reviewedPlanPath, planPath);
+  assert.ok(synthesis.findings.length >= 1);
+  assert.ok(
+    synthesis.findings.every((finding) => finding.source === 'plan_structure' && finding.severity === 'blocking'),
+  );
+  assert.match(
+    synthesis.findings.map((finding) => finding.claim).join('\n'),
+    /exactly one literal `### Recurring Scope` entry|missing required bullet `- Success Condition:`|must contain at least one non-empty line/,
   );
 });
 

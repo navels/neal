@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 
 import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
 import { renderInteractiveBlockedRecoveryHistoryLines } from './recovery-artifacts.js';
+import { getCurrentScopeLabel, getExecutionPlanScopeCountForShape, renderScopeProgressSummary } from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 export function getFinalCompletionReviewArtifactPath(runDir: string) {
@@ -18,7 +19,8 @@ export function renderFinalCompletionReviewMarkdown(state: OrchestrationState) {
     `- Phase: ${state.phase}`,
     `- Status: ${state.status}`,
     `- Execution shape: ${state.executionShape ?? 'pending'}`,
-    `- Current scope: ${state.currentScopeNumber}`,
+    `- Current scope: ${getCurrentScopeLabel(state)}`,
+    `- Scope progress: ${renderScopeProgressSummary(state, getExecutionPlanScopeCountForShape(state.executionShape))}`,
     `- Final commit: ${state.finalCommit ?? 'pending'}`,
     `- Last marker: ${state.lastScopeMarker ?? 'pending'}`,
     `- Reviewer session: ${state.reviewerSessionHandle ?? 'pending'}`,

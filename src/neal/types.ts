@@ -23,7 +23,7 @@ export type OrchestrationPhase =
 
 export type ScopeMarker = 'AUTONOMY_SCOPE_DONE' | 'AUTONOMY_CHUNK_DONE' | 'AUTONOMY_DONE' | 'AUTONOMY_BLOCKED' | 'AUTONOMY_SPLIT_PLAN';
 export type AgentProvider = 'openai-codex' | 'anthropic-claude';
-export type ExecutionShape = 'one_shot' | 'multi_scope';
+export type ExecutionShape = 'one_shot' | 'multi_scope' | 'multi_scope_unknown';
 
 export type AgentRoleConfig = {
   provider: AgentProvider;

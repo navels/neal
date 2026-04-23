@@ -413,6 +413,40 @@ test('ordinary plan-review artifacts render the active adjudication contract wit
   assert.match(progressMarkdown, /- Contract role: validated allowed outcomes for debugging; runtime routing remains explicit elsewhere\./);
 });
 
+test('progress and review artifacts show unknown scope totals explicitly when the active shape is multi_scope_unknown', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 4,
+    executionShape: 'multi_scope_unknown',
+    phase: 'reviewer_scope',
+    status: 'running',
+  });
+
+  const progressMarkdown = renderPlanProgressMarkdown(state);
+  assert.match(progressMarkdown, /- Progress: scope 4\/\?/);
+
+  const reviewMarkdown = renderReviewMarkdown(state);
+  assert.match(reviewMarkdown, /- Scope progress: scope 4\/\?/);
+});
+
+test('progress and review artifacts distinguish derived unknown totals from the parent scope label', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 6,
+    executionShape: 'multi_scope_unknown',
+    phase: 'coder_scope',
+    status: 'running',
+    derivedPlanPath: '/tmp/DERIVED_PLAN_SCOPE_6.md',
+    derivedPlanStatus: 'accepted',
+    derivedFromScopeNumber: 6,
+    derivedScopeIndex: 2,
+  });
+
+  const progressMarkdown = renderPlanProgressMarkdown(state);
+  assert.match(progressMarkdown, /- Progress: scope 6\.2 \| derived 2\/\?/);
+
+  const reviewMarkdown = renderReviewMarkdown(state);
+  assert.match(reviewMarkdown, /- Scope progress: scope 6\.2 \| derived 2\/\?/);
+});
+
 test('execute review requires meaningful-progress as an adjudication-spec reviewer capability', () => {
   const executeReview = getAdjudicationSpec('execute_review');
   const capability = getReviewerCapability(executeReview, 'meaningful_progress');
@@ -785,6 +819,18 @@ test('final completion review and retrospective surface interactive blocked reco
   assert.match(retrospective, /## Interactive Blocked Recovery History/);
   assert.match(retrospective, /Resolution: resume_current_scope/);
   assert.match(retrospective, /Turn 1 guidance: Broaden the scope to include the blocking test fix\./);
+});
+
+test('final completion review shows unknown totals explicitly for recurring plans', async () => {
+  const { state } = await createState({
+    currentScopeNumber: 5,
+    executionShape: 'multi_scope_unknown',
+    phase: 'final_completion_review',
+    status: 'running',
+  });
+
+  const markdown = renderFinalCompletionReviewMarkdown(state);
+  assert.match(markdown, /- Scope progress: scope 5\/\?/);
 });
 
 test('final completion packet rolls derived sub-scope history into the whole-plan summary', async () => {

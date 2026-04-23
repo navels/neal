@@ -3242,6 +3242,43 @@ test('notifyScopeAccepted falls back to scope label alone when the plan cannot b
   assert.equal(notifyLog.trim(), '[neal] PLAN.md: scope 1 complete: scope 1 work');
 });
 
+test('notifyScopeAccepted renders unknown totals explicitly for recurring unknown-total plans', async () => {
+  const { cwd, state } = await createResumeFixture({
+    currentScopeNumber: 2,
+    executionShape: 'multi_scope_unknown',
+  });
+  await writeFile(
+    state.planDoc,
+    [
+      '# Plan',
+      '',
+      '## Execution Shape',
+      '',
+      'executionShape: multi_scope_unknown',
+      '',
+      '## Execution Loop',
+      '',
+      '### Recurring Scope',
+      '- Goal: Ship one recurring slice.',
+      '- Verification: `pnpm typecheck`',
+      '- Success Condition: One bounded slice is done.',
+      '',
+      '## Completion Condition',
+      '',
+      'The backlog is fully drained.',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(cwd);
+  await writeRepoConfig(cwd, { notifyBin: notifyScriptPath });
+
+  await notifyScopeAccepted(state, 'ship another recurring slice');
+
+  const notifyLog = await readFile(notifyLogPath, 'utf8');
+  assert.equal(notifyLog.trim(), '[neal] PLAN.md: scope 2/? complete: ship another recurring slice');
+});
+
 test('final squash tolerates unrelated local changes when the run was started with ignoreLocalChanges', async () => {
   const { statePath, state, notifyLogPath, notifyScriptPath, cwd } = await createFinalSquashFixture({
     ignoreLocalChanges: true,
@@ -3573,6 +3610,161 @@ test('runOnePass reopens execution as a new follow-on scope when final completio
     const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
     assert.match(completionArtifact, /- Reviewer action: continue_execution/);
     assert.match(completionArtifact, /Execution reopened with one explicit follow-on scope\./);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('final completion review keeps one-shot plans on scope 1 when continue_execution requests follow-on work', async () => {
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 1,
+    executionShape: 'one_shot',
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'The one-shot implementation landed, but the whole-plan review found one bounded repair.',
+      verificationSummary: 'Ran one-shot continue-execution coverage.',
+      remainingKnownGaps: ['One repair is still required before the plan can complete.'],
+    },
+  });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    executionShape: 'one_shot',
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish one-shot plan',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-final-completion-one-shot-continue',
+            structured: {
+              action: 'continue_execution',
+              summary: 'One bounded repair is still required.',
+              rationale: 'A one-shot plan can reopen execution without inventing a second numbered scope.',
+              missingWork: {
+                summary: 'Apply the final one-shot repair.',
+                requiredOutcome: 'Reopen execution while staying on scope 1.',
+                verification: 'Run orchestrator tests plus typecheck.',
+              },
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runFinalCompletionReviewPhase(state, statePath);
+    assert.equal(nextState.phase, 'coder_scope');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.currentScopeNumber, 1);
+    assert.equal(nextState.executionShape, 'one_shot');
+    const progressMarkdown = await readFile(nextState.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /- Progress: scope 1\/1/);
+    assert.match(progressMarkdown, /- Resulting action: continue_execution/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('final completion review reopens recurring unknown-total plans on the next numbered scope', async () => {
+  const { statePath, state: fixtureState, createdCommit } = await createFinalSquashFixture({
+    currentScopeNumber: 5,
+    executionShape: 'multi_scope_unknown',
+    phase: 'final_completion_review',
+    status: 'running',
+    archivedReviewPath: '/tmp/review-final.md',
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'One recurring slice landed, but the completion condition is not satisfied yet.',
+      verificationSummary: 'Ran recurring unknown-total final completion coverage.',
+      remainingKnownGaps: ['Another bounded recurring slice is still required.'],
+    },
+  });
+  const state = await saveState(statePath, {
+    ...fixtureState,
+    executionShape: 'multi_scope_unknown',
+    phase: 'final_completion_review',
+    status: 'running',
+    finalCommit: createdCommit,
+    archivedReviewPath: '/tmp/review-final.md',
+    completedScopes: [
+      {
+        number: '5',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit: fixtureState.baseCommit,
+        finalCommit: createdCommit,
+        commitSubject: 'finish recurring scope 5',
+        changedFiles: ['scope.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-final.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          return {
+            sessionHandle: 'reviewer-final-completion-recurring',
+            structured: {
+              action: 'continue_execution',
+              summary: 'The recurring loop needs one more bounded slice.',
+              rationale: 'The explicit completion condition is still false after the current recurring scope.',
+              missingWork: {
+                summary: 'Implement the next recurring slice.',
+                requiredOutcome: 'Reopen execution on the next numbered recurring scope.',
+                verification: 'Run orchestrator and review tests plus typecheck.',
+              },
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runFinalCompletionReviewPhase(state, statePath);
+    assert.equal(nextState.phase, 'coder_scope');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.currentScopeNumber, 6);
+    assert.equal(nextState.baseCommit, createdCommit);
+    assert.equal(nextState.finalCommit, null);
+    const progressMarkdown = await readFile(nextState.progressMarkdownPath, 'utf8');
+    assert.match(progressMarkdown, /- Progress: scope 6\/\?/);
+    assert.match(progressMarkdown, /- Resulting action: continue_execution/);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
@@ -4338,6 +4530,88 @@ test('computeNextScopeStateAfterSquash rolls up the last derived sub-scope into 
   assert.equal(nextState.derivedPlanStatus, null);
   assert.equal(nextState.derivedScopeIndex, null);
   assert.equal(nextState.splitPlanCountForCurrentScope, 0);
+  assert.deepEqual(nextState.completedScopes, completedScopes);
+});
+
+test('computeNextScopeStateAfterSquash keeps recurring unknown-total plans advancing one scope at a time', async () => {
+  const completedScopes: OrchestrationState['completedScopes'] = [
+    {
+      number: '4',
+      marker: 'AUTONOMY_SCOPE_DONE',
+      result: 'accepted',
+      baseCommit: 'base-1',
+      finalCommit: 'final-4',
+      commitSubject: 'finish recurring scope 4',
+      changedFiles: ['src/loop.ts'],
+      reviewRounds: 1,
+      findings: 0,
+      archivedReviewPath: '/tmp/review-4.md',
+      blocker: null,
+      derivedFromParentScope: null,
+      replacedByDerivedPlanPath: null,
+    },
+  ];
+  const { state } = await createResumeFixture({
+    currentScopeNumber: 4,
+    executionShape: 'multi_scope_unknown',
+    phase: 'final_squash',
+    status: 'running',
+    baseCommit: 'base-1',
+    lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
+  });
+
+  const nextState = computeNextScopeStateAfterSquash({
+    state,
+    finalCommit: 'final-4',
+    completedScopes,
+    archivedReviewPath: '/tmp/review-4.md',
+  });
+
+  assert.equal(nextState.phase, 'coder_scope');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 5);
+  assert.equal(nextState.baseCommit, 'final-4');
+  assert.deepEqual(nextState.completedScopes, completedScopes);
+});
+
+test('computeNextScopeStateAfterSquash routes one-shot AUTONOMY_SCOPE_DONE into final completion review without inventing a new scope', async () => {
+  const completedScopes: OrchestrationState['completedScopes'] = [
+    {
+      number: '1',
+      marker: 'AUTONOMY_SCOPE_DONE',
+      result: 'accepted',
+      baseCommit: 'base-1',
+      finalCommit: 'final-1',
+      commitSubject: 'finish one-shot implementation',
+      changedFiles: ['src/one-shot.ts'],
+      reviewRounds: 1,
+      findings: 0,
+      archivedReviewPath: '/tmp/review-1.md',
+      blocker: null,
+      derivedFromParentScope: null,
+      replacedByDerivedPlanPath: null,
+    },
+  ];
+  const { state } = await createResumeFixture({
+    currentScopeNumber: 1,
+    executionShape: 'one_shot',
+    phase: 'final_squash',
+    status: 'running',
+    baseCommit: 'base-1',
+    lastScopeMarker: 'AUTONOMY_SCOPE_DONE',
+  });
+
+  const nextState = computeNextScopeStateAfterSquash({
+    state,
+    finalCommit: 'final-1',
+    completedScopes,
+    archivedReviewPath: '/tmp/review-1.md',
+  });
+
+  assert.equal(nextState.phase, 'final_completion_review');
+  assert.equal(nextState.status, 'running');
+  assert.equal(nextState.currentScopeNumber, 1);
+  assert.equal(nextState.finalCommit, 'final-1');
   assert.deepEqual(nextState.completedScopes, completedScopes);
 });
 

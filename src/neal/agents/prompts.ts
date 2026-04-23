@@ -127,5 +127,5 @@ export function buildBlockedRecoveryCoderPrompt(args: {
 }
 
 export function isExecutionShape(value: string): value is ExecutionShape {
-  return value === 'one_shot' || value === 'multi_scope';
+  return value === 'one_shot' || value === 'multi_scope' || value === 'multi_scope_unknown';
 }

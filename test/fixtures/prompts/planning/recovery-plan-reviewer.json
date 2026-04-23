@@ -15,7 +15,7 @@
     "Review the diagnostic recovery plan candidate at /tmp/DIAGNOSTIC_RECOVERY_1_PLAN.md for parent objective 4 in active plan /tmp/PLAN.md.",
     "Review it as a candidate recovery plan, not as a brand-new top-level initiative.",
     "Also use blocking severity if the proposal silently broadens into unrelated future work instead of a bounded recovery path for the diagnosed failure mode.",
-    "The recovery plan should remain a candidate replacement for the active parent objective, and it must use the same canonical `## Execution Shape` / `## Execution Queue` contract as a top-level plan.",
+    "The recovery plan should remain a candidate replacement for the active parent objective, and it must use the same canonical Neal-executable shape contract as a top-level plan, including the appropriate `## Execution Queue` or `## Execution Loop` / `## Completion Condition` sections for the declared shape.",
     "Use repository tools to inspect the current plan and any directly referenced companion docs before finalizing findings."
   ],
   "excludes": [

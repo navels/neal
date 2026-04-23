@@ -2,7 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
-import { getCurrentScopeLabel, getExecutionPlanPath, getParentScopeLabel, renderRecentAcceptedScopesSummary } from './scopes.js';
+import {
+  getCurrentScopeLabel,
+  getExecutionPlanPath,
+  getExecutionPlanScopeCountForShape,
+  getParentScopeLabel,
+  renderRecentAcceptedScopesSummary,
+  renderScopeProgressSummary,
+} from './scopes.js';
 import type { OrchestrationState } from './types.js';
 
 function getDiscardedDiffPath(state: OrchestrationState) {
@@ -52,6 +59,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
     `- Review target kind: ${reviewTarget.label}`,
     `- Last reviewed artifact: ${lastReviewedPlanPath ?? 'pending'}`,
     `- Scope: ${getCurrentScopeLabel(state)}`,
+    `- Scope progress: ${renderScopeProgressSummary(state, getExecutionPlanScopeCountForShape(state.executionShape))}`,
     `- Phase: ${state.phase}`,
     `- Execution shape: ${state.executionShape ?? 'pending'}`,
     `- Coder session: ${state.coderSessionHandle ?? 'pending'}`,

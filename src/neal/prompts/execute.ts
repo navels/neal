@@ -46,7 +46,7 @@ export function buildScopePrompt(planDoc: string, progressText: string) {
     `If the target remains viable but the current scope has proven to be the wrong execution shape, return ${AUTONOMY_SPLIT_PLAN} instead of forcing the bad shape or using AUTONOMY_BLOCKED.`,
     `Use ${AUTONOMY_SPLIT_PLAN} only when the current scope result should be discarded and replaced by a safer derived plan for the same target.`,
     `When you return ${AUTONOMY_SPLIT_PLAN}, include a derived plan markdown artifact before the final marker.`,
-    'The derived plan must use the same Neal-executable contract as a top-level plan. Any derived-plan-specific sections are optional additive context only; they must not replace or rename the canonical machine-consumed sections.',
+    'The derived plan must use the same Neal-executable contract as a top-level plan. Any derived-plan-specific sections are optional additive context only; they must not replace or rename the canonical machine-consumed sections for the declared shape.',
     ...getExecuteScopeProgressPayloadContractLines(),
     ...getTerminalMarkerArtifactBoundaryLines(),
     'The final line of your response must still be the terminal marker.',
@@ -181,7 +181,7 @@ export function buildCoderResponsePrompt(args: {
       ? 'If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.'
       : 'Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.',
     'If the target remains viable but the current scope has proven to be the wrong execution shape, return outcome=`split_plan` with a concrete derived plan in `derivedPlan`.',
-    'A derived plan must use the same Neal-executable contract as a top-level plan. Derived-plan-specific rationale sections are optional additive context only; they must not replace or rename `## Execution Shape`, `executionShape: ...`, `## Execution Queue`, or the required `### Scope N:` entries.',
+    'A derived plan must use the same Neal-executable contract as a top-level plan. Derived-plan-specific rationale sections are optional additive context only; they must not replace or rename `## Execution Shape`, `executionShape: ...`, `## Execution Queue`, `## Execution Loop`, `## Completion Condition`, `### Scope N:`, or `### Recurring Scope` when those sections are required by the declared shape.',
     ...getCanonicalPlanContractLines(),
     ...getUserGuidanceLines('coder'),
     '',

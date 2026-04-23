@@ -2,7 +2,13 @@ import { basename } from 'node:path';
 
 import { notify } from '../../notifier.js';
 import type { RunLogger } from '../logger.js';
-import { getCurrentScopeLabel, getExecutionPlanPath, getExecutionPlanScopeCount, getParentScopeLabel } from '../scopes.js';
+import {
+  getCurrentScopeLabel,
+  getExecutionPlanPath,
+  getExecutionPlanScopeCount,
+  getParentScopeLabel,
+  renderScopeProgressSegments,
+} from '../scopes.js';
 import { saveState } from '../state.js';
 import type { OrchestrationState } from '../types.js';
 
@@ -33,14 +39,18 @@ async function notifyScopeAccepted(state: OrchestrationState, message: string, l
   const planName = basename(state.planDoc);
   const scopeLabel = getCurrentScopeLabel(state);
   const totalScopeCount = await getExecutionPlanScopeCount(getExecutionPlanPath(state));
-  const scopeSegment = totalScopeCount ? `${scopeLabel}/${totalScopeCount}` : scopeLabel;
+  const { scopeSegment, derivedSegment } = renderScopeProgressSegments(state, totalScopeCount);
+  const progressSegment =
+    derivedSegment && totalScopeCount.kind !== 'unavailable'
+      ? `${scopeSegment} complete (${derivedSegment})`
+      : `${scopeSegment} complete`;
   await logger?.event('notify.scope_complete', {
     message,
     planName,
     scopeNumber: scopeLabel,
     totalScopeCount,
   });
-  await notify('complete', `[neal] ${planName}: scope ${scopeSegment} complete: ${message}`, state.cwd);
+  await notify('complete', `[neal] ${planName}: ${progressSegment}: ${message}`, state.cwd);
 }
 
 async function notifyRetry(state: OrchestrationState, message: string, logger?: RunLogger) {

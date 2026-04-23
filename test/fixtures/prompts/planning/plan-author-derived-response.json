@@ -29,7 +29,10 @@
     "Revise the derived plan so it uses the same Neal-executable contract as a top-level plan.",
     "## Execution Shape",
     "executionShape: multi_scope",
+    "executionShape: multi_scope_unknown",
     "## Execution Queue",
+    "## Execution Loop",
+    "## Completion Condition",
     "Use `fixed` only when you actually revised the plan to resolve the finding.",
     "\"id\": \"finding-1\""
   ],

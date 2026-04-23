@@ -129,8 +129,10 @@ test('prompt fixtures cover the known ambiguity regressions from the prompt-spec
   const renderedCompletionReviewer = renderPrompt(completionReviewer);
 
   assert.match(renderedPrimary, /Choose `multi_scope` when the work changes orchestration or state-machine behavior/);
+  assert.match(renderedPrimary, /Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time/);
   assert.match(renderedDerived, /same Neal-executable contract as a top-level plan/);
   assert.match(renderedDerived, /### Scope 1: Example scope/);
+  assert.match(renderedDerived, /### Recurring Scope/);
   assert.match(renderedReviewer, /echo it in the required `executionShape` field/);
   assert.match(renderedReviewer, /scope granularity, verification concreteness, and resume safety/);
   assert.match(renderedRecoveryReviewer, /candidate recovery plan, not as a brand-new top-level initiative/);

@@ -81,7 +81,7 @@ export function buildPlanReviewerSchema() {
     type: 'object',
     properties: {
       summary: { type: 'string' },
-      executionShape: { type: 'string', enum: ['one_shot', 'multi_scope'] },
+      executionShape: { type: 'string', enum: ['one_shot', 'multi_scope', 'multi_scope_unknown'] },
       findings: {
         type: 'array',
         items: {
