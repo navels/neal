@@ -54,6 +54,7 @@ import { assertAdjudicationTransitionSignal } from './adjudicator/specs.js';
 import {
   getChangedFilesForRange,
   getCommitRange,
+  getCommitSubjects,
   getDiffForRange,
   getDiffStatForRange,
   getHeadCommit,
@@ -106,6 +107,7 @@ import type {
   DiagnosticRecoveryBaselineSource,
   DiagnosticRecoveryDecision,
   DiagnosticRecoveryState,
+  ExecuteScopeProgressJustification,
   FinalCompletionReviewerAction,
   FindingStatus,
   InteractiveBlockedRecoveryState,
@@ -335,6 +337,56 @@ async function persistCoderFailureState(
     message: error.message,
   });
   return failedState;
+}
+
+async function recoverPendingReviewFromCleanCommittedScope(
+  state: OrchestrationState,
+  statePath: string,
+  logger: RunLogger | undefined,
+  eventType: 'run.recovered_pending_review_on_resume' | 'run.recovered_pending_review_after_coder_failure',
+) {
+  if (
+    state.topLevelMode !== 'execute' ||
+    state.phase !== 'coder_scope' ||
+    !state.baseCommit ||
+    state.finalCommit !== null ||
+    state.createdCommits.length > 0
+  ) {
+    return null;
+  }
+
+  const headCommit = await getHeadCommit(state.cwd);
+  const worktreeStatus = await getWorktreeStatus(state.cwd);
+  const createdCommits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
+
+  if (headCommit === state.baseCommit || createdCommits.length === 0 || worktreeStatus.trim() !== '') {
+    return null;
+  }
+
+  const progressJustification =
+    state.currentScopeProgressJustification ??
+    (await buildRecoveredPendingReviewProgressJustification(state, createdCommits));
+
+  const recoveredState = await saveState(statePath, {
+    ...state,
+    createdCommits,
+    currentScopeProgressJustification: progressJustification,
+    phase: 'reviewer_scope',
+    status: 'running',
+    coderRetryCount: 0,
+  });
+  await writeExecutionArtifacts(recoveredState);
+  await logger?.event(eventType, {
+    statePath,
+    previousPhase: 'coder_scope',
+    recoveredPhase: recoveredState.phase,
+    baseCommit: recoveredState.baseCommit,
+    headCommit,
+    createdCommits,
+    progressJustification,
+  });
+
+  return recoveredState;
 }
 
 function getScopeCompletionProblem(marker: string | null) {
@@ -1610,6 +1662,18 @@ async function runCoderScopePhase(state: OrchestrationState, statePath: string, 
       if (isCoderTimeoutError(error)) {
         await bestEffortCleanupTimedOutCoderResume(error.sessionHandle ?? workingState.coderSessionHandle, logger);
       }
+      const recoveredState = await recoverPendingReviewFromCleanCommittedScope(
+        {
+          ...workingState,
+          coderSessionHandle: error.sessionHandle ?? workingState.coderSessionHandle,
+        },
+        statePath,
+        logger,
+        'run.recovered_pending_review_after_coder_failure',
+      );
+      if (recoveredState) {
+        return recoveredState;
+      }
       const failedState = await persistCoderFailureState(workingState, statePath, 'coder_scope', error, logger);
       if (shouldNotifyFailure(error)) {
         await notifyBlocked(failedState, error.message, logger);
@@ -2788,6 +2852,34 @@ function shouldResumeAcceptedDerivedPlan(state: OrchestrationState) {
   );
 }
 
+async function buildRecoveredPendingReviewProgressJustification(
+  state: OrchestrationState,
+  createdCommits: string[],
+): Promise<ExecuteScopeProgressJustification> {
+  const commitSubjects = await getCommitSubjects(state.cwd, createdCommits);
+  const changedFiles = state.baseCommit
+    ? await getChangedFilesForRange(state.cwd, state.baseCommit, createdCommits.at(-1) ?? state.baseCommit)
+    : [];
+  const scopeLabel = state.derivedScopeIndex
+    ? `derived scope ${state.derivedScopeIndex} of parent scope ${state.currentScopeNumber}`
+    : `scope ${state.currentScopeNumber}`;
+
+  return {
+    milestoneTargeted: `Recovered completed coder work for ${scopeLabel}`,
+    newEvidence: [
+      `Resume detected ${createdCommits.length} committed change(s) after the saved base commit while the worktree was clean.`,
+      commitSubjects.length > 0 ? `Commits: ${commitSubjects.join('; ')}` : null,
+      changedFiles.length > 0 ? `Changed files: ${changedFiles.join(', ')}` : null,
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join(' '),
+    whyNotRedundant:
+      'The previous coder turn failed after creating commits, so this recovered review checkpoint covers committed work that has not yet been adjudicated.',
+    nextStepUnlocked:
+      'Reviewer can adjudicate the recovered committed scope instead of Neal crashing or rerunning coder work that already produced commits.',
+  };
+}
+
 export async function loadOrInitialize(
   planDoc: string | null,
   cwd: string,
@@ -2863,35 +2955,13 @@ export async function loadOrInitialize(
 
     state = await flushDerivedPlanNotifications(state, resumeStatePath, logger);
 
-    if (
-      state.topLevelMode === 'execute' &&
-      state.phase === 'coder_scope' &&
-      state.baseCommit &&
-      state.finalCommit === null &&
-      state.createdCommits.length === 0
-    ) {
-      const headCommit = await getHeadCommit(state.cwd);
-      const worktreeStatus = await getWorktreeStatus(state.cwd);
-      const createdCommits = await getCommitRange(state.cwd, state.baseCommit, headCommit);
-
-      if (headCommit !== state.baseCommit && createdCommits.length > 0 && worktreeStatus.trim() === '') {
-        state = await saveState(resumeStatePath, {
-          ...state,
-          createdCommits,
-          phase: 'reviewer_scope',
-          status: 'running',
-          coderRetryCount: 0,
-        });
-        await logger.event('run.recovered_pending_review_on_resume', {
-          statePath: resumeStatePath,
-          previousPhase: 'coder_scope',
-          recoveredPhase: state.phase,
-          baseCommit: state.baseCommit,
-          headCommit,
-          createdCommits,
-        });
-      }
-    }
+    state =
+      (await recoverPendingReviewFromCleanCommittedScope(
+        state,
+        resumeStatePath,
+        logger,
+        'run.recovered_pending_review_on_resume',
+      )) ?? state;
 
     if (state.phase === 'interactive_blocked_recovery' && state.interactiveBlockedRecovery) {
       await logger.event('run.resumed_interactive_blocked_recovery', {

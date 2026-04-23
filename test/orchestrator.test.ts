@@ -2889,6 +2889,39 @@ test('resume keeps active derived execution on the same derived sub-scope', asyn
   assert.equal(state.derivedPlanAcceptedNotified, true);
 });
 
+test('resume recovering committed coder work backfills progress justification for reviewer adjudication', async () => {
+  const { cwd, statePath } = await createFinalSquashFixture({
+    currentScopeNumber: 13,
+    phase: 'coder_scope',
+    status: 'failed',
+    coderSessionHandle: 'coder-session-13',
+    createdCommits: [],
+    currentScopeProgressJustification: null,
+  });
+  await writeFile(join(cwd, '.git', 'info', 'exclude'), '.neal/\n', 'utf8');
+
+  const { state } = await loadOrInitialize(null, cwd, getDefaultAgentConfig(), statePath, 'execute');
+  assert.equal(state.phase, 'reviewer_scope');
+  assert.equal(state.status, 'running');
+  assert.equal(state.createdCommits.length, 1);
+  assert.ok(state.currentScopeProgressJustification);
+  assert.match(
+    state.currentScopeProgressJustification.milestoneTargeted,
+    /Recovered completed coder work for scope 13/,
+  );
+  assert.match(state.currentScopeProgressJustification.newEvidence, /derived scope work/);
+  assert.match(state.currentScopeProgressJustification.newEvidence, /scope\.txt/);
+
+  const reloadedState = await loadState(statePath);
+  assert.ok(reloadedState.currentScopeProgressJustification);
+
+  const progressMarkdown = await readFile(state.progressMarkdownPath, 'utf8');
+  assert.match(progressMarkdown, /Coder milestone: Recovered completed coder work for scope 13/);
+
+  const reviewMarkdown = await readFile(state.reviewMarkdownPath, 'utf8');
+  assert.match(reviewMarkdown, /Coder milestone: Recovered completed coder work for scope 13/);
+});
+
 test('flush sends split-plan rejection notification for guardrail blocks', async () => {
   const { cwd, statePath, state } = await createResumeFixture({
     currentScopeNumber: 10,
@@ -4213,6 +4246,138 @@ test('coder scope inactivity timeout retries once on a fresh session and records
 
     const notifyLog = await readFile(notifyLogPath, 'utf8');
     assert.match(notifyLog, /scope 4 timed out in coder_scope; retrying with a fresh coder session/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('coder scope stream failure after a clean commit recovers directly into review', async () => {
+  const { statePath, state: fixtureState } = await createFinalSquashFixture({
+    currentScopeNumber: 14,
+    phase: 'coder_scope',
+    status: 'running',
+    coderSessionHandle: 'interrupted-session',
+    createdCommits: [],
+    currentScopeProgressJustification: null,
+  });
+  await writeFile(join(fixtureState.cwd, '.git', 'info', 'exclude'), '.neal/\n', 'utf8');
+  const logger = await createRunLogger({
+    cwd: fixtureState.cwd,
+    stateDir: dirname(statePath),
+    planDoc: fixtureState.planDoc,
+    topLevelMode: fixtureState.topLevelMode,
+    runDir: fixtureState.runDir,
+  });
+
+  let reviewerCalled = false;
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          throw new OpenAICodexProviderError(
+            'stream disconnected before completion: request failed after commit',
+            'recovered-coder-session',
+          );
+        },
+      };
+    },
+  });
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound() {
+          reviewerCalled = true;
+          throw new Error('stop after recovered pending review');
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => runOnePass(fixtureState, statePath, logger),
+      /stop after recovered pending review/,
+    );
+
+    assert.equal(reviewerCalled, true);
+    const recoveredState = await loadState(statePath);
+    assert.equal(recoveredState.phase, 'reviewer_scope');
+    assert.equal(recoveredState.status, 'running');
+    assert.equal(recoveredState.coderSessionHandle, 'recovered-coder-session');
+    assert.equal(recoveredState.createdCommits.length, 1);
+    assert.ok(recoveredState.currentScopeProgressJustification);
+    assert.match(
+      recoveredState.currentScopeProgressJustification.milestoneTargeted,
+      /Recovered completed coder work for scope 14/,
+    );
+
+    const events = await readRunEvents(recoveredState.runDir);
+    assert.equal(
+      events.some((event) => event.type === 'run.recovered_pending_review_after_coder_failure'),
+      true,
+    );
+    assert.equal(
+      events.some((event) => event.type === 'phase.error' && event.data?.phase === 'coder_scope'),
+      false,
+    );
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('coder scope stream failure with dirty committed work still fails instead of recovering', async () => {
+  const { statePath, state: fixtureState, cwd } = await createFinalSquashFixture({
+    currentScopeNumber: 15,
+    phase: 'coder_scope',
+    status: 'running',
+    coderSessionHandle: 'interrupted-session',
+    createdCommits: [],
+    currentScopeProgressJustification: null,
+  });
+  await writeFile(join(cwd, '.git', 'info', 'exclude'), '.neal/\n', 'utf8');
+  await writeFile(join(cwd, 'scope.txt'), 'base\nchange\ndirty\n', 'utf8');
+  const logger = await createRunLogger({
+    cwd: fixtureState.cwd,
+    stateDir: dirname(statePath),
+    planDoc: fixtureState.planDoc,
+    topLevelMode: fixtureState.topLevelMode,
+    runDir: fixtureState.runDir,
+  });
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          throw new OpenAICodexProviderError(
+            'stream disconnected before completion: request failed with dirty worktree',
+            'failed-coder-session',
+          );
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => runOnePass(fixtureState, statePath, logger),
+      /stream disconnected before completion/,
+    );
+
+    const failedState = await loadState(statePath);
+    assert.equal(failedState.phase, 'coder_scope');
+    assert.equal(failedState.status, 'failed');
+    assert.equal(failedState.coderSessionHandle, 'failed-coder-session');
+    assert.deepEqual(failedState.createdCommits, []);
+
+    const events = await readRunEvents(failedState.runDir);
+    assert.equal(
+      events.some((event) => event.type === 'run.recovered_pending_review_after_coder_failure'),
+      false,
+    );
+    assert.equal(
+      events.some((event) => event.type === 'phase.error' && event.data?.phase === 'coder_scope'),
+      true,
+    );
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
