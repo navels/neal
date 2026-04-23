@@ -25,7 +25,11 @@ import {
   runOnePass,
   startDiagnosticRecovery,
 } from '../src/neal/orchestrator.js';
-import { resolveExecuteAdjudicationContext } from '../src/neal/adjudicator/execute.js';
+import {
+  resolveExecuteAdjudicationContext,
+  synthesizeExecuteResponseState,
+  synthesizeExecuteReviewerState,
+} from '../src/neal/adjudicator/execute.js';
 import { assertAdjudicationTransitionSignal, getAdjudicationSpec } from '../src/neal/adjudicator/specs.js';
 import {
   EXECUTE_SCOPE_PROGRESS_PAYLOAD_END,
@@ -38,12 +42,14 @@ import {
   stripExecuteScopeProgressPayload,
 } from '../src/neal/agents.js';
 import { clearConfigCache } from '../src/neal/config.js';
+import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
 import { getFinalCompletionReviewArtifactPath } from '../src/neal/final-completion-review.js';
 import { createRunLogger } from '../src/neal/logger.js';
 import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import type { CoderRunPromptArgs, StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
 import { OpenAICodexProviderError } from '../src/neal/providers/openai-codex.js';
 import { notifyScopeAccepted } from '../src/neal/orchestrator/notifications.js';
+import { appendCompletedScope } from '../src/neal/orchestrator/transitions.js';
 import { persistSplitPlanRecovery } from '../src/neal/orchestrator/split-plan.js';
 import { renderPlanProgressMarkdown } from '../src/neal/progress.js';
 import { renderReviewMarkdown } from '../src/neal/review.js';
@@ -4964,6 +4970,21 @@ test('execute review disposition only permits final squash for meaningful-progre
   assert.deepEqual(
     resolveExecuteReviewDisposition({
       hasBlockingFindings: false,
+      hasOpenNonBlockingFindings: true,
+      reachedMaxRounds: false,
+      shouldBlockForConvergence: false,
+      meaningfulProgressAction: 'accept',
+    }),
+    {
+      phase: 'coder_optional_response',
+      status: 'running',
+      blockedFromPhase: null,
+    },
+  );
+
+  assert.deepEqual(
+    resolveExecuteReviewDisposition({
+      hasBlockingFindings: false,
       hasOpenNonBlockingFindings: false,
       reachedMaxRounds: false,
       shouldBlockForConvergence: false,
@@ -5020,6 +5041,207 @@ test('execute review disposition only permits final squash for meaningful-progre
       blockedFromPhase: null,
     },
   );
+});
+
+test('execute reviewer acceptance with only non-blocking findings routes to optional response', async () => {
+  const { state } = await createResumeFixture({
+    phase: 'reviewer_scope',
+    rounds: [],
+    findings: [],
+    maxRounds: 3,
+  });
+  const context = resolveExecuteAdjudicationContext(state);
+
+  const reviewerState = synthesizeExecuteReviewerState({
+    state,
+    context,
+    headCommit: 'head123',
+    reviewerResult: {
+      sessionHandle: 'reviewer-session',
+      summary: 'Only bounded residual polish remains.',
+      findings: [
+        {
+          round: context.round,
+          source: 'reviewer',
+          severity: 'non_blocking',
+          files: ['src/neal/review.ts'],
+          claim: 'Review artifacts should preserve optional dispositions.',
+          evidence: 'Without optional triage, an accepted scope can lose the coder rationale for non-blocking review debt.',
+          requiredAction: 'Route accepted scopes with open non-blocking findings through coder_optional_response.',
+          roundSummary: 'Only bounded residual polish remains.',
+        },
+      ],
+      meaningfulProgress: {
+        action: 'accept',
+        rationale: 'The scope materially advances the parent objective and only non-blocking polish remains.',
+      },
+    },
+  });
+
+  assert.deepEqual(reviewerState.disposition, {
+    phase: 'coder_optional_response',
+    status: 'running',
+    blockedFromPhase: null,
+  });
+  assert.equal(reviewerState.mergedFindings.length, 1);
+  assert.equal(reviewerState.mergedFindings[0].status, 'open');
+  assert.equal(reviewerState.mergedFindings[0].evidence, 'Without optional triage, an accepted scope can lose the coder rationale for non-blocking review debt.');
+});
+
+test('execute optional response must disposition every open non-blocking finding before final squash', async () => {
+  const { state } = await createResumeFixture({
+    phase: 'coder_optional_response',
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'C1',
+        round: 1,
+        source: 'reviewer',
+        severity: 'non_blocking',
+        files: ['src/neal/prompts/execute.ts'],
+        claim: 'Prompt should be clearer.',
+        evidence: 'The optional prompt does not make bounded fixes the default.',
+        requiredAction: 'Clarify optional uptake.',
+        status: 'open',
+        roundSummary: 'Optional uptake needs explicit triage.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+      {
+        id: 'R1-F2',
+        canonicalId: 'C2',
+        round: 1,
+        source: 'reviewer',
+        severity: 'non_blocking',
+        files: ['src/neal/adjudicator/execute.ts'],
+        claim: 'Disposition persistence should be explicit.',
+        evidence: 'Missing responses would leave an open non-blocking finding while final squash proceeds.',
+        requiredAction: 'Require one disposition per open non-blocking finding.',
+        status: 'open',
+        roundSummary: 'Optional uptake needs explicit triage.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+      {
+        id: 'R1-F3',
+        canonicalId: 'C3',
+        round: 1,
+        source: 'reviewer',
+        severity: 'non_blocking',
+        files: ['src/neal/review.ts'],
+        claim: 'A reviewer suggestion may be incorrect.',
+        evidence: 'The optional response contract should preserve evidence-backed rejection rather than reopening the finding.',
+        requiredAction: 'Reject incorrect non-blocking findings with a rationale.',
+        status: 'open',
+        roundSummary: 'Optional uptake needs explicit triage.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+  });
+
+  assert.throws(
+    () =>
+      synthesizeExecuteResponseState({
+        state,
+        mode: 'optional',
+        createdCommits: ['fix123'],
+        response: {
+          sessionHandle: 'coder-session',
+          payload: {
+            outcome: 'responded',
+            summary: 'Handled optional findings.',
+            blocker: '',
+            derivedPlan: '',
+            responses: [
+              {
+                id: 'R1-F1',
+                decision: 'fixed',
+                summary: 'Clarified the prompt.',
+              },
+            ],
+          },
+        },
+      }),
+    /did not disposition every open finding: R1-F2/,
+  );
+
+  const responseState = synthesizeExecuteResponseState({
+    state,
+    mode: 'optional',
+    createdCommits: ['fix123'],
+    response: {
+      sessionHandle: 'coder-session',
+      payload: {
+        outcome: 'responded',
+        summary: 'Handled optional findings.',
+        blocker: '',
+        derivedPlan: '',
+        responses: [
+          {
+            id: 'R1-F1',
+            decision: 'fixed',
+            summary: 'Clarified the prompt.',
+          },
+          {
+            id: 'R1-F2',
+            decision: 'deferred',
+            summary: 'The finding is real but should wait for the residual-debt artifact scope.',
+          },
+          {
+            id: 'R1-F3',
+            decision: 'rejected',
+            summary: 'The suggestion is incorrect because review markdown already preserves rejected dispositions.',
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(responseState.nextPhase, 'final_squash');
+  assert.equal(responseState.findings[0].status, 'fixed');
+  assert.equal(responseState.findings[0].coderDisposition, 'Clarified the prompt.');
+  assert.equal(responseState.findings[0].coderCommit, 'fix123');
+  assert.equal(responseState.findings[1].status, 'deferred');
+  assert.equal(responseState.findings[1].coderDisposition, 'The finding is real but should wait for the residual-debt artifact scope.');
+  assert.equal(responseState.findings[1].coderCommit, null);
+  assert.equal(responseState.findings[2].status, 'rejected');
+  assert.equal(responseState.findings[2].coderDisposition, 'The suggestion is incorrect because review markdown already preserves rejected dispositions.');
+  assert.equal(responseState.findings[2].coderCommit, null);
+
+  const acceptedState = {
+    ...state,
+    phase: responseState.nextPhase,
+    status: responseState.nextStatus,
+    findings: responseState.findings,
+    lastScopeMarker: 'AUTONOMY_SCOPE_DONE' as const,
+  };
+  const completedScopes = appendCompletedScope(acceptedState, 'accepted', {
+    finalCommit: 'scope-final',
+    commitSubject: 'finish optional uptake',
+    changedFiles: ['src/neal/prompts/execute.ts', 'src/neal/adjudicator/execute.ts'],
+    archivedReviewPath: '/tmp/review-optional.md',
+    blocker: null,
+    marker: 'AUTONOMY_SCOPE_DONE',
+  });
+  const completionPacket = await buildFinalCompletionPacket({
+    state: {
+      ...acceptedState,
+      completedScopes,
+      finalCommit: 'scope-final',
+      createdCommits: [],
+    },
+    terminalScope: null,
+  });
+
+  assert.deepEqual(
+    completionPacket.residualReviewDebt.map((item) => `${item.id}:${item.status}:${item.coderDisposition}`),
+    ['R1-F2:deferred:The finding is real but should wait for the residual-debt artifact scope.'],
+  );
+  assert.match(completionPacket.completedScopeSummary, /residual non-blocking debt: R1-F2 deferred/);
+  assert.match(completionPacket.residualReviewDebtSummary, /Scope 1 R1-F2 \(deferred\)/);
+  assert.doesNotMatch(completionPacket.residualReviewDebtSummary, /R1-F1/);
+  assert.doesNotMatch(completionPacket.residualReviewDebtSummary, /R1-F3/);
 });
 
 test('execute adjudication context exposes meaningful-progress through the execute-review capability surface', async () => {

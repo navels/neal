@@ -12,7 +12,7 @@ import {
   renderScopeProgressSummary,
   renderRecentAcceptedScopesSummary,
 } from './scopes.js';
-import type { OrchestrationState } from './types.js';
+import type { OrchestrationState, ProgressScope, ResidualReviewDebtItem } from './types.js';
 
 type InteractiveBlockedRecoverySummary = {
   sourcePhase: NonNullable<OrchestrationState['interactiveBlockedRecovery']>['sourcePhase'];
@@ -71,6 +71,13 @@ type MeaningfulProgressSummary = {
   }[];
 };
 
+type ResidualReviewDebtSummary = {
+  open: number;
+  deferred: number;
+  nonResidualFindings: number;
+  items: (ResidualReviewDebtItem & { scope: string })[];
+};
+
 type PlanProgressState = {
   version: 1;
   planDoc: string;
@@ -97,12 +104,31 @@ type PlanProgressState = {
     derivedPlanDepth: number;
   } | null;
   meaningfulProgress: MeaningfulProgressSummary | null;
+  residualReviewDebt: ResidualReviewDebtSummary;
   diagnosticRecovery: DiagnosticRecoverySummary | null;
   diagnosticRecoveryHistory: DiagnosticRecoveryHistorySummary | null;
   interactiveBlockedRecovery: InteractiveBlockedRecoverySummary | null;
   interactiveBlockedRecoveryHistory: InteractiveBlockedRecoveryHistorySummary | null;
   completedScopes: OrchestrationState['completedScopes'];
 };
+
+function buildResidualReviewDebtSummary(scopes: ProgressScope[]): ResidualReviewDebtSummary {
+  const items = scopes.flatMap((scope) =>
+    (scope.residualReviewDebt ?? []).map((item) => ({
+      scope: scope.number,
+      ...item,
+    })),
+  );
+  return {
+    open: items.filter((item) => item.status === 'open').length,
+    deferred: items.filter((item) => item.status === 'deferred').length,
+    nonResidualFindings: scopes.reduce(
+      (total, scope) => total + Math.max(scope.findings - (scope.residualReviewDebt?.length ?? 0), 0),
+      0,
+    ),
+    items,
+  };
+}
 
 function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
   const parentScopeLabel = state.topLevelMode === 'execute' ? getParentScopeLabel(state) : null;
@@ -156,6 +182,7 @@ function buildPlanProgressState(state: OrchestrationState): PlanProgressState {
             recentAcceptedScopeHistory,
           }
         : null,
+    residualReviewDebt: buildResidualReviewDebtSummary(state.completedScopes.filter((scope) => scope.result === 'accepted')),
     diagnosticRecovery: state.diagnosticRecovery
       ? {
           sequence: state.diagnosticRecovery.sequence,
@@ -211,6 +238,30 @@ function pushIndentedMultiline(lines: string[], value: string) {
 
   for (const line of trimmed.split('\n')) {
     lines.push(`  ${line}`);
+  }
+}
+
+function pushResidualReviewDebtLines(lines: string[], debt: ResidualReviewDebtSummary) {
+  lines.push(
+    '',
+    '## Residual Review Debt',
+    `- Open non-blocking findings: ${debt.open}`,
+    `- Deferred non-blocking findings: ${debt.deferred}`,
+    `- Non-residual findings (all severities): ${debt.nonResidualFindings}`,
+  );
+
+  if (debt.items.length === 0) {
+    lines.push('- Items: none');
+    return;
+  }
+
+  lines.push('- Items:');
+  for (const item of debt.items) {
+    const files = item.files.length > 0 ? item.files.join(', ') : 'n/a';
+    lines.push(`  - Scope ${item.scope} ${item.id} (${item.status}): ${item.claim}`);
+    lines.push(`    Files: ${files}`);
+    lines.push(`    Required action: ${item.requiredAction}`);
+    lines.push(`    Coder disposition: ${item.coderDisposition ?? 'pending'}`);
   }
 }
 
@@ -283,6 +334,10 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
         progress.meaningfulProgress?.parentObjective ?? String(state.currentScopeNumber),
       ),
     );
+  }
+
+  if (state.topLevelMode === 'execute') {
+    pushResidualReviewDebtLines(lines, progress.residualReviewDebt);
   }
 
   if (progress.finalCompletionSummary) {
@@ -404,6 +459,7 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
         `- Commit subject: ${scope.commitSubject ?? 'pending'}`,
         `- Review rounds: ${scope.reviewRounds}`,
         `- Findings: ${scope.findings}`,
+        `- Residual open/deferred non-blocking findings: ${scope.residualReviewDebt?.length ?? 0}`,
         `- Archived review: ${scope.archivedReviewPath ?? 'pending'}`,
         `- Blocker: ${scope.blocker ?? 'none'}`,
         `- Parent scope: ${scope.derivedFromParentScope ?? 'none'}`,

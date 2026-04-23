@@ -243,6 +243,7 @@ export function renderReviewMarkdown(state: OrchestrationState) {
           `- Status: ${finding.status}`,
           `- Files: ${finding.files.join(', ') || 'n/a'}`,
           `- Claim: ${finding.claim}`,
+          `- Evidence: ${finding.evidence?.trim() || 'n/a'}`,
           `- Required action: ${finding.requiredAction}`,
           `- Round summary: ${finding.roundSummary}`,
           `- Coder disposition: ${finding.coderDisposition ?? 'pending'}`,

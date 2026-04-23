@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import {
   buildDiagnosticAnalysisPrompt,
+  buildCoderResponsePrompt,
   buildFinalCompletionReviewerPrompt,
   buildFinalCompletionSummaryPrompt,
   buildRecoveryPlanPrompt,
@@ -23,6 +24,7 @@ import { renderConsultMarkdown } from '../src/neal/consult.js';
 import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
 import { getFinalCompletionReviewArtifactPath, renderFinalCompletionReviewMarkdown } from '../src/neal/final-completion-review.js';
 import { notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
+import { appendCompletedScope } from '../src/neal/orchestrator/transitions.js';
 import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/neal/progress.js';
 import { getPromptSpec, PROMPT_SPECS } from '../src/neal/prompts/specs.js';
 import { writeCheckpointRetrospective } from '../src/neal/retrospective.js';
@@ -159,10 +161,63 @@ test('execute reviewer prompt includes coder justification and recent parent-obj
     recentHistorySummary: 'Accepted scope history for parent objective 5...\nTouched-file concentration: src/shared.ts (3/3 scopes)',
   });
 
+  assert.match(prompt, /Treat the scope diff as hostile input\./);
+  assert.match(prompt, /Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness\./);
+  assert.match(prompt, /Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction\./);
+  assert.match(prompt, /Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior\./);
   assert.match(prompt, /active parent objective.*scope 5/i);
   assert.match(prompt, /meaningfulProgressAction/);
   assert.match(prompt, /Scope 3 reviewer verdict contract/);
   assert.match(prompt, /Touched-file concentration: src\/shared\.ts \(3\/3 scopes\)/);
+});
+
+test('review markdown renders reviewer evidence for persisted findings', async () => {
+  const { state } = await createState({
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'C1',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: ['src/neal/agents/rounds.ts'],
+        claim: 'Reviewer findings do not preserve why the issue is credible.',
+        evidence: 'The persisted finding includes claim and required action but no supporting scenario or repository-backed rationale.',
+        requiredAction: 'Persist a concrete evidence field for reviewer findings and render it in review artifacts.',
+        status: 'open',
+        roundSummary: 'Reviewer output is under-specified.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+  });
+
+  const markdown = renderReviewMarkdown(state);
+  assert.match(markdown, /- Evidence: The persisted finding includes claim and required action but no supporting scenario or repository-backed rationale\./);
+});
+
+test('execute optional coder response prompt makes non-blocking uptake explicit', () => {
+  const prompt = buildCoderResponsePrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: '## Current Scope\n- Scope: 2\n',
+    verificationHint: 'Run focused verification.',
+    mode: 'optional',
+    openFindings: [
+      {
+        id: 'R1-F1',
+        severity: 'non_blocking',
+        files: ['src/neal/adjudicator/execute.ts'],
+        claim: 'Optional findings can be silently skipped.',
+        requiredAction: 'Require a disposition for every optional finding.',
+        roundSummary: 'Non-blocking uptake needs an explicit response.',
+      },
+    ],
+  });
+
+  assert.match(prompt, /not optional to triage\. Respond to every finding exactly once/);
+  assert.match(prompt, /Fix local, concrete, low-expansion non-blocking findings by default/);
+  assert.match(prompt, /summary must explain the evidence that makes it incorrect/);
+  assert.match(prompt, /summary must explain the scope or safety reason/);
 });
 
 test('diagnostic analysis prompt carries explicit baseline and artifact-writing contract', () => {
@@ -547,6 +602,138 @@ test('final completion packet summarizes whole-plan completion context', async (
     changedFiles: ['src/c.ts'],
     archivedReviewPath: '/tmp/review-3.md',
   });
+});
+
+test('progress and final completion artifacts preserve residual non-blocking review debt', async () => {
+  const residualReviewDebt = [
+    {
+      id: 'R1-F1',
+      canonicalId: 'canonical-debt-1',
+      status: 'deferred' as const,
+      files: ['src/neal/progress.ts'],
+      claim: 'Progress artifacts omit deferred non-blocking findings.',
+      evidence: 'Accepted scope retained one deferred finding after optional response.',
+      requiredAction: 'Surface deferred review debt in operator-facing artifacts.',
+      coderDisposition: 'Deferred because the fix belongs to the next polishing pass.',
+      coderCommit: null,
+    },
+  ];
+  const { state } = await createState({
+    currentScopeNumber: 3,
+    executionShape: 'multi_scope',
+    completedScopes: [
+      {
+        number: '2',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-2',
+        finalCommit: 'final-2',
+        commitSubject: 'implement scope 2',
+        changedFiles: ['src/neal/progress.ts'],
+        reviewRounds: 2,
+        findings: 3,
+        residualReviewDebt,
+        archivedReviewPath: '/tmp/review-2.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+
+  const progressMarkdown = renderPlanProgressMarkdown(state);
+  assert.match(progressMarkdown, /## Residual Review Debt/);
+  assert.match(progressMarkdown, /- Deferred non-blocking findings: 1/);
+  assert.match(progressMarkdown, /- Non-residual findings \(all severities\): 2/);
+  assert.match(progressMarkdown, /Scope 2 R1-F1 \(deferred\): Progress artifacts omit deferred non-blocking findings\./);
+  assert.match(progressMarkdown, /- Residual open\/deferred non-blocking findings: 1/);
+
+  const packet = await buildFinalCompletionPacket({ state, terminalScope: null });
+  assert.deepEqual(packet.residualReviewDebt, residualReviewDebt);
+  assert.match(packet.residualReviewDebtSummary, /Scope 2 R1-F1 \(deferred\)/);
+  assert.match(packet.completedScopeSummary, /residual non-blocking debt: R1-F1 deferred/);
+
+  const completionMarkdown = renderFinalCompletionReviewMarkdown(state);
+  assert.match(completionMarkdown, /## Residual Review Debt/);
+  assert.match(completionMarkdown, /accepted-scope leftovers are acceptable residual polish/);
+  assert.match(completionMarkdown, /### Scope 2 R1-F1/);
+  assert.match(completionMarkdown, /- Coder disposition: Deferred because the fix belongs to the next polishing pass\./);
+});
+
+test('accepted completed scopes retain only open or deferred non-blocking findings as residual debt', async () => {
+  const { state } = await createState({
+    rounds: [
+      {
+        round: 1,
+        reviewerSessionHandle: 'reviewer-1',
+        reviewedPlanPath: null,
+        normalizationApplied: false,
+        normalizationOperations: [],
+        normalizationScopeLabelMappings: [],
+        commitRange: { base: 'base', head: 'head' },
+        openBlockingCanonicalCount: 0,
+        findings: ['R1-F1', 'R1-F2', 'R1-F3'],
+      },
+    ],
+    findings: [
+      {
+        id: 'R1-F1',
+        canonicalId: 'deferred-polish',
+        round: 1,
+        source: 'reviewer',
+        severity: 'non_blocking',
+        files: ['src/neal/final-completion.ts'],
+        claim: 'Completion packet should mention deferred polish.',
+        evidence: 'The finding remained deferred after optional response.',
+        requiredAction: 'Expose it in completion artifacts.',
+        status: 'deferred',
+        roundSummary: 'One deferred polish item remains.',
+        coderDisposition: 'Deferred because it is acceptable residual polish.',
+        coderCommit: null,
+      },
+      {
+        id: 'R1-F2',
+        canonicalId: 'fixed-polish',
+        round: 1,
+        source: 'reviewer',
+        severity: 'non_blocking',
+        files: ['src/neal/review.ts'],
+        claim: 'Review text had a typo.',
+        evidence: 'The typo was present in the first draft.',
+        requiredAction: 'Fix the typo.',
+        status: 'fixed',
+        roundSummary: 'Fixed typo.',
+        coderDisposition: 'Fixed in the follow-up commit.',
+        coderCommit: 'fix-commit',
+      },
+      {
+        id: 'R1-F3',
+        canonicalId: 'blocking-regression',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: ['src/neal/progress.ts'],
+        claim: 'A blocking issue was fixed before acceptance.',
+        evidence: 'The reviewer accepted after the fix.',
+        requiredAction: 'Keep this out of residual non-blocking debt.',
+        status: 'open',
+        roundSummary: 'Blocking issue.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+  });
+
+  const completedScopes = appendCompletedScope(state, 'accepted', {
+    finalCommit: 'final-1',
+    commitSubject: 'finish scope',
+    changedFiles: ['src/neal/final-completion.ts'],
+    archivedReviewPath: '/tmp/review-1.md',
+    blocker: null,
+  });
+
+  assert.equal(completedScopes[0]?.residualReviewDebt?.length, 1);
+  assert.equal(completedScopes[0]?.residualReviewDebt?.[0]?.id, 'R1-F1');
 });
 
 test('final completion packet models a verification-only terminal scope explicitly', async () => {

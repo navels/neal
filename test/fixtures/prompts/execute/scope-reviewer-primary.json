@@ -27,8 +27,14 @@
     "recentHistorySummary": "Accepted scope history for parent objective 5.2...\nTouched-file concentration: src/shared.ts (2/2 scopes)"
   },
   "contains": [
+    "Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.",
+    "Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness.",
+    "Those are convergence signals, not proof that the code is sound.",
+    "Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.",
+    "Check whether test coverage for the changed behavior degraded.",
+    "Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.",
     "The active parent objective for meaningful-progress evaluation is scope 5.2.",
-    "You are the authority for meaningful-progress gating during this execute review pass.",
+    "You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.",
     "Set `meaningfulProgressAction` to `accept` only when this scope materially advances the active parent objective."
   ],
   "excludes": [

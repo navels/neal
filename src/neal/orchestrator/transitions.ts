@@ -6,6 +6,7 @@ import {
   shouldAdvanceTopLevelScopeNumber,
   shouldContinueTopLevelExecutionAfterAcceptedScope,
 } from '../scopes.js';
+import { toResidualReviewDebt } from '../review-debt.js';
 import type { OrchestrationState, ScopeMarker } from '../types.js';
 
 type AppendCompletedScopeDetails = {
@@ -41,6 +42,7 @@ export function appendCompletedScope(
       changedFiles: [...(details.changedFiles ?? [])],
       reviewRounds: state.rounds.length,
       findings: state.findings.length,
+      residualReviewDebt: result === 'accepted' ? toResidualReviewDebt(state.findings) : [],
       archivedReviewPath: details.archivedReviewPath,
       blocker: details.blocker,
       derivedFromParentScope: details.derivedFromParentScope ?? null,

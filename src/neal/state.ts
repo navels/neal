@@ -648,6 +648,20 @@ function hydrateCompletedScope(value: unknown): OrchestrationState['completedSco
       : [],
     reviewRounds: typeof scope.reviewRounds === 'number' ? scope.reviewRounds : 0,
     findings: typeof scope.findings === 'number' ? scope.findings : 0,
+    residualReviewDebt: Array.isArray((scope as { residualReviewDebt?: unknown }).residualReviewDebt)
+      ? (scope as { residualReviewDebt: OrchestrationState['completedScopes'][number]['residualReviewDebt'] }).residualReviewDebt?.filter(
+          (item) =>
+            Boolean(item) &&
+            typeof item === 'object' &&
+            typeof item.id === 'string' &&
+            typeof item.canonicalId === 'string' &&
+            (item.status === 'open' || item.status === 'deferred') &&
+            Array.isArray(item.files) &&
+            item.files.every((file) => typeof file === 'string') &&
+            typeof item.claim === 'string' &&
+            typeof item.requiredAction === 'string',
+        ) ?? []
+      : [],
     archivedReviewPath: typeof scope.archivedReviewPath === 'string' ? scope.archivedReviewPath : null,
     blocker: typeof scope.blocker === 'string' ? scope.blocker : null,
     derivedFromParentScope: typeof scope.derivedFromParentScope === 'string' ? scope.derivedFromParentScope : null,

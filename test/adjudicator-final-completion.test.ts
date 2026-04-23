@@ -58,6 +58,8 @@ function createPacket(): FinalCompletionPacket {
     terminalChangedFilesSummary: '- src/neal/orchestrator.ts',
     planChangedFiles: ['src/neal/orchestrator.ts', 'src/neal/adjudicator/final-completion.ts'],
     planChangedFilesSummary: '- src/neal/orchestrator.ts\n- src/neal/adjudicator/final-completion.ts',
+    residualReviewDebt: [],
+    residualReviewDebtSummary: 'No unresolved non-blocking review debt was recorded for accepted scopes.',
     verificationCommands: ['pnpm exec tsx --test test/orchestrator.test.ts', 'pnpm typecheck'],
     verificationSummary: 'Recorded verification commands for this run.',
     lastNonEmptyImplementationScope: {

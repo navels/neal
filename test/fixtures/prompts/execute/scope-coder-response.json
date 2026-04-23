@@ -22,8 +22,11 @@
     ]
   },
   "contains": [
-    "The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.",
-    "If you choose to address any findings, make the smallest justified code changes",
+    "The currently open review findings below are non-blocking, but they are not optional to triage. Respond to every finding exactly once.",
+    "Fix local, concrete, low-expansion non-blocking findings by default.",
+    "Use `rejected` only when the finding is incorrect, and your summary must explain the evidence that makes it incorrect.",
+    "Use `deferred` only when the finding is real but unsafe or intentionally out of scope for this turn",
+    "Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.",
     "A derived plan must use the same Neal-executable contract as a top-level plan."
   ],
   "excludes": [

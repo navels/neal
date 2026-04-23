@@ -12,6 +12,7 @@ export type ReviewerFindingPayload = {
   severity: 'blocking' | 'non_blocking';
   files: string[];
   claim: string;
+  evidence: string;
   requiredAction: string;
 };
 
@@ -62,9 +63,10 @@ export function buildReviewerSchema() {
             severity: { type: 'string', enum: ['blocking', 'non_blocking'] },
             files: { type: 'array', items: { type: 'string' } },
             claim: { type: 'string' },
+            evidence: { type: 'string' },
             requiredAction: { type: 'string' },
           },
-          required: ['severity', 'files', 'claim', 'requiredAction'],
+          required: ['severity', 'files', 'claim', 'evidence', 'requiredAction'],
           additionalProperties: false,
         },
       },

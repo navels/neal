@@ -255,6 +255,53 @@ export function getExecuteResponseOpenFindings(
   }));
 }
 
+function validateExecuteResponseCoverage(args: {
+  state: OrchestrationState;
+  mode: 'blocking' | 'optional';
+  response: Awaited<ReturnType<ExecuteResponseRoundRunner>>;
+}) {
+  const openFindings = getExecuteResponseOpenFindings(args.state, args.mode);
+  const expectedIds = new Set(openFindings.map((finding) => finding.id));
+  const seenIds = new Set<string>();
+  const duplicateIds = new Set<string>();
+  const unknownIds = new Set<string>();
+  const missingIds = new Set(expectedIds);
+
+  for (const response of args.response.payload.responses) {
+    if (seenIds.has(response.id)) {
+      duplicateIds.add(response.id);
+    }
+    seenIds.add(response.id);
+
+    if (!expectedIds.has(response.id)) {
+      unknownIds.add(response.id);
+      continue;
+    }
+
+    missingIds.delete(response.id);
+
+    if (response.summary.trim().length === 0) {
+      throw new Error(`Coder ${args.mode} response returned an empty disposition summary for ${response.id}.`);
+    }
+  }
+
+  if (duplicateIds.size > 0) {
+    throw new Error(`Coder ${args.mode} response returned duplicate finding dispositions: ${[...duplicateIds].join(', ')}`);
+  }
+
+  if (unknownIds.size > 0) {
+    throw new Error(`Coder ${args.mode} response returned dispositions for non-open findings: ${[...unknownIds].join(', ')}`);
+  }
+
+  if (args.response.payload.outcome !== 'responded') {
+    return;
+  }
+
+  if (missingIds.size > 0) {
+    throw new Error(`Coder ${args.mode} response did not disposition every open finding: ${[...missingIds].join(', ')}`);
+  }
+}
+
 export async function runExecuteReviewerAdjudication(args: {
   state: OrchestrationState;
   logger?: RunLogger;
@@ -413,6 +460,11 @@ export function synthesizeExecuteResponseState(args: {
   createdCommits: string[];
 }) {
   const mode = args.mode ?? 'blocking';
+  validateExecuteResponseCoverage({
+    state: args.state,
+    mode,
+    response: args.response,
+  });
   const latestCommit = args.createdCommits.at(-1) ?? null;
   const responseById = new Map(args.response.payload.responses.map((response) => [response.id, response]));
 
@@ -425,8 +477,8 @@ export function synthesizeExecuteResponseState(args: {
     return {
       ...finding,
       status: mapDecisionToStatus(response.decision),
-      coderDisposition: response.summary,
-      coderCommit: latestCommit,
+      coderDisposition: response.summary.trim(),
+      coderCommit: response.decision === 'fixed' ? latestCommit : null,
     };
   });
 

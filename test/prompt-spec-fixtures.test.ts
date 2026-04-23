@@ -139,8 +139,14 @@ test('prompt fixtures cover the known ambiguity regressions from the prompt-spec
   assert.match(renderedRecoveryReviewer, /active parent objective/);
   assert.match(renderedScopeCoderPrimary, /return AUTONOMY_SPLIT_PLAN instead of forcing the bad shape/);
   assert.match(renderedScopeCoderPrimary, /derived plan must use the same Neal-executable contract as a top-level plan/);
-  assert.match(renderedScopeCoderResponse, /explicitly reject\/defer it with rationale/);
+  assert.match(renderedScopeCoderResponse, /not optional to triage\. Respond to every finding exactly once/);
+  assert.match(renderedScopeCoderResponse, /Fix local, concrete, low-expansion non-blocking findings by default/);
+  assert.match(renderedScopeCoderResponse, /Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings/);
   assert.match(renderedScopeReviewer, /authority for meaningful-progress gating/);
+  assert.match(renderedScopeReviewer, /Treat the scope diff as hostile input/);
+  assert.match(renderedScopeReviewer, /Those are convergence signals, not proof that the code is sound/);
+  assert.match(renderedScopeReviewer, /Bias your search toward execute-mode failure classes/);
+  assert.match(renderedScopeReviewer, /Every finding must name the concrete issue/);
   assert.match(renderedScopeReviewer, /active parent objective for meaningful-progress evaluation is scope 5\.2/);
   assert.match(renderedCompletionReviewer, /When you return `continue_execution`, you must provide a non-null `missingWork` object/);
   assert.match(renderedCompletionReviewer, /Use `block_for_operator` when the remaining gap is ambiguous/);

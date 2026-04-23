@@ -196,6 +196,7 @@ export async function runReviewerRound(args: {
       severity: finding.severity,
       files: finding.files,
       claim: finding.claim,
+      evidence: finding.evidence,
       requiredAction: finding.requiredAction,
       roundSummary: structured.summary,
     })),

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { getFinalCompletionContinueExecutionMax } from './config.js';
+import { toResidualReviewDebt } from './review-debt.js';
 import { getCurrentScopeLabel } from './scopes.js';
 import type {
   FinalCompletionPacket,
@@ -9,6 +10,7 @@ import type {
   FinalCompletionTerminalScope,
   OrchestrationState,
   ProgressScope,
+  ResidualReviewDebtItem,
   ScopeMarker,
 } from './types.js';
 
@@ -54,7 +56,12 @@ function renderCompletedScopeSummary(scopes: ProgressScope[]) {
       const commit = scope.finalCommit ?? 'pending';
       const parent = scope.derivedFromParentScope ? ` | parent ${scope.derivedFromParentScope}` : '';
       const blocker = scope.blocker ? ` | blocker: ${scope.blocker}` : '';
-      return `- Scope ${scope.number}: ${scope.result} (${scope.marker}) | commit ${commit}${parent} | ${changedFiles}${blocker}`;
+      const residualDebt = scope.residualReviewDebt?.length
+        ? ` | residual non-blocking debt: ${scope.residualReviewDebt
+            .map((item) => `${item.id} ${item.status}: ${item.claim}`)
+            .join('; ')}`
+        : '';
+      return `- Scope ${scope.number}: ${scope.result} (${scope.marker}) | commit ${commit}${parent} | ${changedFiles}${blocker}${residualDebt}`;
     })
     .join('\n');
 }
@@ -79,6 +86,7 @@ function buildTerminalScopeRecord(
     changedFiles: [...terminalScope.changedFiles],
     reviewRounds: state.rounds.length,
     findings: state.findings.length,
+    residualReviewDebt: toResidualReviewDebt(state.findings),
     archivedReviewPath: terminalScope.archivedReviewPath,
     blocker: null,
     derivedFromParentScope: state.derivedFromScopeNumber !== null ? String(state.derivedFromScopeNumber) : null,
@@ -158,6 +166,31 @@ function summarizeVerification(commands: string[]) {
   ].join('\n');
 }
 
+function collectResidualReviewDebt(scopes: ProgressScope[]): ResidualReviewDebtItem[] {
+  return scopes.flatMap((scope) => scope.residualReviewDebt ?? []);
+}
+
+function summarizeResidualReviewDebt(scopes: ProgressScope[]) {
+  const items = scopes.flatMap((scope) =>
+    (scope.residualReviewDebt ?? []).map((item) => ({
+      scope: scope.number,
+      ...item,
+    })),
+  );
+
+  if (items.length === 0) {
+    return 'No unresolved non-blocking review debt was recorded for accepted scopes.';
+  }
+
+  return items
+    .map((item) => {
+      const files = item.files.length > 0 ? item.files.join(', ') : 'n/a';
+      const disposition = item.coderDisposition ? ` | coder disposition: ${item.coderDisposition}` : '';
+      return `- Scope ${item.scope} ${item.id} (${item.status}) | files: ${files} | ${item.claim} | required: ${item.requiredAction}${disposition}`;
+    })
+    .join('\n');
+}
+
 export async function buildFinalCompletionPacket(args: {
   state: OrchestrationState;
   terminalScope?: FinalCompletionTerminalScope | null;
@@ -171,6 +204,7 @@ export async function buildFinalCompletionPacket(args: {
       .filter((scope) => scope.result === 'accepted')
       .flatMap((scope) => scope.changedFiles),
   );
+  const residualReviewDebt = collectResidualReviewDebt(effectiveScopes);
 
   return {
     planDoc: args.state.planDoc,
@@ -185,6 +219,8 @@ export async function buildFinalCompletionPacket(args: {
     terminalChangedFilesSummary: summarizeChangedFiles(terminalChangedFiles),
     planChangedFiles,
     planChangedFilesSummary: summarizeChangedFiles(planChangedFiles),
+    residualReviewDebt,
+    residualReviewDebtSummary: summarizeResidualReviewDebt(effectiveScopes),
     verificationCommands,
     verificationSummary: summarizeVerification(verificationCommands),
     lastNonEmptyImplementationScope: findLastNonEmptyImplementationScope(effectiveScopes, terminalScope, args.state),

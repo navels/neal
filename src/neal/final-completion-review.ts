@@ -4,13 +4,23 @@ import { dirname, join } from 'node:path';
 import { renderAdjudicationContractLines } from './adjudicator/artifacts.js';
 import { renderInteractiveBlockedRecoveryHistoryLines } from './recovery-artifacts.js';
 import { getCurrentScopeLabel, getExecutionPlanScopeCountForShape, renderScopeProgressSummary } from './scopes.js';
-import type { OrchestrationState } from './types.js';
+import type { OrchestrationState, ProgressScope } from './types.js';
 
 export function getFinalCompletionReviewArtifactPath(runDir: string) {
   return join(runDir, 'FINAL_COMPLETION_REVIEW.md');
 }
 
+function collectResidualReviewDebt(scopes: ProgressScope[]) {
+  return scopes.flatMap((scope) =>
+    (scope.residualReviewDebt ?? []).map((item) => ({
+      scope: scope.number,
+      ...item,
+    })),
+  );
+}
+
 export function renderFinalCompletionReviewMarkdown(state: OrchestrationState) {
+  const residualDebt = collectResidualReviewDebt(state.completedScopes.filter((scope) => scope.result === 'accepted'));
   const lines = [
     '# Final Completion Review',
     '',
@@ -54,6 +64,30 @@ export function renderFinalCompletionReviewMarkdown(state: OrchestrationState) {
   }
 
   lines.push(...renderInteractiveBlockedRecoveryHistoryLines(state.interactiveBlockedRecoveryHistory));
+
+  lines.push('', '## Residual Review Debt');
+  if (residualDebt.length === 0) {
+    lines.push('', 'No unresolved non-blocking review debt was recorded for accepted scopes.');
+  } else {
+    lines.push(
+      '',
+      'The final reviewer should decide whether these accepted-scope leftovers are acceptable residual polish or evidence that execution exited too early.',
+    );
+    for (const item of residualDebt) {
+      const files = item.files.length > 0 ? item.files.join(', ') : 'n/a';
+      lines.push(
+        '',
+        `### Scope ${item.scope} ${item.id}`,
+        `- Status: ${item.status}`,
+        `- Files: ${files}`,
+        `- Claim: ${item.claim}`,
+        `- Evidence: ${item.evidence?.trim() || 'n/a'}`,
+        `- Required action: ${item.requiredAction}`,
+        `- Coder disposition: ${item.coderDisposition ?? 'pending'}`,
+        `- Coder commit: ${item.coderCommit ?? 'pending'}`,
+      );
+    }
+  }
 
   lines.push('', '## Reviewer Verdict');
   if (!state.finalCompletionReviewVerdict) {

@@ -47,9 +47,22 @@ export type ReviewFinding = {
   severity: FindingSeverity;
   files: string[];
   claim: string;
+  evidence?: string | null;
   requiredAction: string;
   status: FindingStatus;
   roundSummary: string;
+  coderDisposition: string | null;
+  coderCommit: string | null;
+};
+
+export type ResidualReviewDebtItem = {
+  id: string;
+  canonicalId: string;
+  status: Extract<FindingStatus, 'open' | 'deferred'>;
+  files: string[];
+  claim: string;
+  evidence: string | null;
+  requiredAction: string;
   coderDisposition: string | null;
   coderCommit: string | null;
 };
@@ -134,6 +147,8 @@ export type FinalCompletionPacket = {
   terminalChangedFilesSummary: string;
   planChangedFiles: string[];
   planChangedFilesSummary: string;
+  residualReviewDebt: ResidualReviewDebtItem[];
+  residualReviewDebtSummary: string;
   verificationCommands: string[];
   verificationSummary: string;
   lastNonEmptyImplementationScope: FinalCompletionReferenceScope | null;
@@ -284,6 +299,7 @@ export type ProgressScope = {
   changedFiles: string[];
   reviewRounds: number;
   findings: number;
+  residualReviewDebt?: ResidualReviewDebtItem[];
   archivedReviewPath: string | null;
   blocker: string | null;
   derivedFromParentScope: string | null;
