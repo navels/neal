@@ -1,0 +1,33 @@
+{
+  "name": "execute scope coder primary prompt",
+  "specId": "scope_coder",
+  "variant": "primary",
+  "builder": "buildScopePrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "progressText": "## Current Scope\n- Scope: 5.2\n- Status: running\n"
+  },
+  "contains": [
+    "action=`split_plan`",
+    "action=`blocked`",
+    "`done`",
+    "`scope_done`",
+    "`derivedPlan`",
+    "## Completion Condition",
+    "`multi_scope`",
+    "`multi_scope_unknown`",
+    "`progress`",
+    "`milestoneTargeted`",
+    "`nextStepUnlocked`",
+    "Before claiming a step is done or a verification passed, confirm the claim against an actual tool or command result from this session, and state plainly when a step is not yet verified.",
+    "Current progress state:"
+  ],
+  "excludes": [
+    "Ordered Derived Scopes",
+    "brand-new top-level initiative",
+    "Use AUTONOMY_SPLIT_PLAN only",
+    "Treat AUTONOMY_BLOCKED as a last resort",
+    "Final line must be exactly one of:",
+    "The final line of your response must still be the terminal marker"
+  ]
+}

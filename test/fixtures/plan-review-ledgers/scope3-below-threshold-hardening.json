@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "label": "scope3-below-threshold-hardening",
+  "description": "Authored Scope 3 boundary case: a verification-hardening finding arriving BELOW the threshold still forces a revision round. Round 1 (< the default threshold of 3) emits a first-occurrence verification-hardening finding (C1) as the only open blocking finding, but because round 1 is below the threshold it is round-forcing, not debt-convertible: disposition request_revision and nothing converts to debt.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified rate-card provenance with an executable oracle."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    }
+  ]
+}

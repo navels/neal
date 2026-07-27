@@ -1,0 +1,130 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without leading v
+        required: true
+        type: string
+      dry_run:
+        description: Run release checks without publishing
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    timeout-minutes: 75
+
+    steps:
+      - name: Guard main branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Publish workflow must run from refs/heads/main; got ${{ github.ref }}."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.18.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm for trusted publishing
+        # Staged publishing requires npm >= 11.15.0.
+        run: |
+          npm install -g npm@^11.15.0
+          npm --version
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release
+        id: validate
+        run: RELEASE_VERSION="${{ inputs.version }}" RELEASE_DRY_RUN="${{ inputs.dry_run }}" pnpm run validate:release
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify package
+        run: node scripts/verify-package.mjs
+
+      - name: Dry-run publish
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          if [ "$(node -p 'require("./package.json").private === true ? "true" : "false"')" = "true" ]; then
+            echo "package.json is private, so npm publish --dry-run is intentionally skipped."
+            exit 0
+          fi
+
+          npm publish --dry-run --access public
+
+      - name: Stage publish
+        if: ${{ inputs.dry_run == false && steps.validate.outputs.npm_published != 'true' }}
+        # The trusted publisher for @navels/neal is configured stage-only: this
+        # step places the version in a staged (not publicly available) state,
+        # and a maintainer reviews and approves it with 2FA — `npm stage list`
+        # / `npm stage view <id>` / `npm stage approve <id>`, or the npmjs.com
+        # UI. A compromised workflow can therefore never ship directly to
+        # `latest`. See docs/release.md.
+        run: |
+          set -o pipefail
+          output_file="$(mktemp)"
+          npm stage publish 2>&1 | tee "$output_file"
+          stage_id="$(sed -nE 's/.*staged with id ([0-9a-f-]+).*/\1/p' "$output_file" | tail -1)"
+
+          {
+            echo "## npm approval required"
+            echo
+            if [ -n "$stage_id" ]; then
+              echo "Stage ID: \`$stage_id\`"
+              echo
+              echo "Review with \`npm stage view $stage_id\` or \`npm stage download $stage_id\`."
+              echo "Approve with \`npm stage approve $stage_id\` or on npmjs.com."
+            else
+              echo "The publish was staged, but the workflow couldn't parse its ID. Run \`npm stage list\` to find it."
+            fi
+            echo
+            echo "This job will wait up to 60 minutes for approval. If it times out, approve the stage and rerun with \`dry_run=false\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for npm approval
+        if: ${{ inputs.dry_run == false }}
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/wait-for-npm-release.mjs
+
+      - name: Finalize GitHub release
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/finalize-release.mjs

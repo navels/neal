@@ -1,0 +1,43 @@
+{
+  "name": "derived-plan response prompt keeps canonical plan sections and response outcomes",
+  "specId": "plan_author",
+  "variant": "response",
+  "builder": "buildCoderPlanResponsePrompt",
+  "args": {
+    "planDoc": "/tmp/DERIVED_PLAN.md",
+    "openFindings": [
+      {
+        "id": "finding-1",
+        "source": "reviewer",
+        "claim": "Split the work into ordered scopes.",
+        "requiredAction": "Replace the vague staged rollout note with a concrete execution queue.",
+        "severity": "blocking",
+        "files": [
+          "/tmp/DERIVED_PLAN.md"
+        ],
+        "roundSummary": "The derived plan remains too vague."
+      }
+    ],
+    "reviewMode": "derived-plan",
+    "parentPlanDoc": "/tmp/PLAN.md",
+    "derivedFromScopeNumber": 3
+  },
+  "contains": [
+    "/tmp/DERIVED_PLAN.md",
+    "scope 3 in parent plan /tmp/PLAN.md",
+    "## Execution Shape",
+    "executionShape: multi_scope",
+    "executionShape: multi_scope_unknown",
+    "## Execution Queue",
+    "## Execution Loop",
+    "## Completion Condition",
+    "`fixed`",
+    "\"id\": \"finding-1\""
+  ],
+  "excludes": [
+    "Ordered Derived Scopes",
+    "emit exactly one terminal marker",
+    "Final line must be exactly",
+    "The final line of your response must still be the terminal marker"
+  ]
+}

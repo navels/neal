@@ -1,0 +1,7 @@
+# Keep both keys so fresh installs approve esbuild's expected postinstall
+# across pnpm 10 and pnpm 11 without pinning contributors to one pnpm version.
+allowBuilds:
+  esbuild: true
+minimumReleaseAge: 0
+onlyBuiltDependencies:
+  - esbuild

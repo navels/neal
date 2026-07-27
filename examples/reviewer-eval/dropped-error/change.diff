@@ -1,0 +1,15 @@
+diff --git a/src/load.ts b/src/load.ts
+index 3da1e73..d7835c0 100644
+--- a/src/load.ts
++++ b/src/load.ts
+@@ -1,4 +1,8 @@
+ export async function loadConfig(read: () => Promise<string>): Promise<string> {
+-  const raw = await read();
+-  return raw.trim();
++  try {
++    const raw = await read();
++    return raw.trim();
++  } catch {
++    return '';
++  }
+ }

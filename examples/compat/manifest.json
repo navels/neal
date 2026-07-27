@@ -1,0 +1,56 @@
+{
+  "fixtures": [
+    {
+      "id": "add-edit-verify",
+      "roles": [
+        "coder",
+        "reviewer"
+      ],
+      "projectDir": "add-edit-verify",
+      "planDoc": "add-edit-verify/PLAN.md",
+      "verifyCommand": "node --test test/add.test.js",
+      "referenceFix": {
+        "file": "src/add.js",
+        "from": "a - b",
+        "to": "a + b"
+      },
+      "reviewer": {
+        "goodDiff": "add-edit-verify/good.diff",
+        "brokenDiff": "add-edit-verify/broken.diff"
+      }
+    },
+    {
+      "id": "sum-grep-edit",
+      "roles": [
+        "coder",
+        "reviewer"
+      ],
+      "projectDir": "sum-grep-edit",
+      "planDoc": "sum-grep-edit/PLAN.md",
+      "verifyCommand": "node --test test/numbers.test.js",
+      "referenceFix": {
+        "file": "src/numbers.js",
+        "from": "(total, n) => total",
+        "to": "(total, n) => total + n"
+      },
+      "reviewer": {
+        "goodDiff": "sum-grep-edit/good.diff",
+        "brokenDiff": "sum-grep-edit/broken.diff"
+      }
+    },
+    {
+      "id": "plan-greeting",
+      "roles": [
+        "planner"
+      ],
+      "projectDir": "plan-greeting",
+      "issuePrompt": "plan-greeting/ISSUE.md",
+      "verifyCommand": "node --test test/greet.test.js",
+      "referenceFix": {
+        "file": "src/greet.js",
+        "from": "`Hello!`",
+        "to": "`Hello, ${name}!`"
+      }
+    }
+  ]
+}

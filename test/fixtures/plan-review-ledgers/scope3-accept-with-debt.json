@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "label": "scope3-accept-with-debt",
+  "description": "Authored Scope 3 positive case for the accept-with-recorded-reservations landing. Rounds 1-2 carry plan-correctness findings (C1, C2) that are fixed before the next round. Round 3 (== the default threshold) introduces a first-occurrence verification-hardening finding (C3) as the only open blocking finding, so the round lands accepted-with-debt: disposition accept_plan and C3 converts to deferred plan-review debt with originRound 3.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan instructs editing a model field that does not exist."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The fixed contract contradicts the fallback branch."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should also pin the already-specified retry-count behavior with an executable oracle."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

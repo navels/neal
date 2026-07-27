@@ -1,0 +1,184 @@
+name: Smoke (live model)
+
+# A real end-to-end planner/coder/reviewer smoke: runs `neal compat` against a
+# cheap, stable OpenRouter model through the `openai-compatible` provider. This
+# catches BEHAVIORAL breaks in the AI-SDK tier (`ai`, `@ai-sdk/openai-compatible`,
+# `zod`) that compile-clean unit tests miss. It does NOT cover the native
+# `@openai/codex-sdk` / `@anthropic-ai/claude-agent-sdk` paths — those need
+# subscription auth that isn't available in CI, so native-SDK bumps still require
+# a local `neal compat` qualification (see docs/maintenance.md).
+#
+# Triggers: dependency-bump PRs (package.json / lockfile), a weekly schedule
+# (catches provider-side drift even with no code change), and manual dispatch.
+# It is intentionally NOT run on every push (cost + LLM nondeterminism).
+
+on:
+  pull_request:
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+      # The compat surface the smoke actually exercises: a criterion or
+      # fixture change must smoke before merge, not on the next Monday cron
+      # (#56).
+      - src/neal/commands/compat.ts
+      - examples/compat/**
+      - scripts/smoke-aggregate.mjs
+      - .github/workflows/smoke.yml
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Override the smoke model slug (probing alternates when the pinned one drifts)"
+        required: false
+        type: string
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: neal compat smoke (openai-compatible / OpenRouter)
+    runs-on: ubuntu-latest
+    # A wedged provider call otherwise runs to GitHub's 6-hour default; the
+    # whole 3-attempt loop normally finishes in ~20 minutes (#56).
+    timeout-minutes: 45
+    env:
+      # Put your OpenRouter key in the repo secret OPENROUTER_API_KEY. neal reads
+      # the key from OPENAI_COMPATIBLE_API_KEY and the endpoint from
+      # OPENAI_COMPATIBLE_BASE_URL (src/neal/config.ts).
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_COMPATIBLE_BASE_URL: https://openrouter.ai/api/v1
+      # Cheap all-roles PASS on the whitelist (docs/compatible-models.md) that
+      # holds up with itself as partner under the per-cell majority verdict.
+      # Used as both candidate and reference so the smoke depends on one model
+      # only; overridable per-dispatch via the `model` input for probing when a
+      # pinned slug drifts. Pin history: gemma-4-26b (drifted 2026-07-14, coder
+      # structured_output 3/3), ling-2.6-1t (systematic reviewer/broken-diff
+      # failure as its own partner), minimax-m2.5 (passed 2026-07-14).
+      SMOKE_MODEL: ${{ inputs.model || 'minimax/minimax-m2.5' }}
+      # Default model for the openai-compatible base config; the compat flags
+      # below override per-role, but provider detection wants a default.
+      OPENAI_COMPATIBLE_MODEL: ${{ inputs.model || 'minimax/minimax-m2.5' }}
+    steps:
+      - name: Guard — skip when no OpenRouter key or on native-SDK PRs
+        id: guard
+        # HEAD_REF via env, never inlined into the script: a branch name is
+        # untrusted input.
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "No OPENROUTER_API_KEY secret present; skipping live smoke."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "${HEAD_REF}" = "renovate/native-agentic-sdks" ]; then
+            # The smoke drives openai-compatible/OpenRouter and never exercises the
+            # native @openai/codex-sdk / @anthropic-ai/claude-agent-sdk adapters
+            # (no subscription auth in CI). Those are qualified locally by
+            # scripts/qualify-sdk.sh, so running the smoke here tests nothing that
+            # changed. Skip it (the job still reports green so a required-check
+            # gate stays satisfied).
+            echo "Native-SDK PR; the smoke does not exercise the native adapters (qualify-sdk.sh does). Skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.18.0
+
+      - name: Enable pnpm
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          corepack enable
+          corepack prepare pnpm@11 --activate
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        if: steps.guard.outputs.run == 'true'
+        run: pnpm build
+
+      # `neal compat` resolves its base config through the same writer-provider
+      # resolver as every other command (docs/compat.md), so the runner needs a
+      # minimal provider config before --model/--reference derivation happens.
+      # The model itself comes from OPENAI_COMPATIBLE_MODEL / the compat flags.
+      - name: Write runner neal config
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          mkdir -p ~/.neal
+          cat > ~/.neal/config.yml <<'EOF'
+          agent:
+            coder:
+              provider: openai-compatible
+            reviewer:
+              provider: openai-compatible
+          EOF
+
+      # Verdict: any fully-green attempt passes immediately. Otherwise a cell
+      # fails the smoke only if it failed in >= 2 of 3 attempts (see
+      # scripts/smoke-aggregate.mjs) — the systematic signal an SDK break
+      # produces — while one-off flakes from a cheap self-referenced model are
+      # absorbed and reported.
+      - name: Live compat smoke (3 tries; per-cell majority verdict)
+        if: steps.guard.outputs.run == 'true'
+        env:
+          NEAL_NOTIFY_BIN: ""
+        run: |
+          set -u
+          for i in 1 2 3; do
+            echo "::group::smoke attempt ${i}/3 (model=${SMOKE_MODEL})"
+            node dist/neal/index.js compat \
+              --model "${SMOKE_MODEL}" --role all \
+              --reference "openai-compatible:${SMOKE_MODEL}" --json \
+              > "smoke-${i}.json" 2> "smoke-${i}.err" || true
+            # Parse the report rather than grep: `neal compat --json` pretty-prints,
+            # so the field is `"overallPass": true` (with a space) and a
+            # `"overallPass":true` grep never matches — which silently forced every
+            # attempt down the majority-verdict path and mislabeled fully-green
+            # attempts as "not fully green".
+            if node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).overallPass === true ? 0 : 1)' "smoke-${i}.json" 2>/dev/null; then
+              echo "Smoke PASS on attempt ${i} (all cells green)."
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "Attempt ${i} not fully green. Per-cell results:"
+            node -e '
+              const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              for (const c of r.cells || []) {
+                const cell = `${c.role}/${c.fixtureId}/${c.diffKind ?? "-"}`;
+                const why = c.pass ? "" : `  (${c.failureMode || "?"})${c.detail ? " " + String(c.detail).replace(/\s+/g, " ").slice(0, 200) : ""}`;
+                console.log(`  ${c.pass ? "PASS" : "FAIL"}  ${cell}${why}`);
+              }
+            ' "smoke-${i}.json" 2>/dev/null \
+              || { echo "  (no parseable report — the attempt crashed; stderr tail:)"; tail -n 8 "smoke-${i}.err" || true; }
+            echo "::endgroup::"
+          done
+          echo "No fully-green attempt; applying per-cell majority verdict."
+          node scripts/smoke-aggregate.mjs smoke-1.json smoke-2.json smoke-3.json
+
+      # Persist the per-attempt compat reports so a flake can be diagnosed after
+      # the fact: each cell's failureMode + detail distinguishes a CI-environment
+      # failure (timeout / provider_failed) from a real model failure
+      # (structured_output / wrong_or_empty_output). Runs on pass or fail.
+      - name: Upload smoke reports
+        if: ${{ always() && steps.guard.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-reports
+          path: |
+            smoke-*.json
+            smoke-*.err
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "label": "issue-16-run2",
+  "source": "tmp/ratchet-corpus/issue-16-run2/2026-07-16T21-30-12-623Z-a7a536b9/REVIEW.md",
+  "description": "Real 5-round top-level plan review distilled from the issue-16 run-2 REVIEW.md ledger. Canonicals C1-C7 each appear in exactly one round, every finding is fixed before the next round, there are zero re-opens, and the review lands accepted at round 5. Per-round open-blocking counts: 2, 1, 2, 2, 0. Baseline (pre-policy) fixture: no findingClass is recorded.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/openai-codex.ts",
+            "src/neal/providers/generic-agentic.ts",
+            "src/neal/run-metrics.ts",
+            "test/openai-codex-provider.test.ts",
+            "test/generic-agentic-provider.test.ts"
+          ],
+          "claimDigest": "Verification does not require pricing assertions on the optional Codex repair and generic-agentic structured-advisor model-threading paths, so cost can be silently undercounted."
+        },
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "scripts/generate-rate-card.ts",
+            "test/provider-pricing.test.ts"
+          ],
+          "claimDigest": "The package-size chat-only fallback contradicts the fixed four-mode generator predicate, so that branch cannot both follow the fallback and pass the mandated transformation/provenance checks."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C1", "decision": "fixed" },
+        { "canonicalId": "C2", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/openai-codex.ts",
+            "src/neal/providers/types.ts",
+            "test/openai-codex-provider.test.ts"
+          ],
+          "claimDigest": "The provider-native structured-advisor consumeCodexAdvisorTurn call site is not covered by a completed-usage test, so an omitted optional model leaves native advisor usage unpriced."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C3", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/openai-compatible.ts",
+            "test/openai-compatible-provider.test.ts"
+          ],
+          "claimDigest": "Step 3 adds a second string model to runChatTurnWithRetry, but callArgs already requires model: LanguageModel; the planned field change is impossible."
+        },
+        {
+          "canonicalId": "C5",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/rate-card.ts",
+            "src/neal/providers/pricing.ts",
+            "test/provider-pricing.test.ts",
+            "test/openai-codex-provider.test.ts",
+            "docs/providers.md"
+          ],
+          "claimDigest": "Conditional published pricing (GPT-5.6 Sol above 272K tokens) is undefined; flat base-rate tests pass while long-context turns are materially underpriced."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C4", "decision": "fixed" },
+        { "canonicalId": "C5", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C6",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/pricing.ts",
+            "test/provider-pricing.test.ts",
+            "docs/providers.md"
+          ],
+          "claimDigest": "The unrestricted last-segment slug fallback lets unlisted slash-prefixed models (e.g. local/gpt-5.5) inherit a listed model's price, violating the never-invent-dollars contract."
+        },
+        {
+          "canonicalId": "C7",
+          "severity": "blocking",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/run-metrics.ts",
+            "test/run-metrics.test.ts"
+          ],
+          "claimDigest": "The plan forbids editing run-metrics.ts, so card-derived costs keep the false 'configured rates' provenance in the generated retrospective."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C6", "decision": "fixed" },
+        { "canonicalId": "C7", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 5,
+      "reviewerFindings": [],
+      "coderDispositions": []
+    }
+  ]
+}

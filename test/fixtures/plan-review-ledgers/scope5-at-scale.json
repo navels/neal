@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "label": "scope5-at-scale",
+  "description": "Authored at-scale demonstration (not corpus-derived): once past the default threshold (3), many verification_hardening findings accumulate as plan-review debt WITHOUT growing the round count. Rounds 1-2 fix plan_correctness findings (C1, C2) to reach the threshold. Rounds 3-4 each co-emit two first-occurrence hardening findings (C3/C4, then C6/C7) that bank as deferred debt on arrival AND one plan_correctness finding (C5, then C8) that forces the round. Round 5 co-emits only two hardening findings (C9, C10), which bank and land the review accepted-with-debt. Across the negotiation SIX hardening asks (C3, C4, C6, C7, C9, C10) convert to debt, yet the round count stays bounded at 5 — every forced revision round was driven by a plan_correctness finding, never by a hardening ask. If each hardening ask had forced its own round, the negotiation would have run at least 6 additional rounds.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["src/neal/config.ts"],
+          "claimDigest": "Verification should pin the already-specified config getter default with an executable oracle."
+        },
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["src/neal/state.ts"],
+          "claimDigest": "Verification should add coverage of the already-specified hydration default path."
+        },
+        {
+          "canonicalId": "C5",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan instructs editing a model field that does not exist."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C5", "decision": "fixed" }]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C6",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["src/neal/review.ts"],
+          "claimDigest": "Verification should assert the rendered debt section stays in sync with the projected debt."
+        },
+        {
+          "canonicalId": "C7",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["src/neal/status.ts"],
+          "claimDigest": "Verification should pin the already-specified status summary counts with an executable oracle."
+        },
+        {
+          "canonicalId": "C8",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The fixed contract contradicts the described fallback branch."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C8", "decision": "fixed" }]
+    },
+    {
+      "round": 5,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C9",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["src/neal/context/reviewer-context.ts"],
+          "claimDigest": "Verification should cover the already-specified inherited-debt context rendering."
+        },
+        {
+          "canonicalId": "C10",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["docs/review-convergence.md"],
+          "claimDigest": "Verification should assert the documented threshold default matches the config default."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

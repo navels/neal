@@ -1,0 +1,38 @@
+{
+  "name": "plan reviewer primary prompt requires explicit execution-shape confirmation",
+  "specId": "plan_reviewer",
+  "variant": "primary",
+  "builder": "buildPlanReviewerPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "round": 2,
+    "reviewMarkdownPath": "/tmp/REVIEW.md"
+  },
+  "contains": [
+    "/tmp/PLAN.md",
+    "Review round: 2.",
+    "`executionShape`",
+    "scope granularity, verification concreteness, and resume safety",
+    "Review the plan independently and look for material problems",
+    "Missing routine implementation detail is not a finding",
+    "concise enough for a person to review",
+    "A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct",
+    "do not require additional implementation or verification to satisfy it",
+    "requested change itself to be wrong while still appearing complete",
+    "Classify every finding with a `findingClass`",
+    "`verification_hardening`",
+    "`plan_correctness`",
+    "/tmp/REVIEW.md"
+  ],
+  "excludes": [
+    "scope 3 in parent plan",
+    "Commit range:",
+    "git diff",
+    "aggregate range",
+    "changed behavior degraded",
+    "If the change removes",
+    "hostile input",
+    "tests that mock away the risky runtime path",
+    "more oracles, more pinning"
+  ]
+}

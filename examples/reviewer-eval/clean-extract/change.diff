@@ -1,0 +1,13 @@
+diff --git a/src/greet.ts b/src/greet.ts
+index 1c1e070..b768208 100644
+--- a/src/greet.ts
++++ b/src/greet.ts
+@@ -1,3 +1,7 @@
++function normalize(name: string): string {
++  return name.trim();
++}
++
+ export function greet(name: string): string {
+-  return 'Hello, ' + name.trim() + '!';
++  return 'Hello, ' + normalize(name) + '!';
+ }

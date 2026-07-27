@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "label": "scope4-cap-hardening-accepts",
+  "description": "Authored Scope 4 cap case: at the round cap the convertible set is class-based (every open hardening finding converts regardless of first-occurrence), so a re-litigated-but-not-reopened hardening point converts instead of failing the run. roundLimit is 4 (default threshold 3). Round 3 banks a first-occurrence hardening finding (C3) on arrival while a co-occurring plan-correctness finding (C4) forces the round. Round 4 (== the cap) re-raises C3 as a SECOND occurrence: pre-cap a repeat occurrence forces a revision round, but at the cap it converts to debt and the review lands accepted-with-debt. C3 spans only rounds 3-4 (two rounds) so the >=3-round reopen convergence block does not fire.",
+  "roundLimit": 4,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        },
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan instructs editing a model field that does not exist."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C4", "decision": "fixed" }]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

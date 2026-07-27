@@ -1,0 +1,36 @@
+{
+  "name": "plan author primary prompt preserves the canonical execution-shape contract",
+  "specId": "plan_author",
+  "variant": "primary",
+  "builder": "buildPlanningPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md"
+  },
+  "contains": [
+    "/tmp/PLAN.md",
+    "`one_shot`",
+    "`multi_scope`",
+    "`multi_scope_unknown`",
+    "## Execution Shape",
+    "## Execution Queue",
+    "## Execution Loop",
+    "## Completion Condition",
+    "### Scope 1: Example scope",
+    "`action`: `ready_for_review`",
+    "`executionShape`",
+    "`planBody`",
+    "smallest human-reviewable plan",
+    "moderate-to-high-level implementation detail",
+    "leave routine implementation discovery to the coder and reviewer",
+    "A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct",
+    "narrow or remove it instead of expanding the implementation or verification scope",
+    "AUTONOMY_DONE",
+    "AUTONOMY_SCOPE_DONE",
+    "AUTONOMY_SPLIT_PLAN"
+  ],
+  "excludes": [
+    "Final line must be exactly one of:",
+    "enumerate the full blast radius",
+    "every consumer of a changed symbol"
+  ]
+}

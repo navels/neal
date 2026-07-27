@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "label": "scope4-cap-stalled-hardening-blocks",
+  "description": "Authored Scope 4 convergence-precedence case: the stalled-window convergence block keeps precedence over the cap conversion, so a stall-tripped hardening finding terminal-blocks at the cap rather than converting. Replayed with review_stuck_window 2 (the test writes a neal.yml). roundLimit is 2 (default threshold 3). Round 1 raises a below-threshold hardening finding (C1) that stays round-forcing and unresolved. Round 2 (== the cap) adds no new findings, so the open-blocking canonical set {C1} is unchanged across the 2-round window: the stall rule fires and the disposition is block_for_operator with the review-stuck non-decreasing reason; C1 is NOT converted to debt.",
+  "roundLimit": 2,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        }
+      ],
+      "coderDispositions": []
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [],
+      "coderDispositions": []
+    }
+  ]
+}

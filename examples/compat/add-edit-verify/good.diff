@@ -1,0 +1,8 @@
+diff --git a/src/add.js b/src/add.js
+index 6946b9a..ee66238 100644
+--- a/src/add.js
++++ b/src/add.js
+@@ -1,2 +1,2 @@
+ // Trivial compat fixture: an arithmetic helper exercised by test/add.test.js.
+-export const add = (a, b) => a - b;
++export const add = (a, b) => a + b;

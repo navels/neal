@@ -1,0 +1,40 @@
+{
+  "name": "execute scope coder response prompt",
+  "specId": "scope_coder",
+  "variant": "response",
+  "builder": "buildCoderResponsePrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "progressText": "## Current Scope\n- Scope: 5.2\n- Status: review-response\n",
+    "verificationHint": "Run the focused regression tests before replying.",
+    "mode": "optional",
+    "openFindings": [
+      {
+        "id": "finding-1",
+        "severity": "non_blocking",
+        "claim": "Consider simplifying the helper naming.",
+        "requiredAction": "Either rename it now or defer with rationale.",
+        "files": [
+          "src/neal/prompts/execute.ts"
+        ],
+        "roundSummary": "Non-blocking cleanup suggestion."
+      }
+    ]
+  },
+  "contains": [
+    "finding-1",
+    "`rejected`",
+    "`deferred`",
+    "outcome=`blocked`",
+    "`derivedPlan`",
+    "## Completion Condition",
+    "`multi_scope`",
+    "`multi_scope_unknown`",
+    "Before claiming a step is done or a verification passed, confirm the claim against an actual tool or command result from this session, and state plainly when a finding is not yet verified."
+  ],
+  "excludes": [
+    "Do not start a new top-level plan",
+    "Ordered Derived Scopes",
+    "action="
+  ]
+}
