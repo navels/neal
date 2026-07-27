@@ -8,7 +8,7 @@
   },
   "author": "Lee Nave",
   "type": "module",
-  "packageManager": "pnpm@11.13.1",
+  "packageManager": "pnpm@11.17.0",
   "homepage": "https://github.com/navels/neal#readme",
   "repository": {
     "type": "git",
@@ -41,7 +41,7 @@
   ],
   "engines": {
     "node": ">=24.18.0",
-    "pnpm": ">=11.13.1"
+    "pnpm": ">=11.17.0"
   },
   "scripts": {
     "build": "rm -rf dist && node node_modules/typescript-7/bin/tsc -p tsconfig.json && chmod +x dist/neal/index.js",
@@ -55,10 +55,10 @@
     "typecheck": "node node_modules/typescript-7/bin/tsc --noEmit -p tsconfig.json && node node_modules/typescript-7/bin/tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.12",
+    "@ai-sdk/openai-compatible": "3.0.14",
     "@anthropic-ai/claude-agent-sdk": "0.3.218",
     "@openai/codex-sdk": "0.145.0",
-    "ai": "7.0.31",
+    "ai": "7.0.37",
     "dotenv": "^17.4.2",
     "yaml": "^2.9.0",
     "zod": "4.4.3"
@@ -70,6 +70,6 @@
     "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "typescript-7": "npm:typescript@^7.0.2",
-    "typescript-eslint": "^8.64.0"
+    "typescript-eslint": "^8.65.0"
   }
 }
