@@ -1,0 +1,104 @@
+# neal runtime configuration template.
+# This file is intentionally fully commented out:
+# - uncomment any setting you want to override for this repository; repo config
+#   takes precedence over ~/.neal/config.yml
+# - put machine-local overrides such as `neal.notify_bin` or role-specific model
+#   choices in ~/.neal/config.yml
+# - run `neal setup` for first-time writer-run provider configuration
+
+# neal:
+#   # Milliseconds between wrapper heartbeat messages on stderr.
+#   # Set to 0 to disable heartbeats entirely.
+#   phase_heartbeat_ms: 60000
+#
+#   # Maximum reviewer rounds before neal blocks on non-converging review.
+#   max_review_rounds: 20
+#
+#   # Consecutive rounds with no reduction in open blocking findings before
+#   # neal treats review as stuck and blocks early.
+#   review_stuck_window: 5
+#
+#   # Milliseconds of inactivity before a coder or reviewer turn times out.
+#   inactivity_timeout_ms: 600000
+#
+#   # Maximum retry attempts for transient API/internal provider failures.
+#   api_retry_limit: 10
+#
+#   # Milliseconds an agent turn may stay silent after starting, with no
+#   # observable progress (no tool use, commands, file changes, or assistant
+#   # text), before neal aborts and retries the turn; once any progress is
+#   # observed, inactivity_timeout_ms governs instead.
+#   agent_turn_startup_timeout_ms: 300000
+#
+#   # Maximum number of times neal retries an agent turn that was aborted for
+#   # startup silence before failing the turn.
+#   agent_turn_retry_limit: 1
+#
+#   # Maximum operator guidance turns allowed during interactive blocked recovery
+#   # before neal requires a terminal disposition.
+#   interactive_blocked_recovery_max_turns: 3
+#
+#   # Maximum number of times final completion review may send execution back
+#   # for more work before neal stops reopening the plan.
+#   final_completion_continue_execution_max: 2
+#
+#   # Optional local notification command. Leave commented to keep
+#   # notifications disabled.
+#   # notify_bin: /absolute/path/to/notify
+#
+# agent:
+#   # Fresh writer-run commands require explicit coder and reviewer providers.
+#   # These commented examples are templates only; run `neal setup` to write
+#   # active provider defaults to ~/.neal/config.yml, or uncomment and edit the
+#   # role settings here for repository-level defaults.
+#   coder:
+#     # Provider for new plan/execute/run workflows.
+#     provider: openai-codex
+#
+#     # Or run the coder against any OpenAI-compatible tool-calling endpoint
+#     # via the providers.openai_compatible block (see docs/providers.md):
+#     # provider: openai-compatible
+#
+#     # Optional default model override for the coder role.
+#     # Leave null to let the provider choose its default model.
+#     model: null
+#
+#     # Optional reasoning-effort override for the coder role.
+#     # Leave null or omit to use the provider default.
+#     # Supported values per provider:
+#     #   openai-codex:     minimal, low, medium, high, xhigh
+#     #   anthropic-claude: low, medium, high, xhigh, max
+#     # An effort value not supported by the configured provider is rejected
+#     # before a run starts.
+#     effort: null
+#
+#   reviewer:
+#     # Provider for the reviewer role.
+#     provider: anthropic-claude
+#
+#     # Optional default model override for the reviewer role.
+#     # Leave null to let the provider choose its default model.
+#     model: null
+#
+#     # Optional reasoning-effort override for the reviewer role.
+#     # Leave null or omit to use the provider default.
+#     # Supported values per provider:
+#     #   openai-codex:     minimal, low, medium, high, xhigh
+#     #   anthropic-claude: low, medium, high, xhigh, max
+#     effort: null
+#
+#   # The planner inherits the coder provider/model/effort unless configured
+#   # explicitly. Uncomment to override the planner independently.
+#   # planner:
+#   #   provider: openai-codex
+#   #   model: null
+#   #   effort: null
+#
+#   # Run headlessly when no operator is available to answer an operator block
+#   # (CI, cron, or a benchmark harness). When true, the execute-mode
+#   # interactive-recovery loop auto-resumes with conservative guidance for a
+#   # bounded number of turns and then fails cleanly, while the final-completion
+#   # and top-level plan-review gates fail cleanly and terminally instead of
+#   # waiting. Verification, authorization, and squash/grading are unchanged.
+#   # The `--unattended` CLI flag overrides this key. Defaults to false.
+#   unattended: false

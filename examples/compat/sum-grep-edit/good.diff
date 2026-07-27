@@ -1,0 +1,12 @@
+diff --git a/src/numbers.js b/src/numbers.js
+index e6677cc..89f58ba 100644
+--- a/src/numbers.js
++++ b/src/numbers.js
+@@ -4,6 +4,6 @@ export const double = (n) => n * 2;
+ 
+ export const negate = (n) => -n;
+ 
+-export const sumAll = (ns) => ns.reduce((total, n) => total, 0);
++export const sumAll = (ns) => ns.reduce((total, n) => total + n, 0);
+ 
+ export const countOf = (ns) => ns.length;

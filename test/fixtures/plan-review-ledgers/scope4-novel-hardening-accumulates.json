@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "label": "scope4-novel-hardening-accumulates",
+  "description": "Authored Scope 4 arrival-conversion case: post-threshold novel verification-hardening findings accumulate as plan-review debt WITHOUT extending the round count. Rounds 1-2 fix plan-correctness findings to reach the default threshold (3). Rounds 3-4 each co-emit a first-occurrence hardening finding (C3, C5) that banks as deferred debt on arrival AND a plan-correctness finding (C4, C6) that forces the round. Round 5 emits only a first-occurrence hardening finding (C7), which banks and lands the review accepted-with-debt. Across rounds 3-5 three hardening asks convert to debt while every revision round was driven by a plan_correctness finding, never by a hardening ask.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        },
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan instructs editing a model field that does not exist."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C4", "decision": "fixed" }]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C5",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should add coverage of the already-specified idle-timeout path."
+        },
+        {
+          "canonicalId": "C6",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The fixed contract contradicts the fallback branch."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C6", "decision": "fixed" }]
+    },
+    {
+      "round": 5,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C7",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified rate-card provenance with an executable oracle."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

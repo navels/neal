@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "label": "scope4-cap-reopened-hardening-blocks",
+  "description": "Authored Scope 4 convergence-precedence case: the >=3-round reopen convergence block keeps precedence over the cap conversion, so a re-opened hardening canonical terminal-blocks at the cap rather than converting. roundLimit is 5 (default threshold 3). Round 3 banks a first-occurrence hardening finding (C3) while a co-occurring plan-correctness finding (Cc) forces the round. Rounds 4 and 5 re-raise C3 (fixed between rounds). By round 5 (== the cap) C3 has appeared as a blocking finding in three distinct rounds (3, 4, 5), so getReopenedCanonical fires and the disposition is block_for_operator with the review-stuck reopened reason; C3 is NOT converted to debt (its latest finding is open).",
+  "roundLimit": 5,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        },
+        {
+          "canonicalId": "Cc",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan instructs editing a model field that does not exist."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "Cc", "decision": "fixed" }]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C3", "decision": "fixed" }]
+    },
+    {
+      "round": 5,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@navels/neal-example-issue-triage-js",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.0",
+  "scripts": {
+    "test": "node --test"
+  }
+}

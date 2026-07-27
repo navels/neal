@@ -1,0 +1,2237 @@
+=== buildFinalCompletionReviewerPrompt#accessMode=no-read#aggregateRange=available#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+The diff inlined below is the source of truth for this review of that aggregate range base000..head000. You have no repository access; judge entirely from the inlined context in this prompt.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Never raise a missing-import or missing-declaration finding from absence in the diff alone — only claim one when the diff itself removes the declaration or adds a new file that lacks it. If you cannot verify such a claim from the inlined context, state the uncertainty instead of asserting a defect.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when the inlined diff gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests in the inlined context that cover the plausible regression surfaces or reason through representative existing flows in the inlined diff at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, reason through the affected existing flows using the inlined context at the level of state transitions and data ownership rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Aggregate diff for range base000..head000
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+
+### Plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic plan body.
+
+=== buildFinalCompletionReviewerPrompt#accessMode=no-read#aggregateRange=available#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+The diff inlined below is the source of truth for this review of that aggregate range base000..head000. You have no repository access; judge entirely from the inlined context in this prompt.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Never raise a missing-import or missing-declaration finding from absence in the diff alone — only claim one when the diff itself removes the declaration or adds a new file that lacks it. If you cannot verify such a claim from the inlined context, state the uncertainty instead of asserting a defect.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when the inlined diff gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests in the inlined context that cover the plausible regression surfaces or reason through representative existing flows in the inlined diff at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, reason through the affected existing flows using the inlined context at the level of state transitions and data ownership rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Aggregate diff for range base000..head000
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+
+### Plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic plan body.
+
+=== buildFinalCompletionReviewerPrompt#accessMode=no-read#aggregateRange=unavailable#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Never raise a missing-import or missing-declaration finding from absence in the diff alone — only claim one when the diff itself removes the declaration or adds a new file that lacks it. If you cannot verify such a claim from the inlined context, state the uncertainty instead of asserting a defect.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when the inlined diff gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests in the inlined context that cover the plausible regression surfaces or reason through representative existing flows in the inlined diff at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, reason through the affected existing flows using the inlined context at the level of state transitions and data ownership rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": null,
+    "headCommit": null,
+    "range": null,
+    "commitSubjects": [],
+    "diffStat": "",
+    "changedFiles": [],
+    "unavailableReason": "no aggregate commit range was resolved"
+  },
+  "finalCommit": null,
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Aggregate review evidence gap
+
+The aggregate diff for this completion review is unavailable: no aggregate commit range was resolved. Treat this as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+
+### Plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic plan body.
+
+=== buildFinalCompletionReviewerPrompt#accessMode=no-read#aggregateRange=unavailable#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Never raise a missing-import or missing-declaration finding from absence in the diff alone — only claim one when the diff itself removes the declaration or adds a new file that lacks it. If you cannot verify such a claim from the inlined context, state the uncertainty instead of asserting a defect.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when the inlined diff gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests in the inlined context that cover the plausible regression surfaces or reason through representative existing flows in the inlined diff at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, reason through the affected existing flows using the inlined context at the level of state transitions and data ownership rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": null,
+    "headCommit": null,
+    "range": null,
+    "commitSubjects": [],
+    "diffStat": "",
+    "changedFiles": [],
+    "unavailableReason": "no aggregate commit range was resolved"
+  },
+  "finalCommit": null,
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Aggregate review evidence gap
+
+The aggregate diff for this completion review is unavailable: no aggregate commit range was resolved. Treat this as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+
+### Plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic plan body.
+
+=== buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+The commit-range diff for that aggregate range base000..head000 is inlined below and is the source of truth for exactly what the aggregate range base000..head000 changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+
+## Inlined commit-range diff from Neal (base000..head000)
+
+You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.
+This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+=== buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+The commit-range diff for that aggregate range base000..head000 is inlined below and is the source of truth for exactly what the aggregate range base000..head000 changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+
+## Inlined commit-range diff from Neal (base000..head000)
+
+You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.
+This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+=== buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+Review that aggregate range base000..head000 directly with your read-only repository tools: use the git_diff tool to see exactly what the aggregate range base000..head000 changed (including deletions and renames), and your read tools to verify the surrounding code. The aggregate range base000..head000 is the source of truth for this review.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+Review that aggregate range base000..head000 directly with your read-only repository tools: use the git_diff tool to see exactly what the aggregate range base000..head000 changed (including deletions and renames), and your read tools to verify the surrounding code. The aggregate range base000..head000 is the source of truth for this review.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": null,
+    "headCommit": null,
+    "range": null,
+    "commitSubjects": [],
+    "diffStat": "",
+    "changedFiles": [],
+    "unavailableReason": "no aggregate commit range was resolved"
+  },
+  "finalCommit": null,
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": null,
+    "headCommit": null,
+    "range": null,
+    "commitSubjects": [],
+    "diffStat": "",
+    "changedFiles": [],
+    "unavailableReason": "no aggregate commit range was resolved"
+  },
+  "finalCommit": null,
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+Review that aggregate range base000..head000 directly with repository tools. The aggregate range base000..head000 is the source of truth for this review.
+Use git commands against the repository, for example: git diff base000..head000, git log --oneline base000..head000, and targeted path diffs or file reads for changed files.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+Review that aggregate range base000..head000 directly with repository tools. The aggregate range base000..head000 is the source of truth for this review.
+Use git commands against the repository, for example: git diff base000..head000, git log --oneline base000..head000, and targeted path diffs or file reads for changed files.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "finalCommit": "head000",
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=unavailable#unattended=false ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": null,
+    "headCommit": null,
+    "range": null,
+    "commitSubjects": [],
+    "diffStat": "",
+    "changedFiles": [],
+    "unavailableReason": "no aggregate commit range was resolved"
+  },
+  "finalCommit": null,
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}
+=== buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=unavailable#unattended=true ===
+Review whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+This is a whole-plan final completion review, not an ordinary last-scope review.
+Compare the completed result against the original plan objectives and the whole-plan completion packet below.
+Evaluate the totality of the work completed for this plan, not just whether each individual scope was previously accepted.
+Your review must answer both of these questions:
+- Are the full plan objectives actually satisfied?
+- Is the aggregate implementation good enough to keep under ordinary code review standards?
+Treat the whole-plan completion claim as hostile input. Try to falsify the aggregate implementation before you accept completion.
+Do not anchor on the coder completion summary, completion packet, verification summaries, or prior per-scope acceptance history when judging whole-plan completion. Those are convergence signals, not proof that the aggregate implementation satisfies the plan.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the aggregate implementation; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.
+If `aggregateReviewContext.unavailableReason` is non-null, treat the missing aggregate range as a completion-review evidence gap rather than proof that the aggregate implementation is correct.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the aggregate implementation.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the aggregate implementation touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the aggregate implementation actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the aggregate implementation.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Treat completion-blocking issues like review findings: each one needs concrete evidence, affected files or runtime behavior, and a required correction.
+Use `continue_execution` only for concrete missing work that is bounded enough for one follow-on scope; use `block_for_operator` for ambiguous or externally constrained gaps.
+Do not turn low-signal style preferences, trivial code-shape preferences, or optional refactors into missing work.
+If the plan is complete aside from low-signal trivia, return `accept_complete` rather than inventing a non-blocking completion concern.
+Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.
+Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.
+Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.
+When you return any other action, `missingWork` must be null.
+
+Squash commit message rules:
+- `squashCommitMessage` is project-facing Git history for human readers.
+- Use `squashCommitMessage` only for `accept_complete`; when you return any non-accept action, set `squashCommitMessage` to null.
+- For `accept_complete`, provide a non-null object with one concise project-facing `subject` and 2 to 5 high-level `bullets`.
+- Do not mention plan paths, markdown plan filenames, temporary run paths, scope-numbered or per-scope wording, final cleanup, Neal mechanics, provider process, or reviewer process.
+- Summarize the code or product behavior change, not the plan document.
+- Valid example: subject "Persist final completion review failures"; bullets ["Mark invalid verdicts failed", "Record phase error events"].
+- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].
+
+Coder whole-plan completion summary:
+{
+  "planGoalSatisfied": false,
+  "whatChangedOverall": "Canonical render matrix pinned across prompt specs.",
+  "verificationSummary": "pnpm typecheck",
+  "remainingKnownGaps": [
+    "One documentation pass remains."
+  ]
+}
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": null,
+    "headCommit": null,
+    "range": null,
+    "commitSubjects": [],
+    "diffStat": "",
+    "changedFiles": [],
+    "unavailableReason": "no aggregate commit range was resolved"
+  },
+  "finalCommit": null,
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}

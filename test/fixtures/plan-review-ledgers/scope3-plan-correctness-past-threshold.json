@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "label": "scope3-plan-correctness-past-threshold",
+  "description": "Authored co-occurrence case: a plan-correctness finding surfacing past the threshold still forces a revision round (the honest non-shortening guarantee). Rounds 1-2 fix earlier findings; round 3 (== threshold) co-emits a first-occurrence verification-hardening finding (C3) AND a plan-correctness finding (C4). Because a round-forcing plan_correctness finding remains open, the round does NOT land accepted-with-debt (disposition request_revision). Under the Scope 4 arrival-time conversion the co-occurring first-occurrence hardening finding (C3) is still banked as deferred plan-review debt on arrival, while C4 keeps the round forced.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should add coverage of the already-specified idle-timeout path."
+        },
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan directs an edit to a consumer that is explicitly out of scope, producing false provenance."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C3", "decision": "fixed" },
+        { "canonicalId": "C4", "decision": "fixed" }
+      ]
+    }
+  ]
+}

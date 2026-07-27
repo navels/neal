@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "label": "scope4-cap-plan-correctness-blocks",
+  "description": "Authored Scope 4 cap case: at the round cap any open plan-correctness finding terminal-blocks the run, and a co-occurring hardening finding is NOT converted (the run fails rather than banking debt). roundLimit is 3 (default threshold 3). Rounds 1-2 fix plan-correctness findings. Round 3 (== the cap) co-emits a hardening finding (C3) and a plan-correctness finding (C4); because a round-forcing plan_correctness finding remains open at the cap, the disposition is block_for_operator with the max-rounds reason and nothing converts to debt.",
+  "roundLimit": 3,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        },
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan directs an edit to a consumer that is explicitly out of scope, producing false provenance."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

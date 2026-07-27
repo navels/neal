@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "label": "scope5-negative-control",
+  "description": "Authored negative control: the policy must NOT wave through a genuine plan_correctness defect just because refinement has passed the round threshold. Rounds 1-3 each surface and fix a distinct plan_correctness finding (C1, C2, C3), carrying the negotiation past the default threshold (3). Round 4 surfaces a genuine first-occurrence plan_correctness defect (C4) — an impossible/contradictory instruction, not a verification-hardening ask. Because a round-forcing plan_correctness blocker is open past the threshold, the round is NOT eligible for the accept-with-debt landing: the disposition stays request_revision (four forced rounds), the run does not accept, and nothing is converted to debt (finalPlanReviewDebt is empty). Contrast the all-hardening-tail fixture, whose post-threshold tail carries only verification_hardening findings and lands accepted-with-debt.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan omits an execution-queue section required by its declared shape."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan directs an edit to a consumer it explicitly places out of scope."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C3", "decision": "fixed" }]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md", "src/neal/providers/openai-compatible.ts"],
+          "claimDigest": "The plan instructs adding a second string model to a call site whose args already require a LanguageModel; the field change is impossible."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}

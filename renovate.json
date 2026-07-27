@@ -1,0 +1,115 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "rangeStrategy": "bump",
+  "platformAutomerge": false,
+  "packageRules": [
+    {
+      "description": "AI-SDK tier stays exact-pinned (range strategy only; merge behavior comes from the buckets below).",
+      "matchPackageNames": [
+        "ai",
+        "@ai-sdk/openai-compatible",
+        "zod"
+      ],
+      "rangeStrategy": "pin"
+    },
+    {
+      "description": "Bucket 1 — weekly non-major updates: everything except the native agentic SDKs, grouped into ONE weekly PR that auto-merges once CI (including the live OpenRouter smoke, which runs on every package.json/lockfile PR) is green, after a soak. See docs/maintenance.md.",
+      "matchPackageNames": [
+        "!@openai/codex-sdk",
+        "!@anthropic-ai/claude-agent-sdk"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "groupName": "weekly non-major updates",
+      "automerge": true,
+      "automergeType": "pr",
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Bucket 3a — library majors (npm packages): every npm major except the native agentic SDKs, grouped into one monthly PR for a dedicated review sitting. A major can change behavior beyond what the smoke exercises, and some (e.g. a TypeScript or `ai` major) need code adaptation. See docs/maintenance.md.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "!@openai/codex-sdk",
+        "!@anthropic-ai/claude-agent-sdk"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "library major updates",
+      "schedule": [
+        "before 6am on the first day of the month"
+      ],
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "needs-review"
+      ]
+    },
+    {
+      "description": "typescript (the plain dependency, not the typescript-7 alias) is pinned to ^6.0.3 on purpose for typescript-eslint's parser, which crashes on load against TypeScript 7's package (no classic compiler API exported). Do not propose a major bump here until typescript-eslint supports TS7 (typescript-eslint#12518, tracked in #10940) — see docs/maintenance.md. typescript-7 is unaffected by this rule and keeps updating normally.",
+      "matchDepNames": [
+        "typescript"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Bucket 3b — GitHub Actions majors: their own monthly PR, separate from the library majors, because an action major never needs code adaptation — review and merge on green CI. Not auto-merged: a major action bump can still change behavior (e.g. upload-artifact's hidden-files change).",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "github-actions major updates",
+      "schedule": [
+        "before 6am on the first day of the month"
+      ],
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "needs-review"
+      ]
+    },
+    {
+      "description": "Bucket 2 — native agentic SDKs (subscription-authenticated adapters): exact pins, ONE grouped PR, NEVER auto-merge — CI cannot exercise these paths (no subscription auth in CI). Opens immediately after the 3-day soak (schedule 'at any time' overrides the weekly default) since these behavior-defining deps are the ones worth acting on fastest, and the PR waits for a human either way. Qualify from any checkout with authenticated Claude/Codex CLIs: scripts/qualify-sdk.sh <pr-number> (qualifies every bumped adapter in the PR); the live smoke is skipped on this PR because it does not exercise the native adapters. See docs/maintenance.md.",
+      "matchPackageNames": [
+        "@openai/codex-sdk",
+        "@anthropic-ai/claude-agent-sdk"
+      ],
+      "rangeStrategy": "pin",
+      "groupName": "native agentic SDKs",
+      "automerge": false,
+      "minimumReleaseAge": "3 days",
+      "schedule": [
+        "at any time"
+      ],
+      "labels": [
+        "dependencies",
+        "agentic-sdk",
+        "needs-qualification"
+      ],
+      "prBodyNotes": [
+        ":warning: Behavior-defining native SDKs — do not merge on green CI alone. From a checkout with authenticated Claude/Codex CLIs, run `scripts/qualify-sdk.sh <pr-number>`: it runs the full suite plus a live `neal compat --role all` pass-through on every bumped adapter, posts the matrices here, and approves on PASS. Urgent bumps (e.g. a fix neal needs today) may bypass the soak with a manual PR. See docs/maintenance.md."
+      ]
+    }
+  ]
+}

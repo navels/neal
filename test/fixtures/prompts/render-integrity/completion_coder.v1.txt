@@ -1,0 +1,68 @@
+=== buildFinalCompletionSummaryPrompt ===
+Summarize whether the execute-mode plan at /tmp/PLAN.md is complete as a whole.
+
+Before writing the summary, review the current repository state, the plan document, and the completion packet below.
+Return only JSON that matches the required schema.
+Return the final answer only as the required structured output object, not as prose or markdown.
+Defer exact output framing to the active structured-output transport; do not add your own output-format constraints.
+Keep the response compact and auditable rather than essay-style.
+Use `planGoalSatisfied` to state whether the plan goal is satisfied overall.
+Use `whatChangedOverall` to summarize the completed work across the whole plan, not just the last scope.
+Use `verificationSummary` to summarize the completion evidence that actually ran.
+Before claiming a step is done or a verification passed, confirm the claim against an actual tool or command result from this session, and do not claim verification that did not actually run.
+Use `remainingKnownGaps` for any known missing work, regressions, quality concerns, testing gaps, risks, or omissions that would make the plan not fully complete.
+Do not contradict yourself:
+- if `planGoalSatisfied` is `true`, `remainingKnownGaps` must be empty
+- if `remainingKnownGaps` is non-empty, `planGoalSatisfied` must be `false`
+
+Whole-plan completion packet:
+{
+  "executionShape": "multi_scope",
+  "currentScopeLabel": "6",
+  "acceptedScopeRecordCount": 5,
+  "blockedScopeCount": 0,
+  "scopeAccountingSummary": "5 accepted top-level records",
+  "verificationOnlyCompletion": false,
+  "aggregateReviewContext": {
+    "baseCommit": "base000",
+    "headCommit": "head000",
+    "range": "base000..head000",
+    "commitSubjects": [
+      "head000 canonical render matrix"
+    ],
+    "diffStat": " src/example.ts | 2 +-",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "unavailableReason": null
+  },
+  "completedScopeSummary": "1 accepted; 2 accepted",
+  "terminalChangedFilesSummary": "src/example.ts",
+  "planChangedFilesSummary": "src/example.ts",
+  "verificationCommandResults": [],
+  "verificationSummary": "pnpm typecheck",
+  "lastNonEmptyImplementationScope": {
+    "number": "5",
+    "finalCommit": "head000",
+    "commitSubject": "canonical render matrix",
+    "changedFiles": [
+      "src/example.ts"
+    ],
+    "archivedReviewPath": "/tmp/REVIEW-5.md"
+  },
+  "continueExecutionCount": 0,
+  "continueExecutionMax": 2
+}
+
+If the completion is verification-only, say so directly in `whatChangedOverall` or `remainingKnownGaps` instead of pretending there was a terminal implementation diff.
+
+Last non-empty implementation scope reference:
+{
+  "number": "5",
+  "finalCommit": "head000",
+  "commitSubject": "canonical render matrix",
+  "changedFiles": [
+    "src/example.ts"
+  ],
+  "archivedReviewPath": "/tmp/REVIEW-5.md"
+}

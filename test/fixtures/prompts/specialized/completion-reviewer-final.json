@@ -1,0 +1,88 @@
+{
+  "name": "final completion reviewer prompt",
+  "specId": "completion_reviewer",
+  "variant": "final_completion",
+  "builder": "buildFinalCompletionReviewerPrompt",
+  "args": {
+    "planDoc": "/tmp/PLAN.md",
+    "packet": {
+      "executionShape": "multi_scope",
+      "currentScopeLabel": "6",
+      "acceptedScopeCount": 5,
+      "blockedScopeCount": 0,
+      "verificationOnlyCompletion": false,
+      "finalCommit": "abc123",
+      "aggregateReviewContext": {
+        "baseCommit": "base123",
+        "headCommit": "abc123",
+        "range": "base123..abc123",
+        "commitSubjects": [
+          "abc123 tighten prompt-spec fixtures"
+        ],
+        "diffStat": " src/neal/prompts/specialized.ts | 12 ++++++++++++",
+        "changedFiles": [
+          "src/neal/prompts/specialized.ts"
+        ],
+        "unavailableReason": null
+      },
+      "completedScopeSummary": [
+        "1 accepted",
+        "2 accepted"
+      ],
+      "terminalChangedFilesSummary": [
+        "src/neal/prompts/execute.ts"
+      ],
+      "planChangedFilesSummary": [
+        "src/neal/prompts/execute.ts",
+        "src/neal/prompts/specs.ts"
+      ],
+      "verificationSummary": [
+        "pnpm typecheck",
+        "tsx --test test/prompt-spec-fixtures.test.ts"
+      ],
+      "lastNonEmptyImplementationScope": {
+        "number": "5",
+        "marker": "AUTONOMY_SCOPE_DONE",
+        "result": "accepted",
+        "baseCommit": "base123",
+        "finalCommit": "head456",
+        "commitSubject": "tighten prompt-spec fixtures",
+        "changedFiles": [
+          "src/neal/prompts/specs.ts"
+        ],
+        "reviewRounds": 1,
+        "findings": 0,
+        "meaningfulProgress": null,
+        "createdAt": "2026-04-17T00:00:00.000Z",
+        "completedAt": "2026-04-17T00:05:00.000Z",
+        "archivedReviewPath": "/tmp/REVIEW-5.md"
+      },
+      "continueExecutionCount": 0,
+      "continueExecutionMax": 2
+    },
+    "summary": {
+      "planGoalSatisfied": false,
+      "whatChangedOverall": "Planning, execute, and specialized prompt specs were migrated into dedicated prompt modules.",
+      "verificationSummary": "pnpm typecheck; tsx --test test/prompt-spec-fixtures.test.ts",
+      "remainingKnownGaps": [
+        "Completion reviewer contract wording still needs one final pass."
+      ]
+    },
+    "scratchDir": "/tmp/repo/.neal/runs/run-123/scratch/final-completion-review"
+  },
+  "contains": [
+    "base123..abc123",
+    "Temporary verification scratch directory: /tmp/repo/.neal/runs/run-123/scratch/final-completion-review",
+    ".neal/runs/",
+    "/scratch/",
+    "`accept_complete`",
+    "`continue_execution`",
+    "`block_for_operator`",
+    "`missingWork`",
+    "Squash commit message rules:",
+    "`squashCommitMessage`"
+  ],
+  "excludes": [
+    "Ordered Derived Scopes"
+  ]
+}

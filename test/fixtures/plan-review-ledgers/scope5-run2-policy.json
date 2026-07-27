@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "label": "scope5-run2-policy",
+  "source": "tmp/ratchet-corpus/issue-16-run2/2026-07-16T21-30-12-623Z-a7a536b9/REVIEW.md",
+  "description": "The real issue-16 run-2 ledger (same 5 rounds, canonicals C1-C7, files/claims as run2-issue-16.json), now with each canonical's faithfully assigned findingClass and a one-line classRationale recorded per finding. Classes: C1/C3 verification_hardening (they ask to strengthen coverage of already-specified pricing paths); C2/C4/C5/C6/C7 plan_correctness (a fixed-contract contradiction, an impossible model-field edit, an undefined-pricing wrong-output defect, an unrestricted-slug-fallback invented-price defect, and an excluded-consumer false-provenance defect). Genuine plan_correctness defects surface at rounds 1 (C2), 3 (C4, C5), and 4 (C6, C7), so those rounds stay forced and the ledger does NOT land early: the disposition sequence is four request_revision rounds then accept_plan at round 5, exactly as the baseline recorded. The policy honestly does not shorten a negotiation that surfaced real defects. With C6 correctly classified plan_correctness, this policy fixture reproduces the baseline's per-round open-blocking canonical counts exactly — 2, 1, 2, 2, 0 — because C6 enters round 4's open-blocking set alongside C7, is presented to the coder, and is fixed rather than banked as debt (round 4's coderDispositions therefore list both C6 and C7). Every finding is fixed and the accepted plan carries NO plan-review debt: no first-occurrence verification_hardening finding ever survives past the threshold unfixed, so nothing converts. classRationale is a documentary field the replay loader ignores.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "classRationale": "Asks that verification REQUIRE pricing assertions on the optional Codex-repair and generic-agentic advisor model-threading paths; the plan's approach is sound, only its verification coverage of already-specified paths is under-specified.",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/openai-codex.ts",
+            "src/neal/providers/generic-agentic.ts",
+            "src/neal/run-metrics.ts",
+            "test/openai-codex-provider.test.ts",
+            "test/generic-agentic-provider.test.ts"
+          ],
+          "claimDigest": "Verification does not require pricing assertions on the optional Codex repair and generic-agentic structured-advisor model-threading paths, so cost can be silently undercounted."
+        },
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "classRationale": "The package-size chat-only fallback contradicts the fixed four-mode generator predicate: a contradictory instruction the plan cannot satisfy, not a coverage gap.",
+          "files": [
+            ".neal/PLAN.md",
+            "scripts/generate-rate-card.ts",
+            "test/provider-pricing.test.ts"
+          ],
+          "claimDigest": "The package-size chat-only fallback contradicts the fixed four-mode generator predicate, so that branch cannot both follow the fallback and pass the mandated transformation/provenance checks."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C1", "decision": "fixed" },
+        { "canonicalId": "C2", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "classRationale": "Asks for a completed-usage test covering the native structured-advisor consumeCodexAdvisorTurn call site; strengthens verification of already-specified behavior without asserting the plan builds the wrong thing.",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/openai-codex.ts",
+            "src/neal/providers/types.ts",
+            "test/openai-codex-provider.test.ts"
+          ],
+          "claimDigest": "The provider-native structured-advisor consumeCodexAdvisorTurn call site is not covered by a completed-usage test, so an omitted optional model leaves native advisor usage unpriced."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C3", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "classRationale": "The plan directs adding a second string model to runChatTurnWithRetry, but callArgs already requires model: LanguageModel; the planned field change is impossible (a contradictory instruction).",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/openai-compatible.ts",
+            "test/openai-compatible-provider.test.ts"
+          ],
+          "claimDigest": "Step 3 adds a second string model to runChatTurnWithRetry, but callArgs already requires model: LanguageModel; the planned field change is impossible."
+        },
+        {
+          "canonicalId": "C5",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "classRationale": "Undefined conditional published pricing above the token threshold yields materially WRONG (under-)prices for long-context turns while flat base-rate tests pass green: the plan would build a wrong/unverifiable pricing behavior, not merely an under-tested correct one.",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/rate-card.ts",
+            "src/neal/providers/pricing.ts",
+            "test/provider-pricing.test.ts",
+            "test/openai-codex-provider.test.ts",
+            "docs/providers.md"
+          ],
+          "claimDigest": "Conditional published pricing (GPT-5.6 Sol above 272K tokens) is undefined; flat base-rate tests pass while long-context turns are materially underpriced."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C4", "decision": "fixed" },
+        { "canonicalId": "C5", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 4,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C6",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "classRationale": "The unrestricted last-segment slug fallback makes the plan mis-price unlisted slash-prefixed models by inheriting a listed model's dollar rate — inventing prices the rate card never defines, a wrong/unverifiable output that violates the never-invent-dollars contract. The required correction RESTRICTS runtime pricing behavior (the fallback must not resolve unlisted models), so this is a genuine plan-correctness defect, not merely stronger verification of an already-correct approach. It enters round 4's open-blocking set alongside C7, forces the round, and is fixed — so it lands as no plan-review debt.",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/providers/pricing.ts",
+            "test/provider-pricing.test.ts",
+            "docs/providers.md"
+          ],
+          "claimDigest": "The unrestricted last-segment slug fallback lets unlisted slash-prefixed models (e.g. local/gpt-5.5) inherit a listed model's price, violating the never-invent-dollars contract."
+        },
+        {
+          "canonicalId": "C7",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "classRationale": "The plan forbids editing run-metrics.ts, so card-derived costs keep a FALSE 'configured rates' provenance in the generated retrospective: the plan would produce a wrong/unverifiable artifact (false provenance) given its own excluded-consumer constraint.",
+          "files": [
+            ".neal/PLAN.md",
+            "src/neal/run-metrics.ts",
+            "test/run-metrics.test.ts"
+          ],
+          "claimDigest": "The plan forbids editing run-metrics.ts, so card-derived costs keep the false 'configured rates' provenance in the generated retrospective."
+        }
+      ],
+      "coderDispositions": [
+        { "canonicalId": "C6", "decision": "fixed" },
+        { "canonicalId": "C7", "decision": "fixed" }
+      ]
+    },
+    {
+      "round": 5,
+      "reviewerFindings": [],
+      "coderDispositions": []
+    }
+  ]
+}

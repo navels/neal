@@ -1,0 +1,45 @@
+{
+  "description": "Labeled reviewer-recall eval fixtures. Each fixture is a small before-tree (base/) plus a change.diff; defective fixtures plant a known defect in a labeled file, clean fixtures are behavior-preserving. scripts/eval-reviewer.mjs applies each diff in a throwaway repo, runs the configured reviewer, and scores its findings against these labels. This is a starter set — add fixtures by following the same shape.",
+  "fixtures": [
+    {
+      "id": "off-by-one",
+      "kind": "defective",
+      "diff": "off-by-one/change.diff",
+      "baseDir": "off-by-one/base",
+      "expectedFindings": [
+        {
+          "file": "src/paginate.ts",
+          "defectClass": "off-by-one",
+          "description": "The page slice end is start + size + 1, so each page overruns into the next page's first item."
+        }
+      ]
+    },
+    {
+      "id": "dropped-error",
+      "kind": "defective",
+      "diff": "dropped-error/change.diff",
+      "baseDir": "dropped-error/base",
+      "expectedFindings": [
+        {
+          "file": "src/load.ts",
+          "defectClass": "swallowed-error",
+          "description": "A bare catch turns any read failure into an empty config string, hiding the error from the caller."
+        }
+      ]
+    },
+    {
+      "id": "clean-extract",
+      "kind": "clean",
+      "diff": "clean-extract/change.diff",
+      "baseDir": "clean-extract/base",
+      "expectedFindings": []
+    },
+    {
+      "id": "clean-doc",
+      "kind": "clean",
+      "diff": "clean-doc/change.diff",
+      "baseDir": "clean-doc/base",
+      "expectedFindings": []
+    }
+  ]
+}

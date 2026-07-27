@@ -1,0 +1,2136 @@
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=false#mode=derived-plan#unattended=false ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Parent plan document content (/tmp/PARENT_PLAN.md)
+
+# Parent Plan
+Deterministic parent plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=false#mode=derived-plan#unattended=true ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Parent plan document content (/tmp/PARENT_PLAN.md)
+
+# Parent Plan
+Deterministic parent plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=false#mode=plan#unattended=false ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=false#mode=plan#unattended=true ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=true#mode=derived-plan#unattended=false ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Parent plan document content (/tmp/PARENT_PLAN.md)
+
+# Parent Plan
+Deterministic parent plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=true#mode=derived-plan#unattended=true ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Parent plan document content (/tmp/PARENT_PLAN.md)
+
+# Parent Plan
+Deterministic parent plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=true#mode=plan#unattended=false ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=no-read#authoredOneShot=true#mode=plan#unattended=true ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the inlined context, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Prior review history and coder responses are inlined below; consider them before finalizing findings.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. All required review context is inlined into this prompt; you have no access to the cited run artifacts or the checkout.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content (and any parent plan content) is inlined below; finalize findings entirely from the inlined context in this prompt.
+
+## Inlined review context from Neal
+
+You do not have repository, file, shell, or tool access of any kind for this review.
+Neal has inlined every artifact you need below. The inlined sections are the source of truth for this review; judge entirely from this prompt.
+Do not report the lack of repository access as a finding; it is expected for this reviewer configuration.
+
+### Reviewed plan document content (/tmp/PLAN.md)
+
+# Plan
+Deterministic reviewed plan body.
+
+
+### Prior review history (REVIEW.md content)
+
+(no prior review history)
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=false#mode=derived-plan#unattended=false ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=false#mode=derived-plan#unattended=true ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=false#mode=plan#unattended=false ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=false#mode=plan#unattended=true ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=true#mode=derived-plan#unattended=false ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=true#mode=derived-plan#unattended=true ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=true#mode=plan#unattended=false ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=true#mode=plan#unattended=true ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use your read-only file tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=false#mode=derived-plan#unattended=false ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=false#mode=derived-plan#unattended=true ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=false#mode=plan#unattended=false ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=false#mode=plan#unattended=true ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=true#mode=derived-plan#unattended=false ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=true#mode=derived-plan#unattended=true ===
+Review the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity when the derived plan does not safely replace the abandoned scope shape, lacks concrete ordered scopes, leaves blast radius too broad, or does not define adequate verification.
+Reject vague replans such as "break it into smaller chunks" when they do not define the actual replacement sequence in the canonical Neal-executable plan shape.
+Also use blocking severity if the proposal appears to be a real blocker disguised as replanning rather than a safer in-repo execution shape.
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on whether the derived plan actually addresses the failure mode, is concrete enough to execute, reduces blast radius, and is truly not a blocker.
+The derived plan should preserve the same target while replacing only the invalid scope shape, and it must use the same canonical Neal-executable shape contract as a top-level plan. For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape. A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans. Reviewers must require the exact section set for the declared shape: `multi_scope` uses `## Execution Queue` and forbids `## Execution Loop` and `## Completion Condition`; `multi_scope_unknown` uses `## Execution Loop` plus `## Completion Condition` and forbids `## Execution Queue`; `one_shot` forbids all three orchestration sections.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+
+Parent plan content from Neal (/tmp/PARENT_PLAN.md):
+```markdown
+# Parent Plan
+Deterministic parent plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=true#mode=plan#unattended=false ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.
+=== buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=true#mode=plan#unattended=true ===
+Review the plan document at /tmp/PLAN.md.
+Review round: 1.
+
+Treat the plan-readiness claim as hostile input. Try to falsify whether the plan is actually Neal-executable before you accept it as ready.
+Do not anchor on the plan narrative, prior review history, or operator framing when judging plan readiness. Those are convergence signals, not proof that the plan will guide safe execution.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the planned behavior.
+Check whether test coverage for the planned behavior is missing or degraded. If the plan lacks, weakens, or fails to require meaningful coverage for the riskiest planned behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the planned behavior insufficiently protected.
+
+Produce only structured review findings.
+This is a read-only plan review. Do not edit files, create scratch artifacts, stage changes, commit, or otherwise mutate the repository.
+The coder owns the plan document and must declare exactly one execution shape inside it: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+You must confirm the declared execution shape and echo it in the required `executionShape` field of your structured output.
+Raise a blocking finding when the declared shape is missing, internally inconsistent, or not safe for neal execution.
+Assess execution readiness explicitly across these dimensions: scope granularity, verification concreteness, and resume safety.
+Try to falsify whether the plan would actually guide safe execution before accepting it as ready.
+Check whether the proposed scopes, sequencing, and verification would catch the riskiest failure modes instead of merely describing plausible work.
+Treat vague verification, hidden state assumptions, broad blast radius, and missing resume boundaries as evidence against plan readiness.
+When you raise a blocking finding about execution readiness, name the failing dimension directly in the claim or required action.
+Every finding must rest on concrete evidence, not assumption. Any claim about the repository’s current state — whether a file, symbol, export, or test node id exists, or whether a verification command collects or passes — must be verified by direct inspection (read the file, search the tree, collect the tests) and cite what you found; any claim about the plan must quote the exact plan text it rests on. If you cannot verify a claim, state the uncertainty instead of raising it as blocking.
+Never infer the repository’s current state from what the plan proposes to change. A plan proposing to add a file, class, or test is not evidence that it already exists; a plan introducing a new abstraction is not evidence that existing code or tests are already organized around it. Confirm presence or absence against the actual tree before asserting it.
+Scope granularity means boundaries stay narrow, auditable, and avoid accidental widening.
+Verification concreteness means the plan uses executable verification commands or deterministic repo-derived checks rather than vague instructions.
+Resume safety means scopes have clean stopping points, understandable ordering, and no hidden staging assumptions.
+A plan should generally be forced to `multi_scope` when it changes orchestration behavior, resume semantics, persistence/schema shape, multiple independent subsystems, or naturally staged rollout checkpoints.
+A plan should generally be forced to `multi_scope_unknown` when the work is an intentionally open-ended recurring loop that still executes one bounded scope per cycle and ends only when a stated completion condition becomes true.
+Use blocking severity for missing information or plan structure that would prevent neal from executing safely.
+Treat leftover planning-task scaffolding as blocking. A final plan must not still describe how to revise itself, how to run `neal plan`, or how to validate the planning task.
+Examples of blocking leftover scaffolding include planning-mode execution headers, planner-only required-input sections, "Verification For This Planning Task", and "Completion Criteria For This Planning Task".
+Use non_blocking severity for clarity improvements that do not block execution.
+Classify every finding with a `findingClass` of either `plan_correctness` or `verification_hardening`.
+A `verification_hardening` finding only demands strengthening how the plan will be verified — more oracles, more pinning, or more coverage of already-specified behavior — without asserting that the plan builds the wrong thing or an unverifiable thing.
+A `plan_correctness` finding means the plan would build the wrong thing, build an unverifiable thing, or contains an impossible or self-contradictory instruction. When you are unsure which class applies, use `plan_correctness`.
+Focus on plan quality for refinement: scopes that need more detail, acceptance criteria that are vague or missing, ambiguous boundaries, hidden assumptions about the repository, weak sequencing, and non-executable verification. Call out plan steps that are avoidably ambiguous or redundant when the current repository already provides a more specific answer, such as existing function names, current exports, or barrel re-export behavior.
+Focus on whether the plan is now a clean future execution plan, explicit about single-scope vs repeated-scope behavior, and clear about verification and completion.
+If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
+Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
+This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.
+
+The reviewed plan content is inlined below; use repository tools to inspect directly referenced companion docs and repository source files before finalizing findings.
+
+Reviewed plan content from Neal (/tmp/PLAN.md):
+```markdown
+# Plan
+Deterministic reviewed plan body.
+
+```
+Use the inlined plan content above as the authoritative plan text for plan-readiness review. Repository inspection should focus on validating referenced files, symbols, assumptions, and companion docs.

@@ -1,0 +1,84 @@
+Continue autonomously on the task described in /tmp/PLAN.md.
+
+Do not edit or stage wrapper-owned artifacts such as review files under .neal/runs/, PLAN_PROGRESS.md, plan-progress.json, or .neal/*.
+Address the currently open review findings provided below.
+You are still working on the same scope. Do not start a new scope.
+Stay on the current implementation scope described by the inlined progress state below.
+Run the focused regression tests before replying.
+Make code changes if needed, run the most relevant verification for the fixes you make, and create a real git commit if you changed code.
+After you have made the necessary commit and run the relevant verification, stop using tools. Your next response must return the structured outcome with no additional shell commands such as git show, git status, or extra exploratory tests.
+Do not keep proving the same fix after you have enough evidence to answer each finding. Summarize the evidence in the structured response instead.
+Before claiming a step is done or a verification passed, confirm the claim against an actual tool or command result from this session, and state plainly when a finding is not yet verified.
+Treat existing behavior on the code paths you touch as part of the contract: identify the shared subsystems your change intersects (state, parsing, dispatch, lifecycle, storage, startup) and confirm that adjacent behavior on those paths still works — by running existing tests that exercise them when such tests exist, or by concrete reasoning through representative flows otherwise — before you finish.
+If you encounter a pre-existing failure, crash, flaky test, or suspicious runtime behavior while implementing or verifying, do not dismiss it solely because it predates your changes, and do not fix it just because you found it. Classify it first with this acceptance-surface test.
+The failure is inside the required acceptance surface only when at least one of these holds: the plan explicitly requires the affected existing behavior to keep working; the plan's stated verification fails because of it; or the behavior this plan delivers cannot be exercised end-to-end without the failing path.
+When it is inside the surface and the fix is bounded, fix it and add a focused regression check when practical. When it is inside the surface but the fix is not bounded, do not silently expand the scope; surface it as a blocking concern through this prompt's blocked escape naming the failure as the blocker, or through this prompt's split-plan escape with a derived plan that sequences the fix, so it becomes an explicit decision.
+When it is outside the surface, record what you observed and why it cannot affect the required behavior in your progress justification, then continue without fixing it. Fixing out-of-surface pre-existing issues is scope drift.
+Use `fixed` only when you actually changed the code or verification in a way that resolves the finding.
+Use `rejected` only when the finding is incorrect, and your summary must explain the evidence that makes it incorrect.
+Use `deferred` only when the finding is real but unsafe or intentionally out of scope for this turn, and your summary must explain the scope or safety reason.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+Always include a `derivedPlan` string. Use an empty string unless outcome=`split_plan`.
+If you truly cannot continue, return outcome=`blocked` and explain the blocker in `blocker`.
+If the target remains viable but the current scope has proven to be the wrong execution shape, return outcome=`split_plan` with a concrete derived plan in `derivedPlan`.
+A derived plan must use the same Neal-executable contract as a top-level plan. Derived-plan-specific rationale sections are optional additive context only; they must not replace or rename the canonical machine-consumed sections required by the declared shape.
+For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape.
+A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans.
+The `derivedPlan` field is the source of truth for derived-plan review and must contain a complete standalone derived plan body.
+Do not commit the derived plan to the target repository as the source of truth; repo-local notes may help while drafting, but the returned `derivedPlan` field must carry the full plan.
+Do not return only a file path, commit SHA, branch name, reflog entry, PR link, external artifact, or a statement that another file was committed.
+Abandoned scope work may be reset before derived-plan review begins, so anything needed to execute the replacement plan must be inside the returned `derivedPlan` field.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+
+Open findings:
+[]
+
+Current progress state:
+## Current Scope
+- Scope: 5.2

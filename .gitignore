@@ -1,0 +1,15 @@
+.ignore
+.env
+.env.*
+node_modules
+dist
+test-results
+.neal/
+.forge/
+.codex-claude-chunked/
+PROGRESS.md
+tmp/
+*.log
+*.cast
+archive/
+EVAL_REPORT.json

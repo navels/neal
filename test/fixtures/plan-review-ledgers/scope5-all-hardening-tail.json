@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "label": "scope5-all-hardening-tail",
+  "description": "Authored positive convergence case. Rounds 1-2 carry plan_correctness findings (C1, C2) that are fixed before the next round, reaching the default threshold (3). Round 3 (== threshold) carries ONLY verification_hardening findings (C3, C4, C5) as the open blocking set, so the round lands accepted-with-debt: disposition accept_plan, and all three tail findings convert to deferred plan-review debt with originRound 3. This is the tail of the negotiation being all hardening: once no plan_correctness / round-forcing blocker remains past the threshold, the review lands rather than burning further rounds, and the hardening reservations are recorded as debt instead of dropped.",
+  "roundLimit": 20,
+  "derivedPlanReview": false,
+  "rounds": [
+    {
+      "round": 1,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C1",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "The plan instructs editing a model field that does not exist."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C1", "decision": "fixed" }]
+    },
+    {
+      "round": 2,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C2",
+          "severity": "blocking",
+          "findingClass": "plan_correctness",
+          "files": ["PLAN.md"],
+          "claimDigest": "A scope success condition contradicts its verification command."
+        }
+      ],
+      "coderDispositions": [{ "canonicalId": "C2", "decision": "fixed" }]
+    },
+    {
+      "round": 3,
+      "reviewerFindings": [
+        {
+          "canonicalId": "C3",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["PLAN.md"],
+          "claimDigest": "Verification should pin the already-specified retry-count behavior with an executable oracle."
+        },
+        {
+          "canonicalId": "C4",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["src/neal/state.ts"],
+          "claimDigest": "Verification should add coverage of the already-specified idle-timeout hydration path."
+        },
+        {
+          "canonicalId": "C5",
+          "severity": "blocking",
+          "findingClass": "verification_hardening",
+          "files": ["docs/storage.md"],
+          "claimDigest": "Verification should assert the documented artifact-class table stays in sync with the emitted files."
+        }
+      ],
+      "coderDispositions": []
+    }
+  ]
+}
