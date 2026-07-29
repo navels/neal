@@ -18,7 +18,15 @@ Two choices explain the design:
 - **The coder and reviewer run on different vendors.** The review is genuinely adversarial: a second model with its own blind spots checks the first, instead of one model grading its own work.
 - **Each scope starts the coder from a fresh context.** A long plan doesn't drift the way a single agent does as its context fills up.
 
-### What makes it interesting
+### Support MusiCares
+
+If neal has been useful to you, please consider donating to MusiCares. It's a
+non-profit giving musicians a place to turn to in times of financial, personal,
+or medical crisis.
+
+[![Donate to MusiCares](https://img.shields.io/badge/Donate_to-MusiCares-b51f2e.svg)](https://www.musicares.org/about/?form=FUNKYMLRVWU&fundraiser=NTYJWDJE&member=SHEDDUJS)
+
+### What makes neal interesting
 
 - **Roles, not one monolithic agent.** Planner, coder, and reviewer are independent, separately configurable roles. Mix vendors and models per role (e.g. Codex codes, Claude reviews).
 - **The reviewer is read-only.** Declared at provider registration and enforced mechanically in each adapter (OS sandbox for Codex, SDK tool allowlist for Claude, a neal-owned jailed toolset for OpenRouter models). See [SECURITY.md](SECURITY.md) and [docs/providers.md](docs/providers.md).
