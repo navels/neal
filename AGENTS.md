@@ -49,9 +49,6 @@ no live credentials or network access, and it must stay that way.
   and keeps the word "adjudication" — don't rename it to match the
   consultant, and don't call the consultant an "adjudicator" in user- or
   LLM-facing text.
-- **`generic-agentic` no longer exists.** It was collapsed into
-  `openai-compatible` (see the CHANGELOG's Unreleased entry). If you see
-  `generic-agentic` in a diff, doc, or your own suggestion, it's stale.
 - **Native SDK bumps need live qualification, not just green CI.**
   `@openai/codex-sdk` and `@anthropic-ai/claude-agent-sdk` can't be exercised
   in CI (no subscription auth there). Qualify with
@@ -61,7 +58,7 @@ no live credentials or network access, and it must stay that way.
 ## Conventions
 
 - CHANGELOG: add new entries under `## [Unreleased]`; never edit historical
-  version entries, even ones using now-renamed terms.
+  version entries.
 - Match existing style: strict TypeScript, ES modules, 2-space indent,
   single quotes, semicolons, descriptive `camelCase`, `SCREAMING_SNAKE_CASE`
   for fixed protocol-marker constants. No formatter is configured — match

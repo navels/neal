@@ -1,7 +1,9 @@
 # Automation contract
 
 The machine-facing contract for driving neal from scripts, CI, and benchmark
-harnesses.
+harnesses. [neal-swebench](https://github.com/navels/neal-swebench) is a working
+example: a harness that drives neal headless through this contract to benchmark
+role pairings on SWE-bench Pro.
 
 Noninteractive harnesses should run `neal execute <plan.md>` for an already
 accepted executable plan, or `neal run <plan.md>` when neal should refine and

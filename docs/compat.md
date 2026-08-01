@@ -3,7 +3,7 @@
 `neal compat` answers one question per model: **can this OpenAI-compatible model
 drive neal's loop at all**, as a coder, a reviewer, or a planner? It is a
 **compatibility smoke test, not a performance benchmark**. There is no
-resolve-rate, no score, no ranking, and no real SWE-bench repo involved. The
+resolve-rate, no score, and no ranking. The
 fixtures are deliberately trivial. Any working agent should pass them. A failure
 therefore means something is **fundamentally wrong** with the model's ability to
 operate neal's contract. It does not mean a task was hard.
@@ -17,8 +17,8 @@ external benchmark assets, no dataset download, no remote runner.
 - **Measured:** whether the model can follow neal's contract end to end (valid
   tool calls + structured output, no max-step loops, no unresolved operator
   blocks, a clean finalization) **and** solve a trivial bundled fixture.
-- **Not measured:** skill. No resolve-rate, no scores, no rankings, no real
-  SWE-bench repos, trivial fixtures only.
+- **Not measured:** skill. No resolve-rate, no scores, no rankings, trivial
+  fixtures only.
 - **Outcome:** a binary **PASS / FAIL per (model, role)**, with a structural
   failure mode recorded for every FAIL.
 

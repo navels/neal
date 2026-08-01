@@ -10,8 +10,8 @@
 
 ## How to read this
 
-- Scored under the **discrimination criterion** ([#49](https://github.com/navels/neal/issues/49),
-  `schemaVersion: 2`): a reviewer PASSes a fixture iff it raises at least one blocking
+- Scored under the **discrimination criterion** (`schemaVersion: 2`): a reviewer
+  PASSes a fixture iff it raises at least one blocking
   finding on the broken diff **and** strictly fewer on the good diff. Severity
   calibration is not graded. Earlier sweeps (2026-06-18) required zero blocking
   findings on the good diff and are not comparable.
@@ -163,8 +163,7 @@ neal compat --model <slug> --role all --reference openai-codex --json
 ```
 
 `openai-codex` (gpt-5.5) is the authoritative reference. No OpenRouter model has
-validated as a drop-in reference (two tried 2026-06-18, both failed. See the
-2026-06-18 revision of this file). Throttle to about three concurrent invocations
+validated as a drop-in reference. Throttle to about three concurrent invocations
 for codex capacity.
 
 Paid slugs only, never `:free`. Re-run when a slug's backing model version changes.

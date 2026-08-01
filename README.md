@@ -9,7 +9,11 @@ stable result.
 
 > **A plan-driven, multi-agent coding loop.** Separate **planner**, **coder**, and **reviewer** roles, each on the provider and model you choose, work together to implement your plan.
 
-![neal execution flow](docs/assets/neal-execution-flow.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/neal-core-flow-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/neal-core-flow-light.svg">
+  <img alt="neal execution flow" src="docs/assets/neal-core-flow-light.svg">
+</picture>
 
 neal is a local planner/coder/reviewer loop for your repo. You write a plan, and neal's planner/reviewer loop turns it into a human-reviewable execution plan with an execution shape, manageable scopes, and high-level implementation detail grounded in the current repository. neal then runs each scope with your configured coder and reviewer roles. After every scope is accepted, a final review pass checks the total set of changes against the entire plan. Run artifacts are recorded under `.neal/` so interrupted work can resume.
 
@@ -282,7 +286,7 @@ neal status --json --all
 
 ## Automation contract
 
-neal keeps a stable machine-facing contract for driving it from scripts, CI, and benchmark harnesses: writer exit codes, the `neal status --json` classification schema, patch-submission eligibility, and harness timeout and trace-publishing guidance. See [docs/automation.md](docs/automation.md).
+neal keeps a stable machine-facing contract for driving it from scripts, CI, and benchmark harnesses: writer exit codes, the `neal status --json` classification schema, patch-submission eligibility, and harness timeout and trace-publishing guidance. See [docs/automation.md](docs/automation.md). [neal-swebench](https://github.com/navels/neal-swebench) drives neal through this contract to benchmark role pairings on SWE-bench Pro.
 
 ## Commands
 
