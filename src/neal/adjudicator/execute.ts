@@ -440,9 +440,12 @@ export async function runExecuteReviewerAdjudication(args: {
     : null;
   const reviewerResult = await (args.runReviewerRound ?? runReviewerRound)({
     reviewer: args.state.agentConfig.reviewer,
-    // Resume the reviewer's own session from the previous round of this
-    // scope's review engagement (null on round 1: scope-boundary resets clear
-    // it). Sessionless providers are filtered at the round layer.
+    // Resume the reviewer's own session. The handle persists across review
+    // rounds AND across ordinary top-level scope advances (the next-scope
+    // resets in transitions.ts clear coderSessionHandle but deliberately not
+    // this); it is null only at run start, on split-plan entry, on
+    // derived-plan parent advance, and after reviewer errors. Sessionless
+    // providers are filtered at the round layer.
     resumeHandle: args.state.reviewerSessionHandle,
     cwd: args.state.cwd,
     planDoc: context.planDoc,
