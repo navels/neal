@@ -1,6 +1,6 @@
 {
   "name": "@navels/neal",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "A source-first multi-agent CLI for planning, executing, reviewing, and resuming scoped code changes.",
   "license": "MIT",
   "publishConfig": {
