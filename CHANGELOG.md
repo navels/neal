@@ -10,6 +10,15 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- `neal review` printed `claude --resume <id>` for every recorded session, even
+  when the reviewer was `openai-codex` and the id was a Codex thread id that
+  `claude --resume` cannot open. Rounds now record which provider owns each
+  session, and the resume hint prints that provider's command (`codex resume
+  <id>` for Codex, `claude --resume <id>` for Claude) or just the id when it
+  has no command for the provider.
+
 ### Changed
 
 - Anthropic Claude structured-advisor (reviewer) and repair turns now set

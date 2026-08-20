@@ -358,12 +358,12 @@ test('neal review records resumable Agent SDK session handles and prints a resum
   // via the onSessionHandle callback.
   class SessionHandleReviewProvider extends QueueReviewProvider {
     override async draftFindings(args: ReviewFindingsProviderDraftArgs): Promise<ReviewFindingsDraft> {
-      args.onSessionHandle?.('draft-sess-1');
+      args.onSessionHandle?.('draft-sess-1', 'anthropic-claude');
       return super.draftFindings(args);
     }
 
     override async reviewDraft(args: ReviewFindingsProviderReviewArgs): Promise<ReviewFindingsReview> {
-      args.onSessionHandle?.('reviewer-sess-1');
+      args.onSessionHandle?.('reviewer-sess-1', 'openai-codex');
       return super.reviewDraft(args);
     }
   }
@@ -386,23 +386,58 @@ test('neal review records resumable Agent SDK session handles and prints a resum
 
   assert.equal(result.outcome, 'accepted');
 
-  // Handles are threaded into the round record (and thus the rounds artifact).
+  // Handles and their providers are threaded into the round record (and thus
+  // the rounds artifact). The coder and reviewer are different providers here,
+  // as they are in a Claude-coder/Codex-reviewer config.
   const acceptedRound = result.rounds[result.rounds.length - 1];
   assert.equal(acceptedRound?.draftSessionHandle, 'draft-sess-1');
+  assert.equal(acceptedRound?.draftSessionProvider, 'anthropic-claude');
   assert.equal(acceptedRound?.reviewSessionHandle, 'reviewer-sess-1');
+  assert.equal(acceptedRound?.reviewSessionProvider, 'openai-codex');
   const roundsArtifact = JSON.parse(await readFile(result.paths.rounds, 'utf8')) as {
-    rounds: Array<{ draftSessionHandle?: string; reviewSessionHandle?: string }>;
+    rounds: Array<{ reviewSessionHandle?: string; reviewSessionProvider?: string }>;
   };
   assert.equal(roundsArtifact.rounds[0]?.reviewSessionHandle, 'reviewer-sess-1');
+  assert.equal(roundsArtifact.rounds[0]?.reviewSessionProvider, 'openai-codex');
 
-  // REVIEW_FINAL.md gains a Resume Sessions section with both handles.
+  // REVIEW_FINAL.md gains a Resume Sessions section with each provider's own
+  // resume command: a Codex thread id is not a Claude session id.
   const finalMarkdown = await readFile(result.paths.final, 'utf8');
   assert.match(finalMarkdown, /## Resume Sessions/);
-  assert.match(finalMarkdown, /Reviewer: `claude --resume reviewer-sess-1`/);
-  assert.match(finalMarkdown, /Draft \(coder\): `claude --resume draft-sess-1`/);
+  assert.match(finalMarkdown, /Reviewer \(openai-codex\): `codex resume reviewer-sess-1`/);
+  assert.match(finalMarkdown, /Draft \(coder\) \(anthropic-claude\): `claude --resume draft-sess-1`/);
+  assert.doesNotMatch(finalMarkdown, /claude --resume reviewer-sess-1/);
 
   // stdout prints a compact, copy-pasteable hint preferring the reviewer.
-  assert.match(stdout.text(), /Resume the reviewer session: \(cd .* && claude --resume reviewer-sess-1\)/);
+  assert.match(stdout.text(), /Resume the reviewer session: \(cd .* && codex resume reviewer-sess-1\)/);
+});
+
+test('neal review lists a session id without a command when the provider has no known resume command', async () => {
+  const repo = await createRepo('neal-review-resume-unknown-');
+  await repo.commitFile('feature.txt', 'feature\n', 'add feature');
+
+  class UnknownProviderReviewProvider extends QueueReviewProvider {
+    override async reviewDraft(args: ReviewFindingsProviderReviewArgs): Promise<ReviewFindingsReview> {
+      args.onSessionHandle?.('reviewer-sess-2', 'some-future-provider');
+      return super.reviewDraft(args);
+    }
+  }
+
+  const stdout = new CaptureWritable();
+  const result = await runNealReviewCli({
+    cwd: repo.cwd,
+    parsed: parseReviewArgs(['review', 'Review this feature commit', '--since', repo.baseCommit]),
+    stdout,
+    stderr: new CaptureWritable(),
+    provider: new UnknownProviderReviewProvider([sampleDraft()], [acceptedFinal('# Review Findings\n\nAccepted.')]),
+    reviewId: 'review-resume-unknown',
+  });
+
+  assert.equal(result.outcome, 'accepted');
+  const finalMarkdown = await readFile(result.paths.final, 'utf8');
+  assert.match(finalMarkdown, /Reviewer \(some-future-provider\): session id `reviewer-sess-2` \(no known resume command for this provider\)/);
+  // No invented command on stdout.
+  assert.doesNotMatch(stdout.text(), /Resume the reviewer session/);
 });
 
 test('neal review keeps its frozen target if HEAD advances during the read-only loop', async () => {

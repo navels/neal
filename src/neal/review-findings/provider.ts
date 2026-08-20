@@ -80,7 +80,7 @@ class AgentReviewFindingsProviderAdapter implements ReviewFindingsProviderAdapte
       logger: this.args.logger,
     });
 
-    args.onSessionHandle?.(result.sessionHandle ?? null);
+    args.onSessionHandle?.(result.sessionHandle ?? null, this.args.agentConfig.coder.provider);
     return validateReviewFindingsDraft(result.structured);
   }
 
@@ -140,7 +140,7 @@ class AgentReviewFindingsProviderAdapter implements ReviewFindingsProviderAdapte
         }),
     });
 
-    args.onSessionHandle?.(result.sessionHandle ?? null);
+    args.onSessionHandle?.(result.sessionHandle ?? null, this.args.agentConfig.reviewer.provider);
     return validateReviewFindingsReview(result.structured);
   }
 }

@@ -165,47 +165,75 @@ export async function writeReviewFindingsFinal(
   );
 }
 
-// The reviewer/draft turns run through the Claude Agent SDK, whose sessions are
-// persisted to ~/.claude/projects but deliberately hidden from the interactive
-// `/resume` picker — they are only resumable by id. Surface those ids so an
-// operator can reopen the reviewer's full context to ask "why did it conclude
-// X". Returns [] when no handles were captured (e.g. non-SDK/test providers).
+// The draft and reviewer turns run through provider SDKs (Claude Agent SDK,
+// Codex SDK). Those sessions are persisted by each CLI but hidden from its
+// interactive resume picker, so they are only resumable by id. Surface the ids
+// with the right command per provider so an operator can reopen the full
+// context and ask "why did it conclude X". Returns [] when no handles were
+// captured (e.g. non-SDK/test providers).
 export function formatReviewResumeSection(cwd: string, round: ReviewFindingsLoopRound): string[] {
-  const resumable = collectResumableHandles(round);
+  const resumable = collectResumableSessions(round);
   if (resumable.length === 0) {
     return [];
   }
   return [
     '## Resume Sessions',
     '',
-    `These reviewer/coder turns ran through the Claude Agent SDK. Such sessions do not appear in the interactive \`/resume\` picker, but you can resume one by id from the reviewed directory (${cwd}):`,
+    `These draft/reviewer turns ran through provider SDKs. Their sessions do not appear in the interactive resume pickers, but you can resume one by id from the reviewed directory (${cwd}):`,
     '',
-    ...resumable.map(([label, handle]) => `- ${label}: \`claude --resume ${handle}\``),
+    ...resumable.map((session) => `- ${formatResumeSessionLine(session)}`),
   ];
 }
 
 // Compact one-line resume hint for stdout, preferring the reviewer session
-// (the one most useful for interrogating the verdict). Null when no handle was
-// captured.
+// (the one most useful for interrogating the verdict) and skipping any session
+// whose provider has no known resume command. Null when nothing is resumable.
 export function formatReviewResumeStdoutLine(cwd: string, round: ReviewFindingsLoopRound): string | null {
-  const reviewer = nonEmptyHandle(round.reviewSessionHandle);
-  const draft = nonEmptyHandle(round.draftSessionHandle);
-  const handle = reviewer ?? draft;
-  if (!handle) {
+  const session = collectResumableSessions(round).find((candidate) => resumeCommand(candidate) !== null);
+  if (!session) {
     return null;
   }
-  const which = reviewer ? 'reviewer' : 'draft';
-  return `Resume the ${which} session: (cd ${cwd} && claude --resume ${handle})`;
+  return `Resume the ${session.role} session: (cd ${cwd} && ${resumeCommand(session)})`;
 }
 
-function collectResumableHandles(round: ReviewFindingsLoopRound): Array<[string, string]> {
-  const entries: Array<[string, string | null | undefined]> = [
-    ['Reviewer', round.reviewSessionHandle],
-    ['Draft (coder)', round.draftSessionHandle],
+type ResumableSession = {
+  role: 'reviewer' | 'draft';
+  label: string;
+  handle: string;
+  provider: string | null;
+};
+
+// CLI resume commands by provider id. A provider missing here still gets its
+// session id listed, just without a command. openai-compatible never surfaces
+// handles (no session resume), so it never reaches this table.
+const RESUME_COMMANDS: Record<string, (handle: string) => string> = {
+  'anthropic-claude': (handle) => `claude --resume ${handle}`,
+  'openai-codex': (handle) => `codex resume ${handle}`,
+};
+
+function resumeCommand(session: ResumableSession): string | null {
+  const build = session.provider ? RESUME_COMMANDS[session.provider] : undefined;
+  return build ? build(session.handle) : null;
+}
+
+function formatResumeSessionLine(session: ResumableSession): string {
+  const command = resumeCommand(session);
+  const who = session.provider ? `${session.label} (${session.provider})` : session.label;
+  if (command) {
+    return `${who}: \`${command}\``;
+  }
+  return `${who}: session id \`${session.handle}\` (no known resume command for this provider)`;
+}
+
+function collectResumableSessions(round: ReviewFindingsLoopRound): ResumableSession[] {
+  const candidates: Array<[ResumableSession['role'], string, string | null | undefined, string | null | undefined]> = [
+    ['reviewer', 'Reviewer', round.reviewSessionHandle, round.reviewSessionProvider],
+    ['draft', 'Draft (coder)', round.draftSessionHandle, round.draftSessionProvider],
   ];
-  return entries
-    .map(([label, handle]): [string, string | null] => [label, nonEmptyHandle(handle)])
-    .filter((entry): entry is [string, string] => entry[1] !== null);
+  return candidates.flatMap(([role, label, handle, provider]) => {
+    const nonEmpty = nonEmptyHandle(handle);
+    return nonEmpty ? [{ role, label, handle: nonEmpty, provider: provider?.trim() ? provider : null }] : [];
+  });
 }
 
 function nonEmptyHandle(handle: string | null | undefined): string | null {

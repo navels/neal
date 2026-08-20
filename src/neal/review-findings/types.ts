@@ -51,10 +51,13 @@ export type ReviewFindingsProviderDraftArgs = {
   previousDraft: ReviewFindingsDraft | null;
   reviewFindings: string[];
   prompt: string;
-  // Optional sink for the Agent SDK session id of the draft (coder) turn, so the
-  // run can record a resumable handle. Mirrors the plan/execute onSessionStarted
-  // callback; non-SDK/test adapters simply leave it uncalled.
-  onSessionHandle?: (sessionHandle: string | null) => void;
+  // Optional sink for the provider session id of the draft (coder) turn, so the
+  // run can record a resumable handle. The second argument names the provider
+  // that owns the session (e.g. 'anthropic-claude', 'openai-codex') so the
+  // resume hint can print that provider's resume command. Mirrors the
+  // plan/execute onSessionStarted callback; non-SDK/test adapters simply leave
+  // it uncalled.
+  onSessionHandle?: (sessionHandle: string | null, provider?: string) => void;
 };
 
 export type ReviewFindingsProviderReviewArgs = {
@@ -62,8 +65,8 @@ export type ReviewFindingsProviderReviewArgs = {
   round: number;
   draft: ReviewFindingsDraft;
   prompt: string;
-  // Optional sink for the Agent SDK session id of the reviewer turn (see above).
-  onSessionHandle?: (sessionHandle: string | null) => void;
+  // Optional sink for the provider session id of the reviewer turn (see above).
+  onSessionHandle?: (sessionHandle: string | null, provider?: string) => void;
 };
 
 // ReviewFindingsProviderAdapter is a review-local findings loop strategy and
@@ -106,12 +109,15 @@ export type ReviewFindingsLoopRound = {
   reviewPrompt: string;
   draft: ReviewFindingsDraft;
   review: ReviewFindingsReview;
-  // Agent SDK session ids for the draft (coder) and review (reviewer) turns of
-  // this round, when the provider surfaced them. Resumable by id via
-  // `claude --resume <handle>` from the reviewed directory; absent for
-  // non-SDK/test providers.
+  // Provider session ids for the draft (coder) and review (reviewer) turns of
+  // this round, when the provider surfaced them, plus the provider id that
+  // owns each session. The coder and reviewer can be different providers, so
+  // each handle carries its own provider; the resume hint maps the provider to
+  // its CLI resume command. Absent for non-SDK/test providers.
   draftSessionHandle?: string | null;
+  draftSessionProvider?: string | null;
   reviewSessionHandle?: string | null;
+  reviewSessionProvider?: string | null;
 };
 
 export type ReviewFindingsReviewArtifact = {

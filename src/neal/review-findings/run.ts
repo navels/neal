@@ -135,14 +135,16 @@ export async function runNealReviewCli(args: RunNealReviewCliArgs): Promise<Revi
         maxRounds,
       });
       let draftSessionHandle: string | null = null;
+      let draftSessionProvider: string | null = null;
       const draftResponse = await provider.draftFindings({
         context,
         round: roundNumber,
         previousDraft,
         reviewFindings,
         prompt: draftPrompt,
-        onSessionHandle: (handle) => {
+        onSessionHandle: (handle, sessionProvider) => {
           draftSessionHandle = handle;
+          draftSessionProvider = sessionProvider ?? null;
         },
       });
       await assertReviewReadOnlyStateUnchanged(cwd, beforeState);
@@ -159,13 +161,15 @@ export async function runNealReviewCli(args: RunNealReviewCliArgs): Promise<Revi
       });
       const reviewPrompt = buildReviewFindingsReviewPrompt(context, draft, roundNumber);
       let reviewSessionHandle: string | null = null;
+      let reviewSessionProvider: string | null = null;
       const reviewResponse = await provider.reviewDraft({
         context,
         round: roundNumber,
         draft,
         prompt: reviewPrompt,
-        onSessionHandle: (handle) => {
+        onSessionHandle: (handle, sessionProvider) => {
           reviewSessionHandle = handle;
+          reviewSessionProvider = sessionProvider ?? null;
         },
       });
       await assertReviewReadOnlyStateUnchanged(cwd, beforeState);
@@ -180,7 +184,9 @@ export async function runNealReviewCli(args: RunNealReviewCliArgs): Promise<Revi
         // Only record handles when captured, so artifacts stay byte-identical
         // for non-SDK providers.
         ...(draftSessionHandle ? { draftSessionHandle } : {}),
+        ...(draftSessionHandle && draftSessionProvider ? { draftSessionProvider } : {}),
         ...(reviewSessionHandle ? { reviewSessionHandle } : {}),
+        ...(reviewSessionHandle && reviewSessionProvider ? { reviewSessionProvider } : {}),
       };
       rounds.push(loopRound);
       await writeReviewFindingsEvent(paths, 'review.review_completed', {
