@@ -104,8 +104,10 @@ Current built-in capabilities are intentionally conservative:
 
 The `coder` capability describes adapter paths, not a global promise that every
 writer-run workflow is read-only: writer-run coder turns use provider SDKs with
-broad local permissions. The separate public `neal review` command enforces its
-own read-only boundary in the review command flow.
+broad local permissions. That includes the public `neal review` command's
+draft turn, which runs on the coder capability with full tools and is
+read-only by prompt rules and an after-the-fact worktree check, not by
+mechanism (see [Review boundary](#review-boundary)).
 
 ### Coder tool policy enforcement
 
@@ -150,6 +152,35 @@ Two consequences follow from no reviewer holding shell access:
   its own reading of the diff and (for read-tool reviewers) the repository.
 - Reviewers never mutate the checkout. A review produces a verdict and findings,
   not edits.
+
+### What the invariant does and does not cover
+
+The invariant covers the tools neal itself hands the reviewer. Beyond that
+it is best effort. What is enforced mechanically today, per provider:
+
+- `anthropic-claude`: the SDK `tools` allowlist is exactly `Read`, `Grep`,
+  `Glob` (empty for the prompt-only repair turn), and `strictMcpConfig` is set
+  so the SDK ignores MCP servers from the operator's user settings, plugins,
+  and project `.mcp.json`. Without that flag those servers load into the
+  reviewer session on top of the allowlist, and they often include tools that
+  write (Jira edits, Drive file writes, a browser).
+- `openai-codex`: every structured-advisor thread runs under the Codex
+  `read-only` sandbox. That sandbox covers shell and filesystem access. neal
+  does not restrict MCP servers configured in the operator's own Codex config,
+  and whether the sandbox applies to them is up to Codex, not neal.
+- `openai-compatible`: the reviewer only ever sees neal's own read-only
+  toolset. There is no MCP or other tool path into that loop.
+
+What is not covered, on any provider:
+
+- The reviewer runs in the same checkout as the coder. There is no separate
+  worktree. Read-only comes from which tools the reviewer has, not from a
+  separate copy of the tree.
+- Prompt instructions ("do not mutate the repository") are instructions to
+  the model, not enforcement. A read-only claim that rests only on prompt text
+  is best effort.
+- Anything the provider adds on its own (its own configured tools,
+  extensions, or network access) is outside the invariant.
 
 Usage reporting is `opportunistic`: providers emit usage only when the SDK
 event or result supplies it.
@@ -782,17 +813,22 @@ Two distinct read-only guarantees apply here, and they should not be conflated:
 - The provider-capability invariant (see
   [The read-only reviewer invariant](#the-read-only-reviewer-invariant)):
   every supported `structured-advisor` capability has `write: false` and
-  `shell: false`, so a writer-run reviewer/structured-advisor round cannot
-  write or run shell by capability. This holds for both writer runs and
-  `neal review`.
-- The `neal review` command's additional artifact-boundary guard: the command
-  checks protected writer state and worktree changes after provider rounds and
-  fails if anything outside its review artifacts changed. This post-round guard
-  is owned by the `neal review` command flow, not by a provider capability, and
-  is specific to `neal review`. A writer run does not perform this artifact
-  diff.
+  `shell: false`, so the adjudication round cannot write or run shell by
+  capability. This covers the reviewer's adjudication round only. The draft
+  round runs on the coder capability with the coder's full tools (shell,
+  file writes, `gh`, the operator's MCP servers) because drafting needs to
+  read things like pull requests and Jira issues. For that round, read-only is
+  a prompt instruction, not a mechanism.
+- The `neal review` command's artifact-boundary guard: the command snapshots
+  protected writer state (`.neal/current.json`, queue pointers, run-local
+  `RUN_STATE.json` files) and `git status` before the loop, compares them after
+  each round, and fails if anything outside its review artifacts changed. This
+  is detection after the fact. It does not prevent a change and does not
+  revert one. It is owned by the `neal review` command flow, not by a provider
+  capability, and a writer run does not perform it.
 
-So the capability invariant guarantees reviewers never write or run shell in
-any mode, while `neal review` adds its own command-level enforcement on top.
-Do not treat the `neal review` artifact-boundary guard as a provider capability,
-and do not assume a writer run performs that post-round artifact check.
+So the capability invariant guarantees the adjudication round never writes or
+runs shell, the draft round is read-only as best effort, and `neal review`
+detects (but cannot undo) a violation. Do not treat the
+artifact-boundary guard as a provider capability, and do not assume a writer
+run performs that post-round check.

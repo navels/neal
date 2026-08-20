@@ -162,6 +162,13 @@ test('every registered provider declares a read-only structured-advisor capabili
 //     in the allowlist, and the exact-equality assertions below exclude them
 //     (and any future SDK tool) until deliberately added here.
 //   - The JSON-block repair turn is prompt-only: its allowlist is exactly [].
+//
+// The allowlist governs built-in tools only. MCP servers from the operator's
+// user settings, plugins, and project .mcp.json are added on top of it, and
+// those routinely carry write-capable tools (issue trackers, drives, browsers).
+// Every advisor variant therefore also sets `strictMcpConfig: true`, which
+// makes the SDK ignore all MCP configuration not passed explicitly in options
+// (neal passes none for reviewer turns).
 const CLAUDE_REVIEWER_READ_TOOL_ALLOWLIST = ['Read', 'Grep', 'Glob'];
 const CLAUDE_WRITE_OR_SHELL_TOOLS = ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 
@@ -172,7 +179,7 @@ function verifyAnthropicClaudeReviewerWiring() {
 
   // Every advisor query-option builder variant, including repair. The empty
   // executable-path argument skips SDK binary resolution (hermetic).
-  const advisorOptionVariants: Record<string, { tools?: unknown }> = {
+  const advisorOptionVariants: Record<string, { tools?: unknown; strictMcpConfig?: unknown }> = {
     'structured-output advisor query': hooks.buildClaudeQueryOptions(advisorRoundArgs(), null, ''),
     'JSON-block advisor query': hooks.buildClaudeJsonBlockQueryOptions(jsonBlockArgs(), null, ''),
     'JSON-block repair query': hooks.buildClaudeJsonBlockRepairQueryOptions(jsonBlockArgs(), null, ''),
@@ -199,6 +206,11 @@ function verifyAnthropicClaudeReviewerWiring() {
         `anthropic-claude ${variant} exposes write/shell tool ${JSON.stringify(forbidden)}`,
       );
     }
+    assert.equal(
+      options.strictMcpConfig,
+      true,
+      `anthropic-claude ${variant} must set strictMcpConfig so operator-configured MCP tools (which may write) do not reach the reviewer`,
+    );
   }
 
   // Exact current values, pinned so drift is loud: primary advisor turns get

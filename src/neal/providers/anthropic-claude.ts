@@ -796,6 +796,13 @@ type ClaudeQueryOptionsSpec = {
   model: string | null | undefined;
   effort: string | null | undefined;
   tools: NonNullable<Options['tools']>;
+  // Structured-advisor (reviewer) turns set this so the SDK ignores MCP servers
+  // from the operator's user settings, plugins, and project .mcp.json. The
+  // `tools` allowlist only governs built-in tools; without this flag every
+  // operator-configured MCP tool (Jira edits, Drive writes, a browser, ...)
+  // still reaches a reviewer that runs under bypassPermissions. Coder turns
+  // leave it unset: the operator's MCP config is part of the coder's trust.
+  strictMcpConfig?: boolean;
   hooks?: Options['hooks'];
   resumeHandle?: string | null;
   claudeExecutablePath: string | undefined;
@@ -817,6 +824,7 @@ function buildClaudeCoreQueryOptions(spec: ClaudeQueryOptionsSpec): Options {
     ...(spec.model ? { model: spec.model } : {}),
     ...(spec.effort ? { effort: spec.effort as Options['effort'] } : {}),
     tools: spec.tools,
+    ...(spec.strictMcpConfig ? { strictMcpConfig: true } : {}),
     ...(spec.hooks ? { hooks: spec.hooks } : {}),
     // Under compat qualification only, run Claude in the SDK's isolation mode
     // (load no filesystem settings). Left unset, the SDK loads ~/.claude and any
@@ -870,6 +878,7 @@ function buildClaudeQueryOptions(
     model: args.model ?? defaultModel,
     effort: defaultEffort,
     tools: ['Read', 'Grep', 'Glob'],
+    strictMcpConfig: true,
     resumeHandle: args.resumeHandle,
     claudeExecutablePath,
     outputSchema: args.schema,
@@ -913,6 +922,7 @@ function buildClaudeJsonBlockQueryOptions(
     model: args.model ?? defaultModel,
     effort: defaultEffort,
     tools: ['Read', 'Grep', 'Glob'],
+    strictMcpConfig: true,
     resumeHandle: args.resumeHandle,
     claudeExecutablePath,
     events: args.events,
@@ -947,6 +957,7 @@ function buildClaudeJsonBlockRepairQueryOptions(
     model: args.model ?? defaultModel,
     effort: defaultEffort,
     tools: [],
+    strictMcpConfig: true,
     claudeExecutablePath,
     events: args.events,
     stderrRole: 'structured-advisor',
