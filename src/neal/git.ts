@@ -248,6 +248,16 @@ export async function getDiffForRange(cwd: string, base: string, head: string) {
   return runGit(['diff', '--find-renames', `${base}..${head}`], cwd);
 }
 
+// Range diff restricted to the given paths. Fixed argv with a `--` separator,
+// never a shell string, so a path can never be read as a revision or option.
+export async function getDiffForRangePaths(cwd: string, base: string, head: string, paths: readonly string[]) {
+  if (base === head || paths.length === 0) {
+    return '';
+  }
+
+  return runGit(['diff', '--find-renames', `${base}..${head}`, '--', ...paths], cwd);
+}
+
 export async function getChangedFilesForRange(cwd: string, base: string, head: string) {
   if (base === head) {
     return [];

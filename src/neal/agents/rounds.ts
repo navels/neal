@@ -50,6 +50,7 @@ import {
   buildConsultantPrompt,
   buildScopePrompt,
 } from './prompts.js';
+import type { EarlierScopeFileChange } from '../prompts/execute.js';
 import {
   buildCoderBlockedRecoveryDispositionSchema,
   buildCoderPlanSchema,
@@ -319,6 +320,9 @@ export async function runReviewerRound(args: {
   // Neal-inlined commit-range diff for a read-only reviewer that has read tools
   // but no commit-range diff tool; threaded into buildReviewerPrompt.
   inlinedRangeDiff?: string | null;
+  // Earlier accepted scopes' per-file diffs for files the current diff touches
+  // again; threaded into buildReviewerPrompt.
+  earlierScopeChanges?: readonly EarlierScopeFileChange[] | null;
   // Persisted unattended run flag; threaded into the reviewer prompt variant.
   unattended?: boolean;
   logger?: RunLogger;

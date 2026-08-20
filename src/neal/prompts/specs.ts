@@ -191,6 +191,12 @@ const SCOPE_REVIEWER_CONTEXT = context('ScopeReviewerPromptContext', [
   field('reviewMarkdownPath', 'run_artifact', true, 'Review artifact that carries prior findings and coder responses.'),
   field('scratchDir', 'run_artifact', true, 'Run-local reviewer scratch directory for temporary verification artifacts.'),
   field(
+    'earlierScopeChanges',
+    'repository_state',
+    false,
+    'Files in the current scope diff that an earlier accepted scope also changed, each with that scope number, commit range, and per-file diff. Computed from completedScopes in run state; omitted when there is no overlap.',
+  ),
+  field(
     'accessMode',
     'orchestrator_state',
     false,
@@ -537,7 +543,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_reviewer',
-    version: 2,
+    version: 3,
     changelog: [
       {
         version: 1,
@@ -546,6 +552,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 2,
         renderSha: '431a75ad341a531535606af607187239a31d12cf921575eb17774b317ad639a0',
+      },
+      {
+        version: 3,
+        renderSha: '4b75fab01367f0e4e263bc7635f8753e8e73c08b3ca46cf6bb6e695a67da31a4',
       },
     ],
     role: 'reviewer',
@@ -570,11 +580,18 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
         field('reviewMarkdownPath', 'run_artifact', true, 'Review history artifact path.'),
         field('progressJustification', 'review_history', true, 'Coder progress-justification payload.'),
         field('scratchDir', 'run_artifact', true, 'Run-local scratch directory for reviewer verification artifacts.'),
+        field(
+          'earlierScopeChanges',
+          'repository_state',
+          false,
+          'Earlier accepted scopes\' per-file diffs for files the current diff touches again; absent when there is no overlap.',
+        ),
       ]),
     },
     providerVariants: SHARED_PROVIDER_VARIANTS,
     evaluationNotes: [
       'Render tests should assert reviewer prompts include shared adversarial falsification, verification skepticism, concrete finding-quality doctrine, meaningful-progress instructions, and parent-objective history.',
+      'Render tests should assert the earlier-scope preservation line renders in every cell and the earlier-scope changes section renders only when an overlap is supplied.',
       'Future fixture cases should cover cases where local correctness differs from parent-objective convergence.',
     ],
     firstMigrationPriority: 2,

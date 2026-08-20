@@ -1,5 +1,5 @@
 import type { ReviewFinding } from '../types.js';
-import { renderInlinedRangeDiffSection } from '../context/inline-review-context.js';
+import { renderInlinedRangeDiffSection, truncateInlineSectionBody } from '../context/inline-review-context.js';
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
 import {
   AUTONOMY_BLOCKED,
@@ -142,6 +142,26 @@ export function buildLegacyScopePrompt(planDoc: string, progressText: string) {
   ].join('\n');
 }
 
+// One file that an earlier accepted scope changed and the current scope's diff
+// touches again, with the earlier scope's diff restricted to that file. The
+// adjudicator computes these from state.completedScopes (see
+// collectEarlierScopeChanges in src/neal/adjudicator/execute.ts).
+export type EarlierScopeFileChange = {
+  file: string;
+  scopeNumber: string;
+  baseCommit: string;
+  finalCommit: string;
+  diff: string;
+};
+
+export const EARLIER_SCOPE_CHANGES_SECTION_HEADING = '## Earlier-scope changes to files in this diff';
+
+// Rendered for every execute-scope review, with or without an overlap: a
+// tool-access reviewer can find earlier-scope history itself, and the rule
+// about what that history means must not depend on whether Neal inlined it.
+const EARLIER_SCOPE_PRESERVATION_LINE =
+  "A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.";
+
 export function buildReviewerPrompt(args: {
   planDoc: string;
   baseCommit: string;
@@ -165,6 +185,10 @@ export function buildReviewerPrompt(args: {
   // Neal-inlined commit-range diff for a read-only reviewer that has read tools
   // but no commit-range diff tool. Only rendered when accessMode is 'read-only'.
   inlinedRangeDiff?: string | null;
+  // Files in the current diff that an earlier accepted scope also changed, each
+  // with that earlier scope's per-file diff. Rendered in every access mode when
+  // non-empty; omitted entirely when there is no overlap.
+  earlierScopeChanges?: readonly EarlierScopeFileChange[] | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
   // When true, the run is unattended: render the no-operator autonomy line.
@@ -232,6 +256,7 @@ export function buildReviewerPrompt(args: {
     ...getFindingQualityLines(),
     ...skepticismLines,
     ...regressionLines,
+    EARLIER_SCOPE_PRESERVATION_LINE,
     ...preexistingLines,
     args.previousHeadCommit
       ? `Previous reviewer head was ${args.previousHeadCommit}. Focus especially on changes since that commit, while still considering the full current state.`
@@ -280,6 +305,33 @@ export function buildReviewerPrompt(args: {
           }),
         ]
       : []),
+    ...(args.earlierScopeChanges && args.earlierScopeChanges.length > 0
+      ? ['', renderEarlierScopeChangesSection(args.earlierScopeChanges)]
+      : []),
+  ].join('\n');
+}
+
+// Earlier accepted scopes' per-file diffs for files the current diff touches
+// again. The body shares the inlined-diff bound (truncateInlineSectionBody),
+// which appends an explicit truncation marker instead of dropping content
+// silently.
+function renderEarlierScopeChangesSection(changes: readonly EarlierScopeFileChange[]) {
+  const body = changes
+    .map((change) =>
+      [
+        `### ${change.file} (scope ${change.scopeNumber}, ${change.baseCommit}..${change.finalCommit})`,
+        '',
+        change.diff.trim() === '' ? '(empty diff)' : change.diff,
+      ].join('\n'),
+    )
+    .join('\n\n');
+  return [
+    EARLIER_SCOPE_CHANGES_SECTION_HEADING,
+    '',
+    'The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.',
+    'Check the current diff against each entry before accepting.',
+    '',
+    truncateInlineSectionBody(body),
   ].join('\n');
 }
 

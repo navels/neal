@@ -4,8 +4,10 @@ import { runCoderResponseRound, runReviewerRound } from '../agents.js';
 import { readOnlyReviewerNeedsInlinedDiff } from '../context/inline-review-context.js';
 import { buildAndPersistReviewerContextPacket } from '../context/reviewer-context.js';
 import { getReviewStuckWindow } from '../config.js';
+import { getDiffForRangePaths } from '../git.js';
 import { EXECUTE_FINALIZATION_PHASE, type ExecuteFinalizationPhase } from '../execute-finalization.js';
 import type { RunLogger } from '../logger.js';
+import type { EarlierScopeFileChange } from '../prompts/execute.js';
 import {
   classifyAlreadySatisfiedTopLevelScopeAcceptance,
   classifyEmptyDerivedParentAdvance,
@@ -413,6 +415,9 @@ export async function runExecuteReviewerAdjudication(args: {
   getDiffStatForRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string>;
   getChangedFilesForRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string[]>;
   getDiffForRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string>;
+  // Path-restricted range diff for earlier-scope overlap context. Optional so
+  // existing callers and fakes stay valid; defaults to the real git helper.
+  getDiffForRangePaths?: (cwd: string, baseCommit: string, headCommit: string, paths: readonly string[]) => Promise<string>;
   runReviewerRound?: ExecuteReviewerRoundRunner;
 }) {
   if (!args.state.baseCommit) {
@@ -438,6 +443,11 @@ export async function runExecuteReviewerAdjudication(args: {
   const inlinedRangeDiff = readOnlyReviewerNeedsInlinedDiff(args.state.agentConfig.reviewer)
     ? await args.getDiffForRange(args.state.cwd, args.state.baseCommit, headCommit)
     : null;
+  const earlierScopeChanges = await collectEarlierScopeChanges({
+    state: args.state,
+    changedFiles,
+    getDiffForRangePaths: args.getDiffForRangePaths ?? getDiffForRangePaths,
+  });
   const reviewerResult = await (args.runReviewerRound ?? runReviewerRound)({
     reviewer: args.state.agentConfig.reviewer,
     // Resume the reviewer's own session. The handle persists across review
@@ -463,6 +473,7 @@ export async function runExecuteReviewerAdjudication(args: {
     scratchDir,
     reviewerContext: await buildAndPersistReviewerContextPacket({ state: args.state }),
     inlinedRangeDiff,
+    earlierScopeChanges,
     unattended: args.state.unattended,
     logger: args.logger,
   });
@@ -475,6 +486,42 @@ export async function runExecuteReviewerAdjudication(args: {
     },
     reviewerResult,
   };
+}
+
+// Files in the current scope's diff that an earlier accepted scope also
+// changed, each paired with that earlier scope's diff restricted to the file.
+// The reviewer session is the only long-lived memory across scopes, and its
+// record of an earlier scope is the coder's summary; this turns "scope 3's
+// file moved during scope 6" into something it reads instead of something it
+// has to remember. Only accepted scopes count, and a scope replaced by a
+// derived plan is skipped because its work was reset. Scopes with no
+// recorded commit range are skipped.
+export async function collectEarlierScopeChanges(args: {
+  state: OrchestrationState;
+  changedFiles: readonly string[];
+  getDiffForRangePaths: (cwd: string, baseCommit: string, headCommit: string, paths: readonly string[]) => Promise<string>;
+}): Promise<EarlierScopeFileChange[]> {
+  const currentFiles = new Set(args.changedFiles);
+  const changes: EarlierScopeFileChange[] = [];
+  for (const scope of args.state.completedScopes) {
+    if (scope.result !== 'accepted' || scope.replacedByDerivedPlanPath || !scope.baseCommit || !scope.finalCommit) {
+      continue;
+    }
+    for (const file of scope.changedFiles) {
+      if (!currentFiles.has(file)) {
+        continue;
+      }
+      const diff = await args.getDiffForRangePaths(args.state.cwd, scope.baseCommit, scope.finalCommit, [file]);
+      changes.push({
+        file,
+        scopeNumber: scope.number,
+        baseCommit: scope.baseCommit,
+        finalCommit: scope.finalCommit,
+        diff,
+      });
+    }
+  }
+  return changes;
 }
 
 function classifyReviewerParentAdvance(args: {

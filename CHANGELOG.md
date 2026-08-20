@@ -43,6 +43,15 @@ dependency-update policy.
   sentences, everyday words, no undefined shorthand, with exact paths,
   identifiers, numbers, and SHAs preserved. The reviewer treats wording that
   breaks those rules as a revise reason.
+- The scope reviewer now sees earlier accepted scopes' per-file diffs for any
+  file the current scope diff touches again, under "Earlier-scope changes to
+  files in this diff", and its doctrine says that weakening or removing a
+  test, assertion, or check an earlier scope introduced is a blocking finding
+  unless the plan calls for it. The reviewer continuity packet also lists each
+  completed scope's changed files. Before this, the reviewer's only record of
+  an earlier scope was the coder's summary, so a later scope could meet its own
+  criteria by undoing an earlier one without the reviewer noticing. `scope_reviewer`
+  prompt spec bumped to version 3. (#10)
 
 ## [0.3.3] - 2026-08-14
 

@@ -9,6 +9,7 @@ import {
   getChangedFilesForRange,
   getCommitRange,
   getDiffForRange,
+  getDiffForRangePaths,
   getDiffStatForRange,
   getHeadCommit,
 } from '../../git.js';
@@ -64,6 +65,7 @@ export async function runReviewPhase(state: OrchestrationState, statePath: strin
       getDiffStatForRange,
       getChangedFilesForRange,
       getDiffForRange,
+      getDiffForRangePaths,
     }));
     reviewerSynthesis = synthesizeExecuteReviewerState({
       state,
