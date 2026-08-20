@@ -135,7 +135,17 @@ type NealJsonBlock = {
 };
 
 const SUMMARY_MAX_LENGTH = 800;
-const ORIGINAL_RESPONSE_MAX_LENGTH = 12000;
+// Bound on the original response echoed into a repair prompt. A real
+// `neal review` payload with nine findings ended at ~14,400 chars, so the old
+// 12,000 cap handed the repair model a JSON object cut off mid-finding and it
+// invented a "truncated" warning and dropped a finding (#11). 60,000 leaves
+// about 4x headroom over that payload while still bounding a runaway response.
+const ORIGINAL_RESPONSE_MAX_LENGTH = 60000;
+// Any fenced block, with or without a language label, that is the only
+// non-whitespace content of a response. Accepted with raw-JSON tolerance
+// because repair turns render "raw whole-response JSON object" as a ```json
+// fence and that payload is otherwise complete.
+const GENERIC_OPENING_FENCE_PATTERN = /^[ \t]*```[ \t]*[A-Za-z0-9_-]*[ \t]*$/;
 const NEAL_JSON_OPENING_FENCE_PATTERN = /^[ \t]*```[ \t]*neal-json[ \t]*$/;
 const CLOSING_FENCE_PATTERN = /^[ \t]*```[ \t]*$/;
 
@@ -213,12 +223,16 @@ export function extractStructuredJsonPayload(assistantText: string): StructuredJ
   const blocks = findNealJsonBlocks(assistantText);
 
   if (blocks.length > 1) {
+    // Still a failure, but hand the first block's JSON to the repair prompt so
+    // the repair model works from the real payload instead of a truncated
+    // transcript. The first block is the one the prompt contract asked for;
+    // later blocks are usually echoes or rewrites of it (#11).
     return {
       ok: false,
       errorKind: 'multiple_control_blocks',
       errorSummary: `Expected exactly one final neal-json control block, but found ${blocks.length}.`,
       prose: assistantText.trim(),
-      rawJson: null,
+      rawJson: blocks[0].rawJson,
     };
   }
 
@@ -245,6 +259,15 @@ export function extractStructuredJsonPayload(assistantText: string): StructuredJ
   }
 
   const trimmed = assistantText.trim();
+  const loneFencedJson = extractLoneFencedJson(trimmed);
+  if (loneFencedJson !== null) {
+    return parseExtractedJson({
+      source: 'raw-json',
+      prose: '',
+      rawJson: loneFencedJson,
+      malformedSummaryPrefix: 'The fenced JSON response was invalid',
+    });
+  }
   if (!looksLikeRawJsonObject(trimmed)) {
     return {
       ok: false,
@@ -792,6 +815,25 @@ function parseExtractedJson(args: {
 
 function looksLikeRawJsonObject(trimmed: string) {
   return trimmed.startsWith('{') || trimmed.startsWith('[');
+}
+
+// Returns the inner text when the whole (trimmed) response is exactly one
+// fenced block: an opening fence line, content with no fence lines inside, and
+// a closing fence as the last line. Null otherwise, including when anything
+// sits outside the fence; that case keeps its existing error.
+function extractLoneFencedJson(trimmed: string): string | null {
+  const lines = trimmed.split(/\r?\n/);
+  if (lines.length < 3) {
+    return null;
+  }
+  if (!GENERIC_OPENING_FENCE_PATTERN.test(lines[0]) || !CLOSING_FENCE_PATTERN.test(lines[lines.length - 1])) {
+    return null;
+  }
+  const inner = lines.slice(1, -1);
+  if (inner.some((line) => /^[ \t]*```/.test(line))) {
+    return null;
+  }
+  return inner.join('\n');
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {

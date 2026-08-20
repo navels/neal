@@ -156,6 +156,83 @@ test('rejects multiple neal-json control blocks', () => {
   }
 });
 
+test('multiple neal-json control blocks hand the first block to the repair prompt', () => {
+  const firstJson = reviewerJson(validReviewerPayload({ summary: 'First block.' }));
+  const secondJson = reviewerJson(validReviewerPayload({ summary: 'Second block (a rewrite of the first).' }));
+  const response = `Prose.\n\n\`\`\`neal-json\n${firstJson}\n\`\`\`\n\nRewrite follows.\n\n\`\`\`neal-json\n${secondJson}\n\`\`\``;
+  const result = extractStructuredJsonPayload(response);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.errorKind, 'multiple_control_blocks');
+    assert.equal(result.rawJson, firstJson);
+  }
+
+  const prompt = buildStructuredJsonRepairPrompt({
+    originalAssistantText: response,
+    invalidJson: result.ok ? null : result.rawJson,
+    extractionErrorSummary: result.ok ? null : result.errorSummary,
+    validationErrorSummary: null,
+    schemaLabel: 'reviewer_payload',
+    schema: buildReviewerSchema(),
+    attemptNumber: 1,
+    attemptLimit: 2,
+  });
+  assert.match(prompt, /Extracted invalid JSON, if any:\n```json\n/);
+  assert.ok(prompt.includes(firstJson), 'repair prompt should carry the first block JSON');
+  assert.doesNotMatch(prompt, /No JSON payload was extracted/);
+});
+
+test('repair prompt keeps a review-sized original response intact and still bounds a runaway one', () => {
+  const build = (originalAssistantText: string) =>
+    buildStructuredJsonRepairPrompt({
+      originalAssistantText,
+      invalidJson: null,
+      extractionErrorSummary: 'x',
+      validationErrorSummary: null,
+      schemaLabel: 'reviewer_payload',
+      schema: buildReviewerSchema(),
+      attemptNumber: 1,
+      attemptLimit: 2,
+    });
+
+  // A nine-finding review payload ended at ~14,400 chars; 30,000 must survive whole.
+  const reviewSized = 'r'.repeat(30000);
+  assert.ok(build(reviewSized).includes(reviewSized));
+  assert.doesNotMatch(build(reviewSized), /\[truncated/);
+
+  const runaway = 'r'.repeat(70000);
+  assert.match(build(runaway), /\[truncated 10000 byte\(s\)\]/);
+});
+
+test('accepts a lone fenced JSON object with the raw-JSON tolerance', () => {
+  for (const label of ['json', '']) {
+    const response = `\`\`\`${label}\n${reviewerJson()}\n\`\`\``;
+    const result = validateStructuredJsonPayload(response, validateReviewerPayload);
+
+    if (!result.ok) {
+      assert.fail(`${label || '(no label)'} fence: ${result.errorSummary}`);
+    }
+    assert.equal(result.source, 'raw-json');
+    assert.equal(result.prose, '');
+    assert.deepEqual(result.structured, validReviewerPayload());
+  }
+});
+
+test('a fenced JSON object with anything outside the fence is still rejected', () => {
+  const trailing = extractStructuredJsonPayload(`\`\`\`json\n${reviewerJson()}\n\`\`\`\n\nTrailing prose.`);
+  assert.equal(trailing.ok, false);
+  if (!trailing.ok) {
+    assert.equal(trailing.errorKind, 'missing_control_block');
+  }
+
+  const leading = extractStructuredJsonPayload(`Leading prose.\n\n\`\`\`json\n${reviewerJson()}\n\`\`\``);
+  assert.equal(leading.ok, false);
+  if (!leading.ok) {
+    assert.equal(leading.errorKind, 'missing_control_block');
+  }
+});
+
 test('rejects a non-final neal-json control block', () => {
   const result = extractStructuredJsonPayload(`${reviewerBlock()}\n\nTrailing prose is not allowed.`);
 

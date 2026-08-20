@@ -12,6 +12,14 @@ dependency-update policy.
 
 ### Fixed
 
+- Structured-JSON repair could not recover a payload that was already valid.
+  When a response had two `neal-json` blocks, the repair prompt got no JSON at
+  all; the original response was cut at 12,000 chars, which truncated a
+  nine-finding review payload mid-object; and a repair that answered with one
+  ```json fence was rejected for the fence label alone. The repair prompt now
+  receives the first block's JSON, the original-response bound is 60,000 chars,
+  and a lone fenced JSON object is accepted with the same tolerance as a raw
+  JSON object. (#11)
 - `neal review` printed `claude --resume <id>` for every recorded session, even
   when the reviewer was `openai-codex` and the id was a Codex thread id that
   `claude --resume` cannot open. Rounds now record which provider owns each
