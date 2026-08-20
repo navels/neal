@@ -10,25 +10,14 @@ dependency-update policy.
 
 ## [Unreleased]
 
-### Fixed
-
-- Structured-JSON repair could not recover a payload that was already valid.
-  When a response had two `neal-json` blocks, the repair prompt got no JSON at
-  all; the original response was cut at 12,000 chars, which truncated a
-  nine-finding review payload mid-object; and a repair that answered with one
-  ```json fence was rejected for the fence label alone. The repair prompt now
-  receives the first block's JSON, the original-response bound is 60,000 chars,
-  and a lone fenced JSON object is accepted with the same tolerance as a raw
-  JSON object. (#11)
-- `neal review` printed `claude --resume <id>` for every recorded session, even
-  when the reviewer was `openai-codex` and the id was a Codex thread id that
-  `claude --resume` cannot open. Rounds now record which provider owns each
-  session, and the resume hint prints that provider's command (`codex resume
-  <id>` for Codex, `claude --resume <id>` for Claude) or just the id when it
-  has no command for the provider.
+## [0.4.0] - 2026-08-20
 
 ### Changed
 
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.227` to `0.3.234`.
+  Re-qualified the native adapter with `neal compat`; no behavior change.
+- Updated `ai` from `7.0.58` to `7.0.65` and `@ai-sdk/openai-compatible` from
+  `3.0.27` to `3.0.30`.
 - Anthropic Claude structured-advisor (reviewer) and repair turns now set
   `strictMcpConfig`, so MCP servers from the operator's user settings, plugins,
   and project `.mcp.json` no longer load into the read-only reviewer session.
@@ -52,6 +41,23 @@ dependency-update policy.
   an earlier scope was the coder's summary, so a later scope could meet its own
   criteria by undoing an earlier one without the reviewer noticing. `scope_reviewer`
   prompt spec bumped to version 3. (#10)
+
+### Fixed
+
+- Structured-JSON repair could not recover a payload that was already valid.
+  When a response had two `neal-json` blocks, the repair prompt got no JSON at
+  all; the original response was cut at 12,000 chars, which truncated a
+  nine-finding review payload mid-object; and a repair that answered with one
+  ```json fence was rejected for the fence label alone. The repair prompt now
+  receives the first block's JSON, the original-response bound is 60,000 chars,
+  and a lone fenced JSON object is accepted with the same tolerance as a raw
+  JSON object. (#11)
+- `neal review` printed `claude --resume <id>` for every recorded session, even
+  when the reviewer was `openai-codex` and the id was a Codex thread id that
+  `claude --resume` cannot open. Rounds now record which provider owns each
+  session, and the resume hint prints that provider's command (`codex resume
+  <id>` for Codex, `claude --resume <id>` for Claude) or just the id when it
+  has no command for the provider.
 
 ## [0.3.3] - 2026-08-14
 
