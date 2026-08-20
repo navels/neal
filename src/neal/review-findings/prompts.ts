@@ -2,6 +2,18 @@ import type { ReviewFindingsContext, ReviewFindingsDraft } from './types.js';
 
 const DIFF_PREVIEW_LIMIT = 12000;
 
+// The accepted findings artifact is read by a human who was not part of the
+// review and may not know the codebase, so both the draft fields and the
+// reviewer's finalMarkdown must be written in plain language. Precision is not
+// negotiable: paths, identifiers, numbers, and SHAs stay exact; only the
+// wording around them gets simpler.
+export const REVIEW_FINDINGS_PLAIN_LANGUAGE_RULES = [
+  'Write for a human reader who was not part of this review and may not know the codebase: short sentences, one idea per sentence, everyday words.',
+  'Do not use jargon, shorthand, or undefined abbreviations when a plain phrase says the same thing. When a technical term is necessary, say in plain words what it means for the reader the first time you use it.',
+  'Keep exact file paths, identifiers, numbers, commit SHAs, and command names. Plain wording must not drop, blur, or soften a technical fact.',
+  'State each claim as what happens and why it matters. State each requiredAction as a concrete step a maintainer can take without re-reading the diff.',
+];
+
 export const REVIEW_FINDINGS_READ_ONLY_RULES = [
   'Do not mutate the repository.',
   'Do not make commits, amend commits, rebase, reset, squash, or rewrite history.',
@@ -81,6 +93,10 @@ export function buildReviewFindingsDraftPrompt(
     '## Read-Only Rules',
     '',
     ...REVIEW_FINDINGS_READ_ONLY_RULES.map((rule) => `- ${rule}`),
+    '',
+    '## Plain Language',
+    '',
+    ...REVIEW_FINDINGS_PLAIN_LANGUAGE_RULES.map((rule) => `- ${rule}`),
     ...(reviewFindings.length > 0
       ? [
           '',
@@ -102,7 +118,7 @@ export function buildReviewFindingsDraftPrompt(
     '',
     renderContextSummary(context),
     '',
-    'Return a summary, concrete findings, and warnings only. Each finding needs severity, files, claim, evidence, and requiredAction. Do not suggest that Neal applied fixes.',
+    'Return a summary, concrete findings, and warnings only. Each finding needs severity, files, claim, evidence, and requiredAction. Write the summary, every claim, evidence, requiredAction, and warning under the Plain Language rules above. Do not suggest that Neal applied fixes.',
   ].join('\n');
 }
 
@@ -110,11 +126,15 @@ export function buildReviewFindingsReviewPrompt(context: ReviewFindingsContext, 
   return [
     '# Neal Review Findings Review',
     '',
-    `Review findings draft round ${round} for missing important findings, weak evidence, false positives, wrong severity, unclear required actions, and insufficient test or integration analysis.`,
+    `Review findings draft round ${round} for missing important findings, weak evidence, false positives, wrong severity, unclear required actions, wording that breaks the Plain Language rules below, and insufficient test or integration analysis.`,
     '',
     '## Read-Only Rules',
     '',
     ...REVIEW_FINDINGS_READ_ONLY_RULES.map((rule) => `- ${rule}`),
+    '',
+    '## Plain Language',
+    '',
+    ...REVIEW_FINDINGS_PLAIN_LANGUAGE_RULES.map((rule) => `- ${rule}`),
     '',
     '## Review Instruction',
     '',
@@ -128,7 +148,7 @@ export function buildReviewFindingsReviewPrompt(context: ReviewFindingsContext, 
     '',
     renderDraftSummary(draft),
     '',
-    'Return verdict=`accepted` only when the final findings artifact is ready. Return verdict=`revise` with concrete findings when another draft is required. Return verdict=`blocked` only when a safe read-only review cannot be produced. Keep accepted finalMarkdown read-only and artifact-ready. Return empty strings for finalMarkdown or blockedReason when they do not apply.',
+    'Return verdict=`accepted` only when the final findings artifact is ready. Return verdict=`revise` with concrete findings when another draft is required. Return verdict=`blocked` only when a safe read-only review cannot be produced. Keep accepted finalMarkdown read-only, artifact-ready, and written under the Plain Language rules above. Return empty strings for finalMarkdown or blockedReason when they do not apply.',
   ].join('\n');
 }
 

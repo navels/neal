@@ -10,6 +10,14 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Changed
+
+- `neal review` draft and reviewer prompts now require plain-language wording
+  in the summary, findings, warnings, and accepted `finalMarkdown`: short
+  sentences, everyday words, no undefined shorthand, with exact paths,
+  identifiers, numbers, and SHAs preserved. The reviewer treats wording that
+  breaks those rules as a revise reason.
+
 ## [0.3.3] - 2026-08-14
 
 ### Changed
