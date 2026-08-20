@@ -56,7 +56,7 @@ All schema targets are `structured_json` with provider surface
 | `plan_author` | `buildPlanningPrompt`, `buildCoderPlanResponsePrompt` (`reviewMode=plan`, `reviewMode=derived-plan`) | `runCoderPlanRound`, `runCoderPlanResponseRound` | Primary planning: `buildCoderPlanSchema` / `validateCoderPlanPayload`. Response rounds: `buildCoderPlanResponseSchema` / `validateCoderPlanResponsePayload`. | Primary planning routes new/resumed structured sessions by persisted `plannerSessionProtocol`. Legacy marker parsing is retained only for active `legacy_marker_v1` sessions. |
 | `plan_reviewer` | `buildPlanReviewerPrompt` (`mode=plan`, `mode=derived-plan`) | `runPlanReviewerRound` | `buildPlanReviewerSchema` / `PlanReviewerPayload` | Execution-shape confirmation is part of the contract. Reviews material approach, scope, sequencing, and verification defects without turning the plan into an implementation inventory. |
 | `scope_coder` | `buildScopePrompt`, `buildCoderResponsePrompt` | `runCoderScopeRound`, `runCoderResponseRound` | Primary execution: `buildCoderScopeSchema` / `validateCoderScopePayload`. Response rounds: `buildCoderResponseSchema` / `validateCoderResponsePayload`. | Primary execution routes new/resumed structured sessions by persisted `coderSessionProtocol`. Legacy marker and progress-payload parsing is retained only for active `legacy_marker_v1` sessions. Also carries an `adjacent`-status blocked-recovery `response` variant (see below). |
-| `scope_reviewer` | `buildReviewerPrompt` | `runReviewerRound` | `buildReviewerSchema` / `ReviewerPayload` | Execute-scope review only. `neal review` external ranges use the separate read-only review-findings loop. Meaningful-progress remains a capability variant of `scope_reviewer`, not a new top-level id. Context includes a run-local `scratchDir`, but read-only reviewer prompts omit it. |
+| `scope_reviewer` | `buildReviewerPrompt` | `runReviewerRound` | `buildReviewerSchema` / `ReviewerPayload` | Execute-scope review only. `neal review` external ranges use the separate read-only review-findings loop. Meaningful-progress remains a capability variant of `scope_reviewer`, not a new top-level id. Context includes a run-local `scratchDir`, but read-only reviewer prompts omit it. Context also includes `earlierScopeChanges` when the current diff touches a file an earlier accepted scope changed (see below). |
 | `completion_coder` | `buildFinalCompletionSummaryPrompt` | `runCoderFinalCompletionSummaryRound` | `buildFinalCompletionSummarySchema` / `parseFinalCompletionSummaryPayload` | Structured advisor round, but still a coder-owned role/task. The completion packet includes aggregate review context when neal can compute it. |
 | `completion_reviewer` | `buildFinalCompletionReviewerPrompt` | `runReviewerFinalCompletionRound` | `buildFinalCompletionReviewerSchema` / `parseFinalCompletionReviewerPayload` | Whole-plan aggregate review remains distinct from ordinary scope review and keeps its final-completion verdict schema. Context includes a run-local `scratchDir`, but read-only reviewer prompts omit it. |
 | `consultant` | `buildConsultantPrompt` | `runConsultantRound` | `buildConsultantSchema` / `validateConsultantVerdictPayload` | Single no-read-safe variant for the read-only consultant. It judges entirely from neal-inlined context and its static instructions pass the shared no-read guard. |
@@ -124,6 +124,26 @@ When adding or changing a prompt spec:
 5. Variant `inputShape` keys must stay a subset of the spec's top-level `requiredContext` keys. neal validates that contract at module load so prompt-spec drift fails fast in tests and at startup.
 
 Final completion has one additional context assembly rule: `buildFinalCompletionPacket()` includes `aggregateReviewContext` for the whole implementation range from `initialBaseCommit` to the resolved final commit. When the range can be read, the packet carries commit subjects, diff stat, and changed files. When it cannot, it carries an explicit `unavailableReason` so the reviewer treats the missing aggregate range as evidence to consider instead of silently accepting completion.
+
+Execute-scope review has one more context assembly rule. The reviewer session
+persists across scopes while the coder session resets, so the reviewer is the
+only participant that remembers earlier scopes, and its record of each one is
+the coder's own summary in the continuity packet. To keep that memory honest,
+`runExecuteReviewerAdjudication` computes `earlierScopeChanges`: for every file
+in the current scope diff that an earlier accepted scope also changed (from
+`completedScopes[].changedFiles` in run state; blocked scopes and scopes
+replaced by a derived plan are skipped), it collects that earlier scope's diff
+restricted to the file (`git diff <scope.baseCommit>..<scope.finalCommit> --
+<file>`, a fixed-argv helper in `src/neal/git.ts`). `buildReviewerPrompt`
+renders them under "Earlier-scope changes to files in this diff", bounded by
+the same inline-section limit as the inlined range diff, and renders nothing
+when there is no overlap. The prompt always carries the matching doctrine line:
+a change to a file an earlier accepted scope signed off must preserve what that
+review accepted, and weakening or removing a test, assertion, or check an
+earlier scope introduced is a blocking finding unless the plan calls for it.
+The continuity packet lists each completed scope's changed files (capped per
+scope, with a count of what was cut) so the reviewer can also see which files
+an earlier scope owned.
 
 Execute-scope and final-completion reviewer context includes a deterministic
 run-local `scratchDir` under `.neal/runs/<run-id>/scratch/`. A `tool-access`

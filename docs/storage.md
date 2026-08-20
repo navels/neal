@@ -86,7 +86,7 @@ neal operations and diagnostics.
 | `.neal/runs/<run-id>/RUN_NARRATIVE.json` | Internal state | Narrative source data that neal may read to update the human narrative. It is not a public trace artifact. |
 | `.neal/runs/<run-id>/REVIEW.md` | User-facing human artifact | Scope or plan review history and findings. |
 | `.neal/runs/<run-id>/REVIEW-<commit>.md` | User-facing human artifact | Archived review history for an accepted scope commit. |
-| `.neal/runs/<run-id>/REVIEWER_CONTEXT.md` | Support/debug artifact | Bounded reviewer-continuity packet rendered for inspection. |
+| `.neal/runs/<run-id>/REVIEWER_CONTEXT.md` | Support/debug artifact | Bounded reviewer-continuity packet rendered for inspection: completed scopes with their changed files, findings, inherited plan-review debt, and citations. |
 | `.neal/runs/<run-id>/REVIEWER_CONTEXT.json` | Support/debug artifact | Machine-readable reviewer-continuity packet without the rendered prompt markdown. |
 | `.neal/runs/<run-id>/RECOVERY.md` | User-facing human artifact | Interactive blocked-recovery transcript/history for a run. |
 | `.neal/runs/<run-id>/FINAL_COMPLETION_REVIEW.md` | User-facing human artifact | Whole-plan final completion review. |

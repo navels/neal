@@ -9,6 +9,10 @@ export const REVIEWER_CONTEXT_MARKDOWN = 'REVIEWER_CONTEXT.md';
 
 const COMPLETED_SCOPE_LIMIT = 12;
 const FINDING_LIMIT = 24;
+// Files listed per completed scope. The full list stays in RUN_STATE.json;
+// the packet carries enough for the reviewer to see which files an earlier
+// scope owned, with an explicit count when the list is cut.
+const COMPLETED_SCOPE_CHANGED_FILE_LIMIT = 20;
 
 export type ReviewerContextCitation = {
   label: string;
@@ -36,6 +40,8 @@ export type ReviewerContextPacket = {
     marker: string;
     finalCommit: string | null;
     summary: string | null;
+    changedFiles: string[];
+    changedFileCount: number;
     reviewRounds: number;
     findings: number;
     residualReviewDebt: number;
@@ -106,6 +112,8 @@ export function buildReviewerContextPacket(args: {
     marker: scope.marker,
     finalCommit: scope.finalCommit,
     summary: scope.summary ?? null,
+    changedFiles: scope.changedFiles.slice(0, COMPLETED_SCOPE_CHANGED_FILE_LIMIT),
+    changedFileCount: scope.changedFiles.length,
     reviewRounds: scope.reviewRounds,
     findings: scope.findings,
     residualReviewDebt: scope.residualReviewDebt?.length ?? 0,
@@ -200,7 +208,7 @@ function buildReviewerContextCitations(state: OrchestrationState): ReviewerConte
 export function renderReviewerContextMarkdown(packet: Omit<ReviewerContextPacket, 'promptMarkdown'>) {
   const scopeLines = packet.completedScopes.length
     ? packet.completedScopes.map((scope) =>
-      `- Scope ${scope.number}: ${scope.result}; marker=${scope.marker}; finalCommit=${scope.finalCommit ?? 'none'}; reviewRounds=${scope.reviewRounds}; findings=${scope.findings}; residualDebt=${scope.residualReviewDebt}; summary=${scope.summary ?? 'none'}`,
+      `- Scope ${scope.number}: ${scope.result}; marker=${scope.marker}; finalCommit=${scope.finalCommit ?? 'none'}; reviewRounds=${scope.reviewRounds}; findings=${scope.findings}; residualDebt=${scope.residualReviewDebt}; files=${formatCompletedScopeFiles(scope)}; summary=${scope.summary ?? 'none'}`,
     )
     : ['- none'];
   const findingLines = packet.findings.length
@@ -252,6 +260,14 @@ export function renderReviewerContextMarkdown(packet: Omit<ReviewerContextPacket
     '## Citations',
     ...packet.citations.map((citation) => `- ${citation.label}: ${citation.path}`),
   ].join('\n');
+}
+
+function formatCompletedScopeFiles(scope: { changedFiles: string[]; changedFileCount: number }) {
+  if (scope.changedFiles.length === 0) {
+    return 'none';
+  }
+  const omitted = scope.changedFileCount - scope.changedFiles.length;
+  return omitted > 0 ? `${scope.changedFiles.join(', ')} (+${omitted} more)` : scope.changedFiles.join(', ');
 }
 
 function runIdFromDir(runDir: string) {

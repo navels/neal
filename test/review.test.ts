@@ -28,7 +28,7 @@ import {
   getReviewerCapability,
   validateAdjudicationSpecContracts,
 } from '../src/neal/adjudicator/specs.js';
-import { runExecuteReviewerAdjudication } from '../src/neal/adjudicator/execute.js';
+import { collectEarlierScopeChanges, runExecuteReviewerAdjudication } from '../src/neal/adjudicator/execute.js';
 import { clearConfigCache } from '../src/neal/config.js';
 import { CONFLICTING_OUTPUT_FORMAT_MARKERS } from '../src/neal/agents/structured-json.js';
 import { completionJsonOutputFormatLines } from '../src/neal/prompts/specialized.js';
@@ -3057,4 +3057,146 @@ test('scope review prompt reaching a read-only structured advisor instructs read
 
   assert.equal(result.reviewerResult.sessionHandle, null);
   assert.equal(result.reviewerResult.meaningfulProgress.action, 'accept');
+});
+
+// Issue #10: the reviewer session is the only long-lived memory across scopes,
+// and its record of an earlier scope is the coder's summary. When the current
+// diff touches a file an earlier accepted scope changed, the adjudicator hands
+// the reviewer that scope's per-file diff so the overlap is read, not recalled.
+test('execute reviewer adjudication inlines earlier accepted scopes\' per-file diffs for files the current diff touches again', async () => {
+  const { state } = await createState({
+    baseCommit: 'base600',
+    currentScopeNumber: 6,
+    currentScopeProgressJustification: {
+      milestoneTargeted: 'Scope 6 adjusts the shared helper.',
+      newEvidence: 'The scope commit touches the helper and its test.',
+      whyNotRedundant: 'Scope 6 work.',
+      nextStepUnlocked: 'The reviewer can adjudicate.',
+    },
+  });
+  const scope = (overrides: Partial<OrchestrationState['completedScopes'][number]>): OrchestrationState['completedScopes'][number] => ({
+    number: '1',
+    marker: 'AUTONOMY_SCOPE_DONE',
+    result: 'accepted',
+    baseCommit: 'base100',
+    finalCommit: 'final100',
+    summary: null,
+    commitSubject: null,
+    changedFiles: [],
+    reviewRounds: 1,
+    findings: 0,
+    residualReviewDebt: [],
+    archivedReviewPath: null,
+    blocker: null,
+    derivedFromParentScope: null,
+    replacedByDerivedPlanPath: null,
+    ...overrides,
+  });
+  state.completedScopes = [
+    // Accepted and overlapping on one file: included.
+    scope({ number: '3', baseCommit: 'base300', finalCommit: 'final300', changedFiles: ['src/helper.ts', 'src/unrelated.ts'] }),
+    // Blocked: skipped even though it overlaps.
+    scope({ number: '4', result: 'blocked', marker: 'AUTONOMY_BLOCKED', baseCommit: 'base400', finalCommit: null, changedFiles: ['src/helper.ts'] }),
+    // Replaced by a derived plan: its work was reset, so skipped.
+    scope({ number: '5', baseCommit: 'base500', finalCommit: 'final500', changedFiles: ['test/helper.test.ts'], replacedByDerivedPlanPath: '/tmp/DERIVED.md' }),
+    // Accepted, no overlap: nothing to inline.
+    scope({ number: '5b', baseCommit: 'base550', finalCommit: 'final550', changedFiles: ['src/elsewhere.ts'] }),
+  ];
+  const diffCalls: Array<{ base: string; head: string; paths: readonly string[] }> = [];
+  let received: unknown = undefined;
+
+  await runExecuteReviewerAdjudication({
+    state,
+    getHeadCommit: async () => 'head600',
+    getCommitRange: async () => ['head600 Adjust the shared helper'],
+    getDiffStatForRange: async () => '2 files changed',
+    getChangedFilesForRange: async () => ['src/helper.ts', 'test/helper.test.ts'],
+    getDiffForRange: async () => 'current scope diff',
+    getDiffForRangePaths: async (_cwd, base, head, paths) => {
+      diffCalls.push({ base, head, paths });
+      return `diff for ${paths.join(',')} in ${base}..${head}`;
+    },
+    runReviewerRound: async (args) => {
+      received = args.earlierScopeChanges;
+      return {
+        sessionHandle: null,
+        summary: 'Reviewed.',
+        findings: [],
+        meaningfulProgress: { action: 'accept', rationale: 'Advances the objective.' },
+      };
+    },
+  });
+
+  assert.deepEqual(diffCalls, [{ base: 'base300', head: 'final300', paths: ['src/helper.ts'] }]);
+  assert.deepEqual(received, [
+    {
+      file: 'src/helper.ts',
+      scopeNumber: '3',
+      baseCommit: 'base300',
+      finalCommit: 'final300',
+      diff: 'diff for src/helper.ts in base300..final300',
+    },
+  ]);
+});
+
+test('collectEarlierScopeChanges returns nothing and calls no git when no accepted scope overlaps', async () => {
+  const { state } = await createState({ baseCommit: 'base200' });
+  let calls = 0;
+  const changes = await collectEarlierScopeChanges({
+    state,
+    changedFiles: ['src/new.ts'],
+    getDiffForRangePaths: async () => {
+      calls += 1;
+      return 'unexpected';
+    },
+  });
+  assert.deepEqual(changes, []);
+  assert.equal(calls, 0);
+});
+
+// The prompt renders the earlier-scope section only with an overlap, and the
+// preservation rule in every case: a tool-access reviewer can find earlier
+// scope history itself, and the rule must not depend on Neal inlining it.
+test('scope reviewer prompt renders earlier-scope per-file diffs when supplied and the preservation rule always', () => {
+  const base = {
+    planDoc: '/tmp/PLAN.md',
+    baseCommit: 'base600',
+    headCommit: 'head600',
+    commits: ['head600 Adjust the shared helper'],
+    diffStat: '2 files changed',
+    changedFiles: ['src/helper.ts', 'test/helper.test.ts'],
+    round: 1,
+    reviewMarkdownPath: '/tmp/REVIEW.md',
+    parentScopeLabel: '6',
+    progressJustification: {
+      milestoneTargeted: 'm',
+      newEvidence: 'e',
+      whyNotRedundant: 'w',
+      nextStepUnlocked: 'n',
+    },
+    recentHistorySummary: 'none',
+    scratchDir: '/tmp/scratch',
+  };
+  const withOverlap = buildReviewerPrompt({
+    ...base,
+    earlierScopeChanges: [
+      {
+        file: 'src/helper.ts',
+        scopeNumber: '3',
+        baseCommit: 'base300',
+        finalCommit: 'final300',
+        diff: 'diff --git a/src/helper.ts b/src/helper.ts\n+assert.equal(result, 42);\n',
+      },
+    ],
+  });
+  const withoutOverlap = buildReviewerPrompt({ ...base, earlierScopeChanges: [] });
+
+  assert.match(withOverlap, /## Earlier-scope changes to files in this diff/);
+  assert.match(withOverlap, /### src\/helper\.ts \(scope 3, base300\.\.final300\)/);
+  assert.match(withOverlap, /\+assert\.equal\(result, 42\);/);
+  assert.doesNotMatch(withoutOverlap, /## Earlier-scope changes to files in this diff/);
+  for (const prompt of [withOverlap, withoutOverlap]) {
+    assert.match(prompt, /must preserve what that scope's review accepted/);
+    assert.match(prompt, /Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding/);
+  }
 });

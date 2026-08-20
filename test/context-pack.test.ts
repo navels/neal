@@ -260,7 +260,11 @@ test('reviewer context packet is bounded and persists citations instead of full 
         finalCommit: `commit-${index + 1}`,
         summary: `Accepted scope ${index + 1}`,
         commitSubject: `Commit scope ${index + 1}`,
-        changedFiles: [`src/file-${index + 1}.ts`],
+        // Scope 3 carries 25 files so the per-scope file cap is exercised.
+        changedFiles:
+          index + 1 === 3
+            ? Array.from({ length: 25 }, (_, fileIndex) => `src/scope3/file-${fileIndex + 1}.ts`)
+            : [`src/file-${index + 1}.ts`],
         reviewRounds: 1,
         findings: index,
         residualReviewDebt: [],
@@ -297,6 +301,15 @@ test('reviewer context packet is bounded and persists citations instead of full 
   assert.equal(packet.createdAt, '2026-04-25T18:15:52.082Z');
   assert.equal(packet.completedScopes.length, 12);
   assert.equal(packet.completedScopes[0]?.number, '3');
+  // Each completed scope names the files it changed (issue #10), capped per
+  // scope with an explicit count of what was cut.
+  assert.equal(packet.completedScopes[0]?.changedFiles.length, 20);
+  assert.equal(packet.completedScopes[0]?.changedFileCount, 25);
+  assert.deepEqual(packet.completedScopes[1]?.changedFiles, ['src/file-4.ts']);
+  assert.equal(packet.completedScopes[1]?.changedFileCount, 1);
+  assert.match(packet.promptMarkdown, /Scope 4: .*files=src\/file-4\.ts;/);
+  assert.match(packet.promptMarkdown, /Scope 3: .*src\/scope3\/file-20\.ts \(\+5 more\);/);
+  assert.doesNotMatch(packet.promptMarkdown, /src\/scope3\/file-21\.ts/);
   assert.equal(packet.findings.length, 24);
   assert.equal(packet.findings[0]?.canonicalId, 'canonical-5');
   assert.equal(packet.limits.truncatedCompletedScopes, true);
