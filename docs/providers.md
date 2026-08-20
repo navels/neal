@@ -342,9 +342,13 @@ neal's shared `neal-json-block-v1` runtime appends provider-neutral transport
 instructions requiring optional useful prose followed by exactly one final
 fenced `neal-json` JSON block. It then extracts, parses, validates, and repairs
 that control object with the caller-supplied schema label, schema, validator,
-and repair limit. Raw whole-response JSON objects are accepted only as a
-compatibility tolerance for older mocks and pre-migration paths. The prompt
-contract remains prose plus one final `neal-json` block. State-facing
+and repair limit. Raw whole-response JSON objects, and a single fenced JSON
+object (any fence label) that is the whole response, are accepted only as a
+compatibility tolerance for older mocks, pre-migration paths, and repair turns
+that render the payload as a ```json fence. The prompt contract remains prose
+plus one final `neal-json` block. When a response carries more than one
+`neal-json` block it is still rejected, but the first block's JSON is passed
+to the repair prompt so repair works from the real payload. State-facing
 `structured_output_received` telemetry is emitted only after neal validation
 succeeds.
 
