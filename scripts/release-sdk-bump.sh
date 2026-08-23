@@ -234,8 +234,14 @@ until gh api "repos/{owner}/{repo}/actions/runs/${RUN_ID}/jobs" \
   sleep 15
 done
 
+# `npm stage list <pkg>` prints one record per stage as "key: value" lines
+# ("id: <uuid>", "version: <semver>", ...). Take the id from the record whose
+# version line matches this release.
 STAGE_LIST="$(npm stage list "$PACKAGE_NAME" 2>/dev/null || true)"
-STAGE_ID="$(grep -F "$VERSION" <<<"$STAGE_LIST" | grep -oE '[0-9a-zA-Z-]{16,}' | grep -v "$PACKAGE_NAME" | head -1 || true)"
+STAGE_ID="$(awk -v version="$VERSION" '
+  $1 == "id:" { id = $2 }
+  $1 == "version:" && $2 == version { print id; exit }
+' <<<"$STAGE_LIST")"
 if [ -z "$STAGE_ID" ]; then
   echo "Could not extract the stage ID automatically. npm stage list output:"
   echo "$STAGE_LIST"
