@@ -37,6 +37,15 @@ if git status --porcelain | grep -q .; then
   exit 1
 fi
 
+# The script fast-forwards local main twice (after each squash-merge), which
+# silently fails mid-release if local main carries unpushed commits. Catch
+# that before merging anything.
+git fetch origin main --quiet
+if [ "$(git rev-list --count origin/main..main)" -gt 0 ]; then
+  echo "release-sdk-bump: local main is ahead of origin/main; push (or drop) those commits first." >&2
+  exit 1
+fi
+
 # --- validate the dependency PR ---
 PR_JSON="$(gh pr view "$PR" --json state,title,files,reviews,headRefOid,baseRefOid)"
 PR_STATE="$(node -pe "JSON.parse(process.argv[1]).state" "$PR_JSON")"
