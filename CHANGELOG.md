@@ -10,6 +10,13 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-23
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.235` to `0.3.237`.
+  Re-qualified the native adapter with `neal compat`; no behavior change.
+
 ## [0.4.1] - 2026-08-21
 
 ### Changed
