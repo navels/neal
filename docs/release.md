@@ -45,6 +45,15 @@ patch release for a compatibility fix that preserves documented behavior, a
 minor release for behavior changes before `1.0.0`, and a major release after
 `1.0.0` if a documented public contract breaks.
 
+For a qualified dependency-bump PR, `scripts/release-sdk-bump.sh <pr-number>`
+runs this entire process as one command: it merges the dependency PR, opens and
+merges the release-preparation pull request with a generated changelog section,
+runs the Publish workflow dry run and, after a confirmation, the real run, and
+prompts for the npm 2FA stage approval. It refuses PRs that touch anything
+beyond `package.json` and `pnpm-lock.yaml`, and refuses native agentic-SDK
+bumps that lack a `scripts/qualify-sdk.sh` PASS review. Every other release
+follows the manual steps below.
+
 ## Prepare a release
 
 Bump `package.json.version` and add a nonempty `## [<version>]` section to

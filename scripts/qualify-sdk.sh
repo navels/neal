@@ -10,8 +10,10 @@
 # present on this machine. On PASS it posts the compat matrix to the PR and
 # approves it; on FAIL it posts the evidence and leaves the PR open.
 #
-# Usage: scripts/qualify-sdk.sh <pr-number> [--merge]
-#   --merge  squash-merge the PR after a PASS (default: approve only)
+# Usage: scripts/qualify-sdk.sh <pr-number>
+#
+# On PASS the PR is approved but left open; release it with
+# scripts/release-sdk-bump.sh, which merges it as part of the release.
 #
 # Requirements: gh (authenticated), node + pnpm on PATH, and the relevant
 # provider CLI logged in (claude / codex). Runs in a throwaway git worktree —
@@ -19,8 +21,7 @@
 
 set -euo pipefail
 
-PR="${1:?usage: scripts/qualify-sdk.sh <pr-number> [--merge]}"
-MERGE_AFTER="${2:-}"
+PR="${1:?usage: scripts/qualify-sdk.sh <pr-number>}"
 
 for tool in gh git node pnpm; do
   command -v "$tool" >/dev/null 2>&1 || { echo "qualify-sdk: missing required tool: $tool" >&2; exit 1; }
@@ -122,12 +123,8 @@ if [ "$PASS" = "true" ]; then
     "$QUALIFIED" "$MATRIX")"
   gh pr review "$PR" --approve --body "$BODY"
   echo "PASS — approved PR #${PR}."
-  if [ "$MERGE_AFTER" = "--merge" ]; then
-    gh pr merge "$PR" --squash
-    echo "Merged PR #${PR}."
-  else
-    echo "Merge when ready: gh pr merge ${PR} --squash"
-  fi
+  echo "Release when ready: scripts/release-sdk-bump.sh ${PR}"
+  echo "(merges the PR and runs the full release; or merge only: gh pr merge ${PR} --squash)"
 else
   ERR_TAIL="$(tail -n 15 "$WORK"/compat-*.err 2>/dev/null || true)"
   BODY="$(printf '**SDK qualification: FAIL** — %s.\n\n<details><summary>compat matrices</summary>\n\n%s\n\n</details>\n\n<details><summary>stderr tails</summary>\n\n\`\`\`\n%s\n\`\`\`\n</details>' \

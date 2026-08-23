@@ -46,12 +46,13 @@ is gated on it as a whole.
    It runs the full suite plus a live `neal compat --role all` pass-through on
    every bumped adapter in the PR (in a throwaway worktree, with roles and
    models pinned explicitly so nothing leaks from `~/.neal/config.yml`), posts
-   the compat matrices to the PR, and approves on PASS (`--merge` also
-   squash-merges).
-4. **Adopt.** Merge, bump neal's version, add a CHANGELOG entry noting the bump +
-   any behavior change, and cut a release via the existing workflow. Urgent
-   bumps (a fix neal needs immediately) may skip the Renovate soak with a
-   manual PR. Qualify them the same way.
+   the compat matrices to the PR, and approves on PASS, leaving the PR open
+   for the release script.
+4. **Adopt.** Run `scripts/release-sdk-bump.sh <pr-number>`: it merges the PR,
+   opens and merges the release-preparation PR (version bump + changelog), and
+   runs the Publish workflow through the npm 2FA approval. See
+   [docs/release.md](release.md). Urgent bumps (a fix neal needs immediately)
+   may skip the Renovate soak with a manual PR. Qualify them the same way.
 
 ## TypeScript 6 and 7 side by side
 
