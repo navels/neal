@@ -7,7 +7,6 @@ import {
   getDerivedPlanSectionContractLines,
   getProtocolMarkerArtifactProhibitionLines,
   getTerminalMarkerArtifactBoundaryLines,
-  getUnattendedAutonomyLines,
 } from './shared.js';
 import { assertPromptBuilder } from './assert-builder.js';
 import { getUserGuidanceLines } from './guidance.js';
@@ -173,7 +172,7 @@ function getAuthoredOneShotReviewerLines(authoredOneShot?: boolean) {
 export function buildPlanningPrompt(
   planDoc: string,
   planDocument?: string | null,
-  options?: { unattended?: boolean; authoredOneShot?: boolean },
+  options?: { authoredOneShot?: boolean },
 ) {
   const spec = assertPromptBuilder('plan_author', 'buildPlanningPrompt', PROMPT_MODULE_PATH);
   const primaryVariant = spec.variants.find((variant) => variant.kind === 'primary');
@@ -185,7 +184,6 @@ export function buildPlanningPrompt(
     ...getPlanningPromptBaseLines(planDoc),
     ...getInlineCurrentPlanLines(planDocument),
     ...getAuthoredOneShotPlanningLines(options?.authoredOneShot),
-    ...getUnattendedAutonomyLines(options?.unattended),
     ...getProtocolMarkerArtifactProhibitionLines(),
     ...getCanonicalPlanContractLines(),
     'If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.',
@@ -227,8 +225,6 @@ export function buildPlanReviewerPrompt(args: {
   parentPlanContent?: string | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
-  // When true, the run is unattended: render the no-operator autonomy line.
-  unattended?: boolean;
   // When true, the top-level plan was authored `one_shot`: render a line instructing the
   // reviewer to raise a blocking finding on any shape expansion or added orchestration.
   authoredOneShot?: boolean;
@@ -286,7 +282,6 @@ export function buildPlanReviewerPrompt(args: {
     reviewHistoryLine,
     ...getAuthoredOneShotReviewerLines(args.authoredOneShot),
     ...getReviewerContextLines(args.reviewerContext),
-    ...getUnattendedAutonomyLines(args.unattended),
     ...getUserGuidanceLines('reviewer'),
     '',
     planInspectionLine,

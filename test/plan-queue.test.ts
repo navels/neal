@@ -113,7 +113,6 @@ function createFakeQueueRunner(
     planDoc: string;
     itemIndex: number;
     allowedDirtyPaths: string[];
-    unattended: boolean;
     squashOnCompletion: boolean;
   }>;
   cleanCalls: Array<{ cwd: string; paths: string[] }>;
@@ -127,7 +126,6 @@ function createFakeQueueRunner(
     planDoc: string;
     itemIndex: number;
     allowedDirtyPaths: string[];
-    unattended: boolean;
     squashOnCompletion: boolean;
   }> = [];
   const cleanCalls: Array<{ cwd: string; paths: string[] }> = [];
@@ -165,7 +163,6 @@ function createFakeQueueRunner(
           planDoc: args.planDoc,
           itemIndex: args.item.index,
           allowedDirtyPaths: args.stage === 'execution' ? [args.planDoc] : [],
-          unattended: args.unattended,
           squashOnCompletion: args.squashOnCompletion,
         });
         itemDebts.push({ stage: args.stage, planReviewDebt: args.item.planReviewDebt });
@@ -184,7 +181,6 @@ function createFakeQueueRunner(
             topLevelMode: args.stage === 'planning' ? 'plan' : 'execute',
             allowedDirtyPaths: args.stage === 'execution' ? [args.planDoc] : [],
             agentConfig: getDefaultAgentConfig(),
-            unattended: args.unattended,
             autoSquashOnCompletion: args.squashOnCompletion,
             progressJsonPath: join(runDir, 'plan-progress.json'),
             progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
@@ -573,7 +569,6 @@ test('runPlanAndExecuteQueue composes one planning child and one execution child
       planDoc: join(cwd, 'plans', 'A.md'),
       itemIndex: 0,
       allowedDirtyPaths: [],
-      unattended: false,
       squashOnCompletion: true,
     },
     {
@@ -581,7 +576,6 @@ test('runPlanAndExecuteQueue composes one planning child and one execution child
       planDoc: join(cwd, 'plans', 'A.md'),
       itemIndex: 0,
       allowedDirtyPaths: [join(cwd, 'plans', 'A.md')],
-      unattended: false,
       squashOnCompletion: true,
     },
   ]);
@@ -1350,50 +1344,6 @@ test('continuePlanAndExecuteQueueFromChildRun advances from resumed failed plann
     calls.map((call) => `${call.itemIndex}:${call.stage}`),
     ['0:planning', '0:execution'],
   );
-});
-
-test('continuePlanAndExecuteQueueFromChildRun carries unattended into the execution child after a resumed planning child', async () => {
-  const { cwd } = await createQueueFixture('neal-queue-resumed-unattended-', ['A.md']);
-  const { calls, deps } = createFakeQueueRunner(cwd, [{ status: 'failed' }, { status: 'done' }]);
-
-  // Original headless run: the planning child halts (e.g. blocked) and is later
-  // resumed in a separate process where the queue arg is no longer supplied.
-  const failedQueue = await runPlanAndExecuteQueue({
-    cwd,
-    planDocs: ['plans/A.md'],
-    agentConfig: getDefaultAgentConfig(),
-    unattended: true,
-    deps,
-  });
-  assert.equal(calls[0]?.unattended, true);
-
-  const failedPlanningStatePath = resolveQueueStoredPath(cwd, failedQueue.items[0].planningStatePath!);
-  const resumedChildState = await loadState(failedPlanningStatePath);
-  // The resumed child's persisted state retained unattended=true from creation.
-  assert.equal(resumedChildState.unattended, true);
-  const childResult: ExecuteRunResult = {
-    finalState: {
-      ...resumedChildState,
-      status: 'done',
-      phase: 'done',
-      planDoc: join(cwd, 'plans', 'A.md'),
-    },
-    waitingForOperatorGuidance: false,
-    waitingForManualGate: false,
-    stopRequestedAfterScope: false,
-  };
-
-  // Continuation does NOT re-supply unattended; it must derive it from the
-  // resumed child's finalState so the execution child stays headless.
-  const completedQueue = await continuePlanAndExecuteQueueFromChildRun({
-    childResult,
-    agentConfig: getDefaultAgentConfig(),
-    deps,
-  });
-
-  assert.equal(completedQueue?.status, 'completed');
-  const executionCall = calls.find((call) => call.stage === 'execution');
-  assert.equal(executionCall?.unattended, true);
 });
 
 test('continuePlanAndExecuteQueueFromChildRun carries --no-squash into the execution child after a resumed planning child', async () => {

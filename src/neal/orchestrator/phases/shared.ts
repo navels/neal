@@ -140,46 +140,6 @@ export async function persistCoderFailureState(
   return failedState;
 }
 
-// The structural origin of an unattended block that could not be resolved
-// without an operator. Carried on the `unattended.block_unresolved` log event so
-// the classification rides the event/retrospective rather than a new state field.
-export type UnattendedBlockSite =
-  | 'interactive_blocked_recovery'
-  | 'final_completion_review'
-  | 'reviewer_plan';
-
-// Shared terminal-fail action for the three operator-block sites under
-// `unattended`. Mirrors `persistCoderFailureState`: save `status:'failed'`,
-// re-render the execution artifacts, write a `failed` checkpoint retrospective,
-// and emit a classified log event — deliberately WITHOUT `notifyBlocked` (that
-// is the attended wait notification). Any produced diff/plan is left in the
-// worktree/run dir as an artifact and is not submitted, exactly as today's
-// failed runs leave it. `phase`/`blockedFromPhase` are preserved for
-// diagnostics (defaulting `blockedFromPhase` to the current phase).
-export async function persistUnattendedBlockUnresolvedFailure(
-  state: OrchestrationState,
-  statePath: string,
-  site: UnattendedBlockSite,
-  logger?: RunLogger,
-) {
-  const blockedFromPhase = state.blockedFromPhase ?? state.phase;
-  const failedState = await saveState(statePath, {
-    ...state,
-    status: 'failed',
-    blockedFromPhase,
-  });
-  await writeExecutionArtifacts(failedState);
-  await writeCheckpointRetrospective(failedState, 'failed');
-  await logger?.event('unattended.block_unresolved', {
-    reason: 'unattended_block_unresolved',
-    site,
-    blockedFromPhase,
-    phase: failedState.phase,
-    scopeNumber: failedState.currentScopeNumber,
-  });
-  return failedState;
-}
-
 export async function persistBlockedScope(state: OrchestrationState, statePath: string, reason: string) {
   const scopeLabel = getCurrentScopeLabel(state);
   if (state.completedScopes.some((scope) => scope.number === scopeLabel)) {

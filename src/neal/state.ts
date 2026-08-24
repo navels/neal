@@ -127,8 +127,6 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     topLevelMode: init.topLevelMode,
     allowedDirtyPaths: [...init.allowedDirtyPaths],
     agentConfig: init.agentConfig,
-    unattended: init.unattended ?? false,
-    unattendedAutoResumeCount: 0,
     consultantAttemptCount: 0,
     autoSquashOnCompletion: init.autoSquashOnCompletion ?? true,
     progressJsonPath: init.progressJsonPath,
@@ -1135,8 +1133,6 @@ function normalizeStateV1(parsed: unknown): OrchestrationState {
     topLevelMode,
     allowedDirtyPaths: readStringArray(state, 'allowedDirtyPaths'),
     agentConfig: hydrateAgentConfig(readRequired(state, 'agentConfig'), 'agentConfig'),
-    unattended: readOptionalBoolean(state, 'unattended') ?? false,
-    unattendedAutoResumeCount: readOptionalSafeInteger(state, 'unattendedAutoResumeCount') ?? 0,
     consultantAttemptCount: readOptionalSafeInteger(state, 'consultantAttemptCount') ?? 0,
     // Legacy-tolerant: states persisted before this field existed hydrate to
     // true, preserving the historical always-squash behavior on resume.

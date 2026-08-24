@@ -21,6 +21,7 @@ import {
   formatCompatTable,
   getCompatExamplesDir,
   isOpenAICompatibleProvider,
+  isOperatorStopFinalState,
   loadCompatManifest,
   parseCompatArgs,
   rolesForSelection,
@@ -31,7 +32,7 @@ import {
   type CompatManifest,
   type CompatReport,
 } from '../src/neal/commands/compat.js';
-import { clearConfigCache } from '../src/neal/config.js';
+import { clearConfigCache, getNotifyBin } from '../src/neal/config.js';
 import {
   clearProviderDefinitionRegistrationsForTesting,
   registerProviderDefinitionForTesting,
@@ -44,7 +45,7 @@ import type {
 } from '../src/neal/review-findings/types.js';
 import { CoderRoundError } from '../src/neal/agents/structured-coder.js';
 import { NealProviderError } from '../src/neal/providers/types.js';
-import type { AgentConfig } from '../src/neal/types.js';
+import type { AgentConfig, OrchestrationState } from '../src/neal/types.js';
 import { createFakeProviderDefinition } from './helpers/fake-provider.js';
 import { runGit } from './helpers/git.js';
 
@@ -204,31 +205,108 @@ test('rolesForSelection expands all to coder/reviewer/planner', () => {
   assert.deepEqual(rolesForSelection('reviewer'), ['reviewer']);
 });
 
+// A minimal OrchestrationState carrying just the fields the operator-stop
+// derivation reads (mirrors test/writer-exit-codes.test.ts).
+function makeFinalState(overrides: Partial<OrchestrationState>): OrchestrationState {
+  return {
+    topLevelMode: 'execute',
+    derivedPlanPath: null,
+    status: 'failed',
+    phase: 'coder_scope',
+    pendingPlanReviewGuidance: null,
+    blockedFromPhase: null,
+    interactiveBlockedRecovery: null,
+    manualGate: null,
+    rounds: [],
+    findings: [],
+    maxRounds: 5,
+    ...overrides,
+  } as OrchestrationState;
+}
+
+// Site A's operator-wait shape: status stays 'running' while the run waits in
+// interactive blocked recovery for `neal resume --message`.
+function makeInteractiveRecoveryWaitState(): OrchestrationState {
+  return makeFinalState({
+    status: 'running',
+    phase: 'interactive_blocked_recovery',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-08-24T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need operator guidance.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      turns: [],
+    },
+  });
+}
+
 test('classifyWriterFailure maps run state to taxonomy modes by precedence', () => {
   assert.equal(
-    classifyWriterFailure({ finalStatus: 'failed', events: [{ type: 'provider.provider_error' }], threwDuringRun: false }),
+    classifyWriterFailure({
+      finalState: makeFinalState({}),
+      events: [{ type: 'provider.provider_error' }],
+      threwDuringRun: false,
+    }),
     'provider_failed',
   );
   // provider_failed wins over block_unresolved per the taxonomy ordering.
   assert.equal(
     classifyWriterFailure({
-      finalStatus: 'failed',
-      events: [{ type: 'provider.provider_error' }, { type: 'unattended.block_unresolved' }],
+      finalState: makeFinalState({ status: 'blocked', phase: 'blocked' }),
+      events: [{ type: 'provider.provider_error' }],
       threwDuringRun: false,
     }),
     'provider_failed',
   );
   assert.equal(
-    classifyWriterFailure({ finalStatus: 'failed', events: [{ type: 'unattended.block_unresolved' }], threwDuringRun: false }),
-    'block_unresolved',
-  );
-  assert.equal(classifyWriterFailure({ finalStatus: 'blocked', events: [], threwDuringRun: false }), 'block_unresolved');
-  assert.equal(
-    classifyWriterFailure({ finalStatus: 'failed', events: [{ type: 'phase.error' }], threwDuringRun: false }),
+    classifyWriterFailure({ finalState: makeFinalState({}), events: [{ type: 'phase.error' }], threwDuringRun: false }),
     'structured_output',
   );
-  assert.equal(classifyWriterFailure({ finalStatus: null, events: [], threwDuringRun: true }), 'finalization_error');
-  assert.equal(classifyWriterFailure({ finalStatus: 'failed', events: [], threwDuringRun: false }), 'provider_failed');
+  assert.equal(classifyWriterFailure({ finalState: null, events: [], threwDuringRun: true }), 'finalization_error');
+  assert.equal(classifyWriterFailure({ finalState: null, events: [], threwDuringRun: false }), 'finalization_error');
+  assert.equal(classifyWriterFailure({ finalState: makeFinalState({}), events: [], threwDuringRun: false }), 'provider_failed');
+});
+
+test('classifyWriterFailure derives block_unresolved from each final operator-stop shape', () => {
+  // Site A: the interactive-recovery wait keeps status 'running' but is
+  // structurally waiting for the operator.
+  assert.equal(
+    classifyWriterFailure({ finalState: makeInteractiveRecoveryWaitState(), events: [], threwDuringRun: false }),
+    'block_unresolved',
+  );
+  // Sites B/C: a direct blocked save.
+  assert.equal(
+    classifyWriterFailure({
+      finalState: makeFinalState({ status: 'blocked', phase: 'blocked' }),
+      events: [],
+      threwDuringRun: false,
+    }),
+    'block_unresolved',
+  );
+  // A pending-guidance view (guidance recorded but not yet consumed) is an
+  // operator stop even though status is 'running'.
+  assert.equal(
+    classifyWriterFailure({
+      finalState: makeFinalState({
+        topLevelMode: 'plan',
+        status: 'running',
+        phase: 'coder_plan_response',
+        blockedFromPhase: 'reviewer_plan',
+        pendingPlanReviewGuidance: {
+          message: 'Tighten the scope before continuing.',
+          sourcePhase: 'reviewer_plan',
+          recordedAt: '2026-08-24T00:00:00.000Z',
+        },
+      }),
+      events: [],
+      threwDuringRun: false,
+    }),
+    'block_unresolved',
+  );
+  // A plain failure (no operator-stop shape) is not an operator stop.
+  assert.equal(isOperatorStopFinalState(makeFinalState({})), false);
+  assert.equal(isOperatorStopFinalState(makeFinalState({ status: 'done', phase: 'done' })), false);
 });
 
 test('classifyWriterFailure attributes coder structured-output errorKinds to structured_output', () => {
@@ -237,7 +315,7 @@ test('classifyWriterFailure attributes coder structured-output errorKinds to str
   for (const kind of ['structured_output_invalid', 'structured_output_missing'] as const) {
     assert.equal(
       classifyWriterFailure({
-        finalStatus: 'failed',
+        finalState: makeFinalState({}),
         events: [{ type: 'provider.provider_error', data: { errorKind: kind } }],
         threwDuringRun: false,
       }),
@@ -249,7 +327,7 @@ test('classifyWriterFailure attributes coder structured-output errorKinds to str
   for (const kind of ['api_error', 'timeout', 'permission_denied', 'provider_failed'] as const) {
     assert.equal(
       classifyWriterFailure({
-        finalStatus: 'failed',
+        finalState: makeFinalState({}),
         events: [{ type: 'provider.provider_error', data: { errorKind: kind } }],
         threwDuringRun: false,
       }),
@@ -260,7 +338,7 @@ test('classifyWriterFailure attributes coder structured-output errorKinds to str
   // A provider error with no errorKind keeps the generic provider_failed mapping.
   assert.equal(
     classifyWriterFailure({
-      finalStatus: 'failed',
+      finalState: makeFinalState({}),
       events: [{ type: 'provider.provider_error' }],
       threwDuringRun: false,
     }),
@@ -326,7 +404,6 @@ test('evaluateCoderFixture drives the real throwaway run and PASSes when the fix
     assert.equal(cell.pass, true, `expected coder PASS, got ${JSON.stringify(cell)}`);
     assert.equal(cell.failureMode, null);
     assert.equal(run.finalStatus, 'done');
-    assert.equal(run.unattended, true);
     assert.equal(run.verifyExitCode, 0);
     const preparedInfo = prepared as { throwawayCwd: string; runDir: string; planDoc: string } | null;
     assert.ok(preparedInfo, 'onPrepared should have been called');
@@ -797,6 +874,62 @@ test('runCompat short-circuits to FAIL(protocol) and skips fixtures when the pre
       ['coder', 'planner', 'reviewer'],
     );
   } finally {
+    clearProviderDefinitionRegistrationsForTesting();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runCompat resolves no notify binary for child runs even when one is configured', async () => {
+  const providerId = 'fake-compat-notify-quiet';
+  registerProviderDefinitionForTesting(createFakeProviderDefinition({ id: providerId }));
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-compat-cwd-'));
+  await writeFile(
+    join(cwd, 'neal.yml'),
+    [
+      'neal:',
+      '  notify_bin: /configured/operator-notify',
+      'agent:',
+      '  coder:',
+      `    provider: ${providerId}`,
+      '  reviewer:',
+      `    provider: ${providerId}`,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  clearConfigCache(cwd);
+  const savedNotifyEnv = process.env.NEAL_NOTIFY_BIN;
+  // Drop the suite-wide NEAL_NOTIFY_BIN= kill switch so the configured
+  // notify_bin genuinely resolves before compat starts.
+  delete process.env.NEAL_NOTIFY_BIN;
+
+  try {
+    assert.equal(getNotifyBin(cwd), '/configured/operator-notify');
+
+    await runCompat({
+      cwd,
+      parsed: { model: 'cand', role: 'coder', reference: null, json: false },
+      deps: {
+        compatDir,
+        manifest: loadCompatManifest(),
+        // Short-circuit at the pre-filter: suppression happens at compat
+        // startup, so no fixture needs to run for the structural claim.
+        verifyProviders: async () => {
+          throw new Error('short-circuit');
+        },
+      },
+    });
+
+    // The defined-but-empty NEAL_NOTIFY_BIN override wins over config: every
+    // child run inside this process now resolves no notify binary.
+    assert.equal(process.env.NEAL_NOTIFY_BIN, '');
+    assert.equal(getNotifyBin(cwd), null, 'a compat run must resolve no notify binary');
+  } finally {
+    if (savedNotifyEnv === undefined) {
+      delete process.env.NEAL_NOTIFY_BIN;
+    } else {
+      process.env.NEAL_NOTIFY_BIN = savedNotifyEnv;
+    }
     clearProviderDefinitionRegistrationsForTesting();
     await rm(cwd, { recursive: true, force: true });
   }

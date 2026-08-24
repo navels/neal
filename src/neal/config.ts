@@ -41,9 +41,6 @@ export type NealConfigFile = {
       model?: string | null;
       effort?: string | null;
     };
-    // When true, runs resolve operator-block sites autonomously instead of
-    // waiting for `neal resume --message`. Defaults to false.
-    unattended?: boolean | null;
   };
   providers?: {
     openai_compatible?: {
@@ -99,7 +96,6 @@ type NealResolvedConfig = {
       provider: AgentProvider;
       model: string | null;
     };
-    unattended: boolean;
   };
 };
 
@@ -154,7 +150,6 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
       provider: 'anthropic-claude',
       model: null,
     },
-    unattended: false,
   },
 };
 
@@ -313,9 +308,6 @@ function mergeConfig(base: NealConfigFile, override: NealConfigFile | null): Nea
         ...base.agent?.reviewer,
         ...override.agent?.reviewer,
       },
-      // Scalar agent toggle: merged explicitly because the deep-merge above only
-      // covers the three provider sub-objects. Override wins when present.
-      unattended: override.agent?.unattended ?? base.agent?.unattended,
     },
     providers: {
       openai_compatible: {
@@ -350,10 +342,9 @@ function loadConfigFile(cwd = process.cwd()): NealConfigFile {
   }
 
   const sources = getConfigSourceInfo(cacheKey);
-  const resolved = mergeConfig(
-    mergeConfig({}, readYamlFileIfPresent(sources.user.path)),
-    readYamlFileIfPresent(sources.repo.path),
-  );
+  const userConfig = readYamlFileIfPresent(sources.user.path);
+  const repoConfig = readYamlFileIfPresent(sources.repo.path);
+  const resolved = mergeConfig(mergeConfig({}, userConfig), repoConfig);
   cachedConfig.set(cacheKey, resolved);
   return resolved;
 }
@@ -642,13 +633,6 @@ export function getDefaultCoderModel(cwd = process.cwd()) {
   return config.agent?.coder?.model === null
     ? null
     : (parseStringValue(config.agent?.coder?.model) ?? DEFAULT_CONFIG.agent.coder.model);
-}
-
-export function getConfiguredUnattended(cwd = process.cwd()): boolean {
-  const config = loadConfigFile(cwd);
-  return typeof config.agent?.unattended === 'boolean'
-    ? config.agent.unattended
-    : DEFAULT_CONFIG.agent.unattended;
 }
 
 export function getDefaultPlannerProvider(cwd = process.cwd()) {

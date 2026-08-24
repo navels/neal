@@ -284,8 +284,6 @@ function createSeededTransitionState(overrides: Partial<OrchestrationState>): Or
     topLevelMode: 'execute',
     allowedDirtyPaths: ['docs/allowed-dirty.md'],
     agentConfig: hermeticAgentConfig(),
-    unattended: true,
-    unattendedAutoResumeCount: 4,
     consultantAttemptCount: 3,
     autoSquashOnCompletion: false,
     progressJsonPath: '/seed/repo/.neal/runs/seed-run/plan-progress.json',
@@ -592,8 +590,7 @@ test('parent advance resets the widest per-scope set including gates, sessions, 
   // manualGate, blockedFromPhase, and interactiveBlockedRecovery. Preserved as
   // seeded — notably plannerSessionHandle/Protocol,
   // interactiveBlockedRecoveryHistory, pendingPlanReviewGuidance,
-  // derivedPlanDepth, unattendedAutoResumeCount, and
-  // finalCompletionContinueExecutionCount.
+  // derivedPlanDepth, and finalCompletionContinueExecutionCount.
   const expected: OrchestrationState = {
     ...input,
     baseCommit: 'arg-final-commit',
@@ -749,7 +746,6 @@ test('persistSplitPlanRecovery persisted spread resets abandoned scope work and 
       planDocBackupPath: '/seed/plan-backup.md',
       allowedDirtyPaths: ['docs/allowed-dirty.md'],
       agentConfig: seedPersistedAgentConfig(),
-      unattended: true,
       autoSquashOnCompletion: false,
       currentScopeNumber: 7,
       executionShape: 'multi_scope',
@@ -770,7 +766,6 @@ test('persistSplitPlanRecovery persisted spread resets abandoned scope work and 
       coderSessionProtocol: 'structured_json_v1',
       reviewerSessionHandle: 'seed-reviewer-session',
       coderRetryCount: 4,
-      unattendedAutoResumeCount: 4,
       currentScopeProgressJustification: seedProgressJustification(),
       currentScopeMeaningfulProgressVerdict: seedMeaningfulProgressVerdict(),
       finalCompletionSummary: seedFinalCompletionSummary(),
@@ -838,7 +833,7 @@ Stop when the replacement queue is exhausted.
   // (including finalCompletionContinueExecutionCapReached staying TRUE — the
   // split-plan site must not reset it), interactiveBlockedRecoveryHistory,
   // completedScopes, currentScopeNumber, baseCommit, derivedPlanDepth,
-  // unattendedAutoResumeCount, unattended, autoSquashOnCompletion,
+  // autoSquashOnCompletion,
   // planDocBackupPath, allowedDirtyPaths, agentConfig, maxRounds,
   // maxDerivedPlanReviewRounds, and authoredExecutionShape.
   const expected: OrchestrationState = {
@@ -904,7 +899,6 @@ test('final completion continue_execution reopen resets the follow-on scope boun
       planDocBackupPath: '/seed/plan-backup.md',
       allowedDirtyPaths: ['docs/allowed-dirty.md'],
       agentConfig: seedPersistedAgentConfig(),
-      unattended: true,
       autoSquashOnCompletion: false,
       currentScopeNumber: 5,
       executionShape: 'multi_scope',
@@ -924,7 +918,6 @@ test('final completion continue_execution reopen resets the follow-on scope boun
       coderSessionProtocol: 'structured_json_v1',
       reviewerSessionHandle: 'seed-reviewer-session',
       coderRetryCount: 4,
-      unattendedAutoResumeCount: 4,
       currentScopeProgressJustification: seedProgressJustification(),
       currentScopeMeaningfulProgressVerdict: seedMeaningfulProgressVerdict(),
       finalCompletionSummary: seedFinalCompletionSummary(),
@@ -994,7 +987,7 @@ test('final completion continue_execution reopen resets the follow-on scope boun
     // positive derivedPlanDepth, the three split-plan notification flags,
     // non-empty interactiveBlockedRecoveryHistory,
     // plannerSessionHandle/Protocol, completedScopes,
-    // unattendedAutoResumeCount, unattended, autoSquashOnCompletion,
+    // autoSquashOnCompletion,
     // planDocBackupPath, allowedDirtyPaths, agentConfig, maxRounds,
     // maxDerivedPlanReviewRounds, and authoredExecutionShape — all untouched
     // by the reopen spread.

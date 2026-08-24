@@ -474,7 +474,6 @@ export async function runExecuteReviewerAdjudication(args: {
     reviewerContext: await buildAndPersistReviewerContextPacket({ state: args.state }),
     inlinedRangeDiff,
     earlierScopeChanges,
-    unattended: args.state.unattended,
     logger: args.logger,
   });
 

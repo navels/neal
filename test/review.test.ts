@@ -241,7 +241,7 @@ function recoveryStateWithAdvice(): OrchestrationState['interactiveBlockedRecove
   };
 }
 
-test('attended interactive blocked recovery notification surfaces consultant advice when present', async () => {
+test('interactive blocked recovery notification surfaces consultant advice when present', async () => {
   const { root, state } = await createState({
     currentScopeNumber: 3,
     interactiveBlockedRecovery: recoveryStateWithAdvice(),
@@ -255,7 +255,7 @@ test('attended interactive blocked recovery notification surfaces consultant adv
   assert.match(notifyLog, /suggested directive: Re-read the acceptance criteria and re-run the failing test\./);
 });
 
-test('attended blocked notification surfaces consultant advice when the recovery record carries it', async () => {
+test('blocked notification surfaces consultant advice when the recovery record carries it', async () => {
   const { root, state } = await createState({
     currentScopeNumber: 3,
     interactiveBlockedRecovery: recoveryStateWithAdvice(),
@@ -320,9 +320,6 @@ test('execute reviewer prompt includes coder justification and recent parent-obj
   assert.match(prompt, /`block_for_operator`/);
 });
 
-const UNATTENDED_AUTONOMY_LINE =
-  'No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.';
-
 // Shared core of the issue #10 evidence-audit clause. Identical to the literal
 // pinned in test/prompt-spec-fixtures.test.ts; the completion summary surface
 // voice-matches the tail but carries this exact substring exactly once.
@@ -334,42 +331,6 @@ const EVIDENCE_AUDIT_CLAUSE =
 // the shared core keeps both pinned together: this literal protects the exact
 // voice-matched wording, not just the shared evidence-audit core.
 const EVIDENCE_AUDIT_SUMMARY_CLAUSE = `${EVIDENCE_AUDIT_CLAUSE}, and do not claim verification that did not actually run.`;
-
-test('unattended flag renders the no-operator autonomy line into execute prompts only when true', () => {
-  const reviewerBaseArgs = {
-    planDoc: '/tmp/PLAN.md',
-    baseCommit: 'base123',
-    headCommit: 'head456',
-    commits: ['head456 add gate logic'],
-    previousHeadCommit: null,
-    diffStat: ' src/neal/orchestrator.ts | 10 +++++-----',
-    changedFiles: ['src/neal/orchestrator.ts'],
-    round: 2,
-    reviewMarkdownPath: '/tmp/REVIEW.md',
-    parentScopeLabel: '5',
-    progressJustification: {
-      milestoneTargeted: 'm',
-      newEvidence: 'e',
-      whyNotRedundant: 'w',
-      nextStepUnlocked: 'n',
-    },
-    recentHistorySummary: 'No accepted scopes yet.',
-    scratchDir: '/tmp/scratch',
-  };
-
-  const attendedReviewer = buildReviewerPrompt(reviewerBaseArgs);
-  const unattendedReviewer = buildReviewerPrompt({ ...reviewerBaseArgs, unattended: true });
-  assert.doesNotMatch(attendedReviewer, /No operator is available to answer\./);
-  assert.ok(unattendedReviewer.includes(UNATTENDED_AUTONOMY_LINE));
-  // Attended render is byte-identical to the explicit `unattended: false` render.
-  assert.equal(buildReviewerPrompt({ ...reviewerBaseArgs, unattended: false }), attendedReviewer);
-
-  const attendedScope = buildScopePrompt('/tmp/PLAN.md', 'progress text');
-  const unattendedScope = buildScopePrompt('/tmp/PLAN.md', 'progress text', { unattended: true });
-  assert.doesNotMatch(attendedScope, /No operator is available to answer\./);
-  assert.ok(unattendedScope.includes(UNATTENDED_AUTONOMY_LINE));
-  assert.equal(buildScopePrompt('/tmp/PLAN.md', 'progress text', { unattended: false }), attendedScope);
-});
 
 test('execute reviewer prompt default variant instructs repository inspection without inline context', () => {
   const baseArgs = {
@@ -1914,37 +1875,6 @@ test('final completion reviewer prompt requires a structured whole-plan verdict'
       `reviewer prompt must not contain transport-conflicting marker: ${marker}`,
     );
   }
-  // Attended completion review omits the unattended autonomy line; the unattended
-  // variant renders it while leaving the attended render byte-identical.
-  assert.doesNotMatch(prompt, /No operator is available to answer\./);
-  const unattendedCompletionPrompt = buildFinalCompletionReviewerPrompt({
-    planDoc: '/tmp/PLAN.md',
-    packet,
-    summary: {
-      planGoalSatisfied: false,
-      whatChangedOverall: 'Implemented the completion packet and coder summary contract.',
-      verificationSummary: 'Ran review tests and typecheck.',
-      remainingKnownGaps: ['Reviewer completion verdict is still needed.'],
-    },
-    scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
-    unattended: true,
-  });
-  assert.ok(unattendedCompletionPrompt.includes(UNATTENDED_AUTONOMY_LINE));
-  assert.equal(
-    buildFinalCompletionReviewerPrompt({
-      planDoc: '/tmp/PLAN.md',
-      packet,
-      summary: {
-        planGoalSatisfied: false,
-        whatChangedOverall: 'Implemented the completion packet and coder summary contract.',
-        verificationSummary: 'Ran review tests and typecheck.',
-        remainingKnownGaps: ['Reviewer completion verdict is still needed.'],
-      },
-      scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
-      unattended: false,
-    }),
-    prompt,
-  );
 });
 
 test('final completion reviewer prompt default variant instructs repository inspection without inline context', async () => {

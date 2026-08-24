@@ -11,7 +11,6 @@ import {
   getAgentTurnRetryLimit,
   getAgentTurnStartupTimeoutMs,
   getConfigSourceInfo,
-  getConfiguredUnattended,
   getExplicitAgentConfig,
   getNotifyBin,
   getOpenAICompatibleSettings,
@@ -138,47 +137,6 @@ test('getConsultantMaxAttempts defaults to 1, honors overrides, and 0 disables',
     await writeFile(join(cwd, 'neal.yml'), 'neal:\n  consultant_max_attempts: 0\n', 'utf8');
     clearConfigCache(cwd);
     assert.equal(getConsultantMaxAttempts(cwd), 0);
-  });
-});
-
-test('getConfiguredUnattended defaults to false and honors user and repo config', async () => {
-  await withIsolatedHome(async (home) => {
-    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-unattended-'));
-
-    assert.equal(getConfiguredUnattended(cwd), false);
-
-    await writeUserConfig(home, 'agent:\n  unattended: true\n');
-    clearConfigCache(cwd);
-    assert.equal(getConfiguredUnattended(cwd), true);
-
-    // Repo config overrides the user config scalar.
-    await writeFile(join(cwd, 'neal.yml'), 'agent:\n  unattended: false\n', 'utf8');
-    clearConfigCache(cwd);
-    assert.equal(getConfiguredUnattended(cwd), false);
-  });
-});
-
-test('getConfiguredUnattended merges alongside writer provider config without dropping it', async () => {
-  await withIsolatedHome(async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-unattended-merge-'));
-    await writeFile(
-      join(cwd, 'neal.yml'),
-      [
-        'agent:',
-        '  unattended: true',
-        '  coder:',
-        '    provider: openai-codex',
-        '  reviewer:',
-        '    provider: anthropic-claude',
-        '',
-      ].join('\n'),
-      'utf8',
-    );
-    clearConfigCache(cwd);
-
-    assert.equal(getConfiguredUnattended(cwd), true);
-    // The provider triple is still resolvable; the scalar merge did not clobber it.
-    assert.equal(getExplicitAgentConfig(cwd)?.coder.provider, 'openai-codex');
   });
 });
 

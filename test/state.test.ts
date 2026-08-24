@@ -506,54 +506,6 @@ test('state round-trip preserves pending plan-review guidance for plan runs', as
   assert.deepEqual(loadedState.pendingPlanReviewGuidance, savedState.pendingPlanReviewGuidance);
 });
 
-test('unattended persists across save/load for plan and execute modes and defaults false when absent', async () => {
-  for (const topLevelMode of ['plan', 'execute'] as const) {
-    const cwd = await mkdtemp(join(tmpdir(), `neal-state-unattended-${topLevelMode}-`));
-    const stateDir = join(cwd, '.neal');
-    const runDir = join(stateDir, 'runs', `unattended-${topLevelMode}-run`);
-    const initialState = await createInitialState(
-      {
-        cwd,
-        planDoc: join(cwd, 'PLAN.md'),
-        stateDir,
-        runDir,
-        topLevelMode,
-        allowedDirtyPaths: [],
-        agentConfig: {
-          planner: { provider: 'openai-codex', model: null },
-          coder: { provider: 'openai-codex', model: null },
-          reviewer: { provider: 'anthropic-claude', model: null },
-        },
-        unattended: true,
-        progressJsonPath: join(runDir, 'plan-progress.json'),
-        progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
-        reviewMarkdownPath: join(runDir, 'REVIEW.md'),
-        recoveryMarkdownPath: join(runDir, 'RECOVERY.md'),
-        maxRounds: 5,
-      },
-      '1111111111111111111111111111111111111111',
-    );
-    assert.equal(initialState.unattended, true);
-
-    const statePath = getRunStatePath(runDir);
-    await saveState(statePath, initialState);
-    const loadedState = await loadState(statePath);
-    assert.equal(loadedState.unattended, true);
-
-    // Legacy states predating this field hydrate to the safe default (attended).
-    const persisted = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, unknown>;
-    delete persisted.unattended;
-    await writeFile(statePath, JSON.stringify(persisted, null, 2) + '\n', 'utf8');
-    const legacyState = await loadState(statePath);
-    assert.equal(legacyState.unattended, false);
-  }
-});
-
-test('createInitialState defaults unattended to false when the init flag is omitted', async () => {
-  const { state } = await createMinimalStateFixture('neal-state-unattended-default-');
-  assert.equal(state.unattended, false);
-});
-
 test('createInitialState defaults consultantAttemptCount to 0 and resumes as 0 when absent', async () => {
   const { state, statePath } = await createMinimalStateFixture('neal-state-consultant-count-default-');
   assert.equal(state.consultantAttemptCount, 0);

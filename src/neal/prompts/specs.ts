@@ -237,7 +237,7 @@ const CONSULTANT_CONTEXT = context('ConsultantPromptContext', [
 export const PROMPT_SPECS: readonly PromptSpec[] = [
   {
     id: 'plan_author',
-    version: 3,
+    version: 4,
     changelog: [
       {
         version: 1,
@@ -250,6 +250,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 3,
         renderSha: '51943007b2a334ee0c92d8314616fb882e9cea7b410b05c5aeda668c7c9e04dc',
+      },
+      {
+        version: 4,
+        renderSha: 'e9f5b2dd5f66df87986b2e2f884c560d02a235db053b544221dcb43512e057a4',
       },
     ],
     role: 'coder',
@@ -325,7 +329,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'plan_reviewer',
-    version: 3,
+    version: 4,
     changelog: [
       {
         version: 1,
@@ -338,6 +342,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 3,
         renderSha: 'fa0309ed0e394c690dfc3135da3c98a74dd5413ccb754fefa100171bf35b72b6',
+      },
+      {
+        version: 4,
+        renderSha: '65ad05a8bbe1f4a6d631db8778bf6bed82249151f3412a7773f9568ae2d40f11',
       },
     ],
     role: 'reviewer',
@@ -434,11 +442,15 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_coder',
-    version: 1,
+    version: 2,
     changelog: [
       {
         version: 1,
         renderSha: 'c579d65db51be90fa81dbe3b7dd260083bc4960cc4cba32ccf2cd802d19703bc',
+      },
+      {
+        version: 2,
+        renderSha: '0ce921ee7d0acc4042bacf31e1509968f7e76df8db8417eb4b724ce7842794ac',
       },
     ],
     role: 'coder',
@@ -543,7 +555,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_reviewer',
-    version: 3,
+    version: 4,
     changelog: [
       {
         version: 1,
@@ -556,6 +568,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 3,
         renderSha: '4b75fab01367f0e4e263bc7635f8753e8e73c08b3ca46cf6bb6e695a67da31a4',
+      },
+      {
+        version: 4,
+        renderSha: 'da87b19f2401ffdca21e3cefec1037c6470b3e74810b6152d07c55fa4924047f',
       },
     ],
     role: 'reviewer',
@@ -719,7 +735,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'completion_reviewer',
-    version: 2,
+    version: 3,
     changelog: [
       {
         version: 1,
@@ -728,6 +744,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 2,
         renderSha: 'cc06cea4a8de6366f07a6943718fc1ae219e4c9092a5cf52542fa9de0caa02da',
+      },
+      {
+        version: 3,
+        renderSha: '127097db4b0d06cba8943681d12d93fbb07e577e078c99c1d81036399bedb66a',
       },
     ],
     role: 'reviewer',

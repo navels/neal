@@ -258,9 +258,8 @@ generic recovery with no consultant invocation:
 - Per-scope budget: `state.consultantAttemptCount`, bounded by
   `neal.consultant_max_attempts` (default `1`, `0` disables) and
   reset to `0` at scope boundaries. One invocation consumes one unit whether it
-  auto-applies a recoverable verdict (both run modes) or, on a non-recoverable
-  verdict, finalizes terminally (unattended) or surfaces the verdict as operator
-  advice and yields (attended).
+  auto-applies a recoverable verdict or, on a non-recoverable verdict, surfaces
+  the verdict as operator advice and yields.
 - Anti-thrash window: a block that repeats a `state.recentBlocks` record with
   the same scope identity (`scopeNumber` + `derivedScopeIndex`), the same
   `sourcePhase`, the same normalized blocker key, and no new evidence

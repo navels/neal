@@ -311,8 +311,8 @@ function executeResumedRun(
 ) {
   return executeRun(state, statePath, logger, {
     // Honor the squash preference persisted at run creation (`--no-squash`)
-    // instead of re-deriving it, exactly as `unattended` is. Legacy states
-    // missing the field hydrate to true, keeping the historical behavior.
+    // instead of re-deriving it. Legacy states missing the field hydrate to
+    // true, keeping the historical behavior.
     autoSquashOnCompletion: state.autoSquashOnCompletion,
   });
 }
@@ -413,11 +413,9 @@ async function applyResumeRunExitCode(
       const queueState = await continueQueueFromChildRun({
         childResult: outcome.result,
         agentConfig: outcome.result.finalState.agentConfig,
-        // Source unattended from the resumed child's persisted state, exactly as
-        // agentConfig is, so the queue continuation keeps headless runs headless.
-        unattended: outcome.result.finalState.unattended,
-        // Likewise source the squash preference from the resumed child's
-        // persisted state so remaining queue items keep honoring --no-squash.
+        // Source the squash preference from the resumed child's persisted
+        // state, exactly as agentConfig is, so remaining queue items keep
+        // honoring --no-squash.
         squashOnCompletion: outcome.result.finalState.autoSquashOnCompletion,
       });
       setWriterCommandExitCode(

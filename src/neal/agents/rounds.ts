@@ -323,8 +323,6 @@ export async function runReviewerRound(args: {
   // Earlier accepted scopes' per-file diffs for files the current diff touches
   // again; threaded into buildReviewerPrompt.
   earlierScopeChanges?: readonly EarlierScopeFileChange[] | null;
-  // Persisted unattended run flag; threaded into the reviewer prompt variant.
-  unattended?: boolean;
   logger?: RunLogger;
 }): Promise<{
   sessionHandle: string | null;
@@ -383,8 +381,6 @@ export async function runPlanReviewerRound(args: {
   reviewerContext?: ReviewerContextPacket | null;
   reviewedPlanContent?: string | null;
   parentPlanContent?: string | null;
-  // Persisted unattended run flag; threaded into the plan-reviewer prompt variant.
-  unattended?: boolean;
   // When true, the top-level plan was authored `one_shot`; the reviewer prompt gains a line
   // instructing it to raise a blocking finding on any shape expansion or added orchestration.
   authoredOneShot?: boolean;
@@ -549,8 +545,6 @@ export async function runReviewerFinalCompletionRound(args: {
   // read tools but no commit-range diff tool; threaded into
   // buildFinalCompletionReviewerPrompt.
   inlinedRangeDiff?: string | null;
-  // Persisted unattended run flag; threaded into the completion-reviewer prompt.
-  unattended?: boolean;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; verdict: FinalCompletionReviewerVerdict }> {
   const schema = buildFinalCompletionReviewerSchema();
@@ -602,8 +596,6 @@ export async function runCoderScopeRound(args: {
   sessionHandle?: string | null;
   coderSessionProtocol: CoderSessionProtocol | null;
   onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
-  // Persisted unattended run flag; threaded into the coder scope prompt.
-  unattended?: boolean;
   logger?: RunLogger;
 }): Promise<{
   sessionHandle: string | null;
@@ -623,7 +615,7 @@ export async function runCoderScopeRound(args: {
     const { sessionHandle, structured } = await runCoderStructuredPrompt<CoderScopePayload>({
       coder: args.coder,
       cwd: args.cwd,
-      prompt: buildScopePrompt(args.planDoc, progressText, { unattended: args.unattended }),
+      prompt: buildScopePrompt(args.planDoc, progressText),
       schema,
       label: 'Coder scope round',
       structuredJsonProtocol: buildStructuredJsonProtocolSpec({
@@ -761,8 +753,6 @@ export async function runCoderPlanRound(args: {
   sessionHandle?: string | null;
   coderSessionProtocol: CoderSessionProtocol | null;
   onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
-  // Persisted unattended run flag; threaded into the planning prompt.
-  unattended?: boolean;
   // When true, the top-level plan was authored `one_shot`; the planning prompt gains a line
   // instructing the refiner to keep it single-scope.
   authoredOneShot?: boolean;
@@ -779,7 +769,6 @@ export async function runCoderPlanRound(args: {
       coder: args.coder,
       cwd: args.cwd,
       prompt: buildPlanningPrompt(args.planDoc, planDocument, {
-        unattended: args.unattended,
         authoredOneShot: args.authoredOneShot,
       }),
       schema,

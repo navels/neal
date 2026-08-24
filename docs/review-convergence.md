@@ -1,10 +1,10 @@
 # Plan-review convergence
 
-Plan review either converges or the run fails. The reviewer is asked "is this
+Plan review either converges or the run blocks. The reviewer is asked "is this
 plan execution-ready?" fresh every round against a document that grows with each
 fix, so every individually-defensible new finding forces another full revision
 round. The only non-acceptance exits used to be terminal failures: reaching the
-round cap, and an unattended coder block. That produced two failure modes in
+round cap, and a plan-stage coder block with no answerable landing. That produced two failure modes in
 real runs: long negotiations that keep re-litigating verification strength after
 the plan is already correct, and runs that terminally fail when a coder
 legitimately needs author input it must not fabricate.
@@ -13,7 +13,7 @@ The convergence policy addresses both failure modes as **deterministic
 orchestration policy**, not prompt tuning. It never shortens a negotiation that
 surfaced a genuine plan-correctness defect, and only stops burning rounds on
 verification-hardening demands once the plan itself is correct. And a
-coder-authored plan-stage block no longer terminally fails: it lands as a
+coder-authored plan-stage block lands as a
 recoverable blocked-with-reason state that an operator can answer via
 `neal resume --message` (see
 [Coder-authored plan-stage block recovery](#coder-authored-plan-stage-block-recovery)).
@@ -200,8 +200,7 @@ terminal-failed) lands as the documented blocked contract instead of a terminal
 failure. `finalizeBlockedPlanReviewResponse`
 (`src/neal/orchestrator/phases/planning.ts`) takes an explicit `blockCause`
 (`coder_authored` | `dirty_worktree` | `reviewer_convergence`), and for a
-`coder_authored` block on the top-level plan stage, in **both attended and
-unattended runs**, it:
+`coder_authored` block on the top-level plan stage, it:
 
 - persists `status: 'blocked'` with a durable `blockerReason` (the coder's
   reported blocker), so the writer exits **2** (not `failed`/exit 3) and the
@@ -228,9 +227,9 @@ durable `blockerReason` is the discriminator. A `dirty_worktree` safety block
 (the planner dirtied non-plan files with no operator to clean them) records no
 `blockerReason`: it lands at the same response phase but stays a normal blocked
 state: it is not reported or answerable as waiting for `--message` guidance, and
-it keeps its prior bare-resume behavior when a resumable planner session exists. A
-`dirty_worktree` safety block and reviewer cap/stall exhaustion (`reviewer_convergence`)
-under `unattended` keep terminal-failing (exit 3).
+it keeps its prior bare-resume behavior when a resumable planner session exists.
+Reviewer cap/stall exhaustion (`reviewer_convergence`) likewise lands a normal
+blocked state with no `blockerReason` (exit 2).
 
 **Exclusion (the initial `coder_plan` authoring block):** the author-input route
 does **not** cover the initial `coder_plan` block. That block already lands

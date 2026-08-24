@@ -10,6 +10,20 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed unattended mode: the `--unattended` flag on `neal plan` /
+  `neal execute` / `neal run`, the `agent.unattended` config key, the
+  unattended prompt variants, and the persisted `unattended` /
+  `unattendedAutoResumeCount` run-state fields (#22). There is exactly one
+  block-recovery story: every operator stop lands in a controlled,
+  operator-actionable state and the writer exits `2`. Interactive-recovery
+  and top-level plan-review blocks accept `neal resume --message`; a blocked
+  final-completion review stays blocked for status/artifact inspection.
+  Migration: drop `--unattended` from scripts and `agent.unattended` from
+  config, and have harnesses that need a hard verdict treat an exit-2 operator
+  stop as a failure themselves (`neal compat` already does).
+
 ## [0.4.3] - 2026-08-24
 
 ### Changed

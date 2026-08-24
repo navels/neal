@@ -93,12 +93,3 @@
 #   #   provider: openai-codex
 #   #   model: null
 #   #   effort: null
-#
-#   # Run headlessly when no operator is available to answer an operator block
-#   # (CI, cron, or a benchmark harness). When true, the execute-mode
-#   # interactive-recovery loop auto-resumes with conservative guidance for a
-#   # bounded number of turns and then fails cleanly, while the final-completion
-#   # and top-level plan-review gates fail cleanly and terminally instead of
-#   # waiting. Verification, authorization, and squash/grading are unchanged.
-#   # The `--unattended` CLI flag overrides this key. Defaults to false.
-#   unattended: false

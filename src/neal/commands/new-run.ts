@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 
 import { parseNewRunArgs } from '../cli.js';
-import { assertWriterProvidersConfigured, getConfiguredUnattended } from '../config.js';
+import { assertWriterProvidersConfigured } from '../config.js';
 import { assertGitRepositoryWithCommit } from '../git.js';
 import { loadOrInitialize } from '../orchestrator.js';
 import { assertAgentConfigSupportsWriterRun } from '../providers/registry.js';
@@ -39,9 +39,6 @@ export async function runNewRunCommand(args: string[]): Promise<void> {
   assertAgentConfigSupportsWriterRun(parsed.agentConfig, { context: `new ${parsed.topLevelMode} writer run` });
 
   const planDoc = resolve(cwd, parsed.planDoc);
-  // Flag overrides config: `--unattended` forces true, otherwise fall back to
-  // the resolved `agent.unattended` config value (default false).
-  const unattended = parsed.unattended || getConfiguredUnattended(cwd);
   await assertGitRepositoryWithCommit(cwd, `neal ${parsed.topLevelMode}`);
   await requireExistingPlanFile(planDoc, parsed.planDoc);
   const result = await withPreparedWriterRun(
@@ -54,7 +51,6 @@ export async function runNewRunCommand(args: string[]): Promise<void> {
       const loaded = await loadOrInitialize(planDoc, cwd, parsed.agentConfig, undefined, parsed.topLevelMode, {
         allowedDirtyPaths: parsed.topLevelMode === 'execute' ? [planDoc] : [],
         runDir: prepared.runDir,
-        unattended,
         autoSquashOnCompletion: parsed.squashOnCompletion,
       });
       markInitialized();
@@ -64,7 +60,6 @@ export async function runNewRunCommand(args: string[]): Promise<void> {
         // state is the single source of truth so `neal resume` sees the same
         // preference this process does.
         autoSquashOnCompletion: loaded.state.autoSquashOnCompletion,
-        unattended,
       });
     },
   );

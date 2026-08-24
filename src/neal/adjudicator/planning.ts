@@ -522,7 +522,6 @@ export async function runPlanningReviewerAdjudication(args: {
     reviewerContext: await buildAndPersistReviewerContextPacket({ state: args.state }),
     reviewedPlanContent,
     parentPlanContent,
-    unattended: args.state.unattended,
     // Reinforce an author-declared `one_shot` only for the top-level authored plan; derived
     // plans declare and own their own shape and are never clamped.
     authoredOneShot: !context.derivedPlanReview && args.state.authoredExecutionShape === 'one_shot',

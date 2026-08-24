@@ -55,9 +55,6 @@ export type ExecuteRunResult = {
 
 export type ExecuteRunOptions = {
   autoSquashOnCompletion?: boolean;
-  // Per-process run option mirroring the persisted OrchestrationState.unattended
-  // value resolved from the `--unattended` flag / `agent.unattended` config.
-  unattended?: boolean;
 };
 
 export type PreparedWriterRun = {

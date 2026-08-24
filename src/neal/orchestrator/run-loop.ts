@@ -169,12 +169,7 @@ export async function runOnePass(args: {
     archivedReviewPath: currentState.archivedReviewPath,
   });
   if (currentState.phase === 'blocked' || currentState.phase === 'done') {
-    // A terminal-failed run (e.g. unattended site-A terminal-fail lands on
-    // phase:'blocked' with status:'failed') must keep its failed retrospective
-    // rather than be overwritten as a blocked one.
-    const retrospectiveReason =
-      currentState.status === 'failed' ? 'failed' : currentState.phase === 'blocked' ? 'blocked' : 'done';
-    await runtime.writeCheckpointRetrospective(currentState, retrospectiveReason);
+    await runtime.writeCheckpointRetrospective(currentState, currentState.phase === 'blocked' ? 'blocked' : 'done');
   }
   return currentState;
 }

@@ -9,7 +9,6 @@ import {
   runConsultant,
   upsertRecentBlock,
 } from '../../adjudicator/consultant.js';
-import { UNATTENDED_AUTO_RESUME_GUIDANCE } from '../../blocked-guidance.js';
 import { getInteractiveBlockedRecoveryMaxTurns, getConsultantMaxAttempts } from '../../config.js';
 import { EXECUTE_FINALIZATION_PHASE } from '../../execute-finalization.js';
 import type { RunLogger } from '../../logger.js';
@@ -33,18 +32,9 @@ import {
   bestEffortCleanupTimedOutCoder,
   persistBlockedScope,
   persistCoderFailureState,
-  persistUnattendedBlockUnresolvedFailure,
   scheduleCoderFreshSessionRetry,
   shouldRetryCoderWithFreshSession,
 } from './shared.js';
-
-// Bounded number of synthesized conservative auto-resumes the execute-mode
-// interactive-recovery chokepoint performs under `unattended` before it fails
-// cleanly and terminally. Kept a module constant (not a config knob) and held
-// at or below `interactive_blocked_recovery_max_turns` (default 3) so an
-// auto-resume turn never pushes past the recovery turn cap. Revisit here if the
-// unattended push proves too short or too long for headless runs.
-export const UNATTENDED_MAX_AUTO_RESUMES = 2;
 
 export class InteractiveBlockedRecoveryPendingTurnError extends Error {
   readonly pendingTurn: number;
@@ -117,12 +107,10 @@ function isConsultantEligibleBlock(
 // budget-exhausted cases emit NO `consultant.*` events so they preserve
 // the generic recovery path byte-for-byte: a disabled or exhausted consultant
 // must be indistinguishable from the consultant never having existed.
-// The single uniform budget is shared by both run modes — an invocation consumes
-// one unit whether it auto-applies a recoverable verdict (either mode) or, on a
-// non-recoverable verdict, finalizes terminally (unattended) or produces advice
-// and yields (attended) — and is reset to 0 at every scope boundary (see the
-// scope-advance transitions and the split-plan persist) so one scope's
-// adjudication never exhausts a later scope.
+// An invocation consumes one unit whether it auto-applies a recoverable verdict
+// or produces advice and yields for the operator, and the budget is reset to 0
+// at every scope boundary (see the scope-advance transitions and the split-plan
+// persist) so one scope's adjudication never exhausts a later scope.
 function isConsultantBudgetAvailable(state: OrchestrationState): boolean {
   const maxAttempts = getConsultantMaxAttempts(state.cwd);
   if (maxAttempts <= 0) {
@@ -131,140 +119,21 @@ function isConsultantBudgetAvailable(state: OrchestrationState): boolean {
   return state.consultantAttemptCount < maxAttempts;
 }
 
-// Unattended interception for every eligible block class. Runs the read-only
-// consultant (which may itself short-circuit on an anti-thrash repeat) and, on a
-// recoverable verdict with a concrete in-scope directive, enters interactive
-// recovery with that directive injected as the pending turn — bounded by a
-// SEPARATE counter (`consultantAttemptCount`) that never touches
-// `unattendedAutoResumeCount` or the recovery turn cap. A non-recoverable verdict
-// (including a thrash repeat) is finalized TERMINALLY rather than silently
-// auto-resumed. Every gate that prevents the consultant from running — an
-// ineligible source phase, the disabled/exhausted budget, the turn cap, or an
-// consultant error — returns null so the caller falls through to the existing
-// generic auto-resume / terminal-fail path with `recentBlocks` left unchanged.
-// The consultant itself makes zero commits and zero file edits; this function is
-// the sole writer of `recentBlocks`, and only on the branches where the
-// consultant actually ran.
-async function maybeResolveBlockedUnattended(
-  state: OrchestrationState,
-  statePath: string,
-  reason: string,
-  sourcePhase: InteractiveBlockedRecoveryState['sourcePhase'],
-  nextRecovery: InteractiveBlockedRecoveryState,
-  logger?: RunLogger,
-): Promise<OrchestrationState | null> {
-  if (!isConsultantEligibleBlock(reason, sourcePhase)) {
-    return null;
-  }
-  if (!isConsultantBudgetAvailable(state)) {
-    return null;
-  }
-  // Never push past the recovery turn cap; if there is no room for a recovery
-  // turn, fall through to the generic bound check unchanged.
-  if (nextRecovery.turns.length >= nextRecovery.maxTurns) {
-    return null;
-  }
-
-  await logger?.event('consultant.start', {
-    scopeNumber: state.currentScopeNumber,
-    sourcePhase,
-    blockedReason: reason,
-  });
-
-  let verdict: ConsultantVerdict;
-  try {
-    verdict = await runConsultant(state, reason, sourcePhase, logger);
-  } catch (error) {
-    // An consultant failure must never crash the run or weaken existing recovery;
-    // record the decline and fall through to the generic path with `recentBlocks`
-    // unchanged (the consultant did not complete for this block).
-    await logger?.event('consultant.declined', {
-      scopeNumber: state.currentScopeNumber,
-      sourcePhase,
-      blockedReason: reason,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-
-  // The consultant ran (possibly short-circuiting internally on a thrash repeat),
-  // so this block is recorded in the anti-thrash window regardless of the verdict.
-  // The candidate is built from the PRE-update array and written in this same
-  // transition, so a block can never match itself. It MUST be built from the same
-  // `state` snapshot `runConsultant` checked: the candidate's evidence
-  // fingerprint is derived from `state.createdCommits`, and a divergent snapshot
-  // would record a fingerprint the guard never compared against.
-  const candidate = buildRecentBlockCandidate(state, reason, sourcePhase);
-  const recentBlocks = upsertRecentBlock(state.recentBlocks, candidate);
-
-  const resolutionDirective = verdict.resolutionDirective.trim();
-  if (!verdict.recoverable || !resolutionDirective) {
-    // Genuine wall (recoverable:false) or a thrash repeat: an unattended run has
-    // no operator to escalate to, so finalize TERMINALLY instead of synthesizing a
-    // generic auto-resume. The consultant actually ran, so this branch consumes
-    // one unit of the shared per-scope budget (`consultantAttemptCount`) exactly
-    // like the recoverable branch, and persists the anti-thrash record via the
-    // threaded `recentBlocks`. Only the fallback paths where `runConsultant`
-    // was never invoked leave the budget untouched.
-    await logger?.event('consultant.declined', {
-      scopeNumber: state.currentScopeNumber,
-      sourcePhase,
-      blockedReason: reason,
-      recoverable: verdict.recoverable,
-      triageCategory: verdict.triageCategory,
-      consultantAttemptCount: state.consultantAttemptCount + 1,
-    });
-    return failUnattendedRecoveryTerminally(
-      { ...state, recentBlocks, consultantAttemptCount: state.consultantAttemptCount + 1 },
-      statePath,
-      'terminal_block',
-      state.coderSessionHandle,
-      logger,
-    );
-  }
-
-  await logger?.event('consultant.verdict', {
-    scopeNumber: state.currentScopeNumber,
-    sourcePhase,
-    blockedReason: reason,
-    recoverable: verdict.recoverable,
-    triageCategory: verdict.triageCategory,
-    targetCanonicalIds: verdict.targetCanonicalIds,
-    // Report the post-increment count this verdict is about to consume so the
-    // verdict and the later `resolved` event agree on the budget figure.
-    consultantAttemptCount: state.consultantAttemptCount + 1,
-  });
-
-  // Recoverable verdict with a concrete directive: auto-apply it (shared with the
-  // attended path) so the coder consumes the directive and the run continues.
-  return applyRecoverableConsultantDirective({
-    state,
-    statePath,
-    reason,
-    sourcePhase,
-    nextRecovery,
-    recentBlocks,
-    resolutionDirective,
-    verdict,
-    logger,
-  });
-}
-
-// Attended interception for every eligible block class. The consultant NEVER
-// auto-applies its verdict in attended mode; instead it triages read-only and the
-// verdict is returned as advice (plus the updated anti-thrash window) for the
-// caller to persist alongside the operator yield. Gated by the SAME eligibility +
-// disable knob + per-scope budget as the unattended path; when any gate blocks the
-// consultant (ineligible phase, knob 0, exhausted budget, or an consultant
-// error) this returns null and the caller yields exactly as today with no advice,
-// no budget consumption, and `recentBlocks` unchanged.
+// Consultant interception for every eligible block class. The consultant triages
+// read-only and the verdict is returned as advice (plus the updated anti-thrash
+// window) for the caller to either auto-apply (recoverable verdict with a
+// concrete directive) or persist alongside the operator yield. Gated by the
+// eligibility check, the disable knob, and the per-scope budget; when any gate
+// blocks the consultant (ineligible phase, knob 0, exhausted budget, or a
+// consultant error) this returns null and the caller yields for the operator
+// with no advice, no budget consumption, and `recentBlocks` unchanged.
 //
-// The consultant runs BEFORE any `consultant.*` event is emitted, so an
-// consultant error degrades to today's plain attended yield with a byte-for-byte
+// The consultant runs BEFORE any `consultant.*` event is emitted, so a
+// consultant error degrades to a plain operator yield with a byte-for-byte
 // generic observable surface: zero consultant events, no advice, and no
 // counter/`recentBlocks` mutation. The `start`/`verdict` audit pair is emitted only
 // once the consultant has actually produced a verdict for this block.
-async function buildAttendedConsultantAdvice(
+async function buildConsultantAdvice(
   state: OrchestrationState,
   reason: string,
   sourcePhase: InteractiveBlockedRecoveryState['sourcePhase'],
@@ -285,7 +154,7 @@ async function buildAttendedConsultantAdvice(
   try {
     verdict = await runConsultant(state, reason, sourcePhase, logger);
   } catch {
-    // Degrade to today's plain attended yield: never crash the run, and emit NO
+    // Degrade to a plain operator yield: never crash the run, and emit NO
     // `consultant.*` events so the fallback is indistinguishable from the
     // disabled/exhausted/ineligible generic yield.
     return null;
@@ -306,9 +175,11 @@ async function buildAttendedConsultantAdvice(
     consultantAttemptCount: state.consultantAttemptCount + 1,
   });
 
-  // Same-snapshot rule as the unattended writer: the recorded candidate's
-  // commit-trail evidence fingerprint must come from the `state` the consultant
-  // just checked, never a fresher snapshot.
+  // Same-snapshot rule: the recorded candidate's commit-trail evidence
+  // fingerprint must come from the `state` the consultant just checked, never a
+  // fresher snapshot — the candidate's evidence fingerprint is derived from
+  // `state.createdCommits`, and a divergent snapshot would record a fingerprint
+  // the anti-thrash guard never compared against.
   const candidate = buildRecentBlockCandidate(state, reason, sourcePhase);
   const recentBlocks = upsertRecentBlock(state.recentBlocks, candidate);
   const advice: InteractiveBlockedRecoveryConsultantAdvice = {
@@ -321,13 +192,13 @@ async function buildAttendedConsultantAdvice(
   return { advice, recentBlocks, verdict };
 }
 
-// Applies a recoverable consultant verdict — shared by both run modes. Enters
-// interactive recovery and injects the consultant's in-scope directive as the
-// pending turn, exactly like a human-supplied `neal resume --message`, so the
-// coder consumes it and the run continues. Consumes one unit of the per-scope
-// consultant budget (`consultantAttemptCount`, never `unattendedAutoResumeCount`)
-// and persists the anti-thrash `recentBlocks`. The caller has already emitted the
-// `consultant.verdict` audit event for this verdict.
+// Applies a recoverable consultant verdict. Enters interactive recovery and
+// injects the consultant's in-scope directive as the pending turn, exactly like
+// a human-supplied `neal resume --message`, so the coder consumes it and the
+// run continues. Consumes one unit of the per-scope consultant budget
+// (`consultantAttemptCount`) and persists the anti-thrash `recentBlocks`. The
+// caller has already emitted the `consultant.verdict` audit event for this
+// verdict.
 async function applyRecoverableConsultantDirective(args: {
   state: OrchestrationState;
   statePath: string;
@@ -395,78 +266,13 @@ export async function enterInteractiveBlockedRecovery(
     turns: [],
   };
 
-  // Unattended runs have no operator to answer, so instead of yielding-and-halting
-  // we either synthesize a conservative auto-resume turn (bounded) or, past the
-  // bound, run the shared terminal-fail action. Gate purely on structural state:
-  // the persisted counter and the recovery turn cap, never on guidance text.
-  if (state.unattended) {
-    // Before the generic auto-resume/terminal-fail decision, give the bounded
-    // read-only consultant a chance to triage the block: autonomously resolve it
-    // with an in-scope directive (recoverable) or finalize terminally (a genuine
-    // wall or thrash repeat). Any ineligible source phase, disabled/exhausted
-    // budget, turn cap, or consultant error falls through to the existing generic
-    // behavior unchanged.
-    const consultantResolved = await maybeResolveBlockedUnattended(
-      state,
-      statePath,
-      reason,
-      sourcePhase,
-      nextRecovery,
-      logger,
-    );
-    if (consultantResolved) {
-      return consultantResolved;
-    }
-
-    const canAutoResume =
-      state.unattendedAutoResumeCount < UNATTENDED_MAX_AUTO_RESUMES &&
-      nextRecovery.turns.length < nextRecovery.maxTurns;
-    if (!canAutoResume) {
-      // Past the bound, finalize any active recovery record into history and land
-      // on a terminal failed shape (status:'failed', phase:'blocked',
-      // interactiveBlockedRecovery:null) so the run is never persisted as an
-      // active/waiting recovery. Reuses the same finalizer as the disposition
-      // terminal-fail paths.
-      return failUnattendedRecoveryTerminally(state, statePath, 'terminal_block', state.coderSessionHandle, logger);
-    }
-
-    const enteredState = await saveState(statePath, {
-      ...state,
-      phase: 'interactive_blocked_recovery',
-      status: 'running',
-      blockedFromPhase: state.blockedFromPhase ?? state.phase,
-      unattendedAutoResumeCount: state.unattendedAutoResumeCount + 1,
-      interactiveBlockedRecovery: {
-        ...nextRecovery,
-        sourcePhase,
-        blockedReason: reason,
-      },
-    });
-    await writeExecutionArtifacts(enteredState);
-    await logger?.event('interactive_blocked_recovery.entered', {
-      scopeNumber: enteredState.currentScopeNumber,
-      sourcePhase: enteredState.interactiveBlockedRecovery?.sourcePhase,
-      blockedReason: reason,
-    });
-    await logger?.event('interactive_blocked_recovery.unattended_auto_resume', {
-      scopeNumber: enteredState.currentScopeNumber,
-      sourcePhase,
-      autoResumeCount: enteredState.unattendedAutoResumeCount,
-      maxAutoResumes: UNATTENDED_MAX_AUTO_RESUMES,
-    });
-    // Reuse the turn-recording helper so the synthesized guidance turn satisfies
-    // the same invariants a human-supplied `neal resume --message` would; the run
-    // loop then proceeds into runInteractiveBlockedRecoveryPhase to consume it.
-    return recordInteractiveBlockedRecoveryGuidance(statePath, UNATTENDED_AUTO_RESUME_GUIDANCE, logger);
-  }
-
-  // Attended runs run the same bounded read-only consultant. On a recoverable
-  // verdict with a concrete directive, they auto-apply it exactly as unattended
-  // runs do — the consultant's advice is acted on in both modes. On a genuine wall
+  // Give the bounded read-only consultant a chance to triage the block. On a
+  // recoverable verdict with a concrete directive, auto-apply it so the coder
+  // consumes the directive and the run continues. On a genuine wall
   // (recoverable:false), or when the disable knob / budget / eligibility gate the
-  // consultant off, the attended run yields for the operator, carrying the verdict
-  // as advice when there is one so the operator sees why it stopped.
-  const advisory = await buildAttendedConsultantAdvice(state, reason, sourcePhase, logger);
+  // consultant off, the run yields for the operator, carrying the verdict as
+  // advice when there is one so the operator sees why it stopped.
+  const advisory = await buildConsultantAdvice(state, reason, sourcePhase, logger);
   if (advisory) {
     const resolutionDirective = advisory.advice.resolutionDirective.trim();
     if (advisory.advice.recoverable && resolutionDirective) {
@@ -507,16 +313,14 @@ export async function enterInteractiveBlockedRecovery(
   return nextState;
 }
 
-// Whether a caller of `enterInteractiveBlockedRecovery` should emit an attended
-// blocked / interactive-recovery notification for the returned state. Notify only
-// when an attended run is actually WAITING for the operator. An attended run whose
-// block the consultant auto-fixed leaves a pending directive to consume (status
-// 'running', a recorded recovery turn) — that is `waitingForOperatorGuidance:
-// false`, so it must not notify. Unattended runs never wait here (they auto-resume
-// or terminally fail), so `!state.unattended` already excludes them. Gate
-// structurally on the derived recovery view, never on text.
+// Whether a caller of `enterInteractiveBlockedRecovery` should emit a blocked /
+// interactive-recovery notification for the returned state. Notify only when the
+// run is actually WAITING for the operator. A run whose block the consultant
+// auto-fixed leaves a pending directive to consume (status 'running', a recorded
+// recovery turn) — that is `waitingForOperatorGuidance: false`, so it must not
+// notify. Gate structurally on the derived recovery view, never on text.
 export function shouldNotifyInteractiveBlockedRecoveryEntry(state: OrchestrationState): boolean {
-  return !state.unattended && (getInteractiveRecoveryView(state)?.waitingForOperatorGuidance ?? false);
+  return getInteractiveRecoveryView(state)?.waitingForOperatorGuidance ?? false;
 }
 
 export async function recordInteractiveBlockedRecoveryGuidance(
@@ -747,86 +551,6 @@ function getInteractiveBlockedRecoveryResumePhase(
   }
 }
 
-// Shared unattended terminal-fail for a recovery disposition. The active
-// recovery record is finalized into history (so `interactiveBlockedRecovery`
-// becomes null and the lifecycle view is no longer "active"/waiting — required
-// because the state invariant ties a non-null record to the recovery phase),
-// the run lands on the recovery's source phase for diagnostics, and the shared
-// classified terminal-fail action runs (status:'failed', no `notifyBlocked`).
-// `state` must carry the disposition already recorded on its latest turn.
-async function failUnattendedRecoveryTerminally(
-  state: OrchestrationState,
-  statePath: string,
-  action: CoderBlockedRecoveryDisposition['action'],
-  sessionHandle: string | null,
-  logger?: RunLogger,
-) {
-  const recovery = state.interactiveBlockedRecovery;
-  const sourcePhase = recovery?.sourcePhase ?? state.blockedFromPhase ?? state.phase;
-  // The history record's resultPhase must satisfy the disposition-result invariant
-  // (stay_blocked -> recovery, terminal_block/replace -> blocked); the run itself
-  // lands on the terminal `blocked` phase with status:'failed', which keeps the
-  // lifecycle view out of any waiting/active recovery state.
-  const historyResultPhase: OrchestrationState['phase'] =
-    action === 'stay_blocked' ? 'interactive_blocked_recovery' : 'blocked';
-  await logger?.event('interactive_blocked_recovery.unattended_terminal_fail', {
-    scopeNumber: state.currentScopeNumber,
-    sourcePhase,
-    autoResumeCount: state.unattendedAutoResumeCount,
-    maxAutoResumes: UNATTENDED_MAX_AUTO_RESUMES,
-  });
-  const finalized = recovery ? finalizeInteractiveBlockedRecovery(state, action, historyResultPhase) : state;
-  return persistUnattendedBlockUnresolvedFailure(
-    {
-      ...finalized,
-      phase: 'blocked',
-      blockedFromPhase: sourcePhase,
-      coderSessionHandle: sessionHandle,
-      coderSessionProtocol: sessionHandle ? state.coderSessionProtocol : null,
-      coderRetryCount: 0,
-    },
-    statePath,
-    'interactive_blocked_recovery',
-    logger,
-  );
-}
-
-// Under `unattended`, a recovery disposition that would otherwise leave the run
-// waiting for an operator (`stay_blocked`) is resolved structurally: synthesize
-// another conservative auto-resume turn while still under the persisted
-// auto-resume cap and the recovery turn cap, otherwise run the shared
-// terminal-fail action. `state` must already be persisted in
-// `interactive_blocked_recovery` with its recovery record holding the handled
-// turns. Gates only on the persisted counter and turn cap, never on text.
-async function continueOrTerminateUnattendedRecovery(
-  state: OrchestrationState,
-  statePath: string,
-  sessionHandle: string | null,
-  logger?: RunLogger,
-) {
-  const recovery = state.interactiveBlockedRecovery;
-  const canAutoResume =
-    !!recovery &&
-    state.unattendedAutoResumeCount < UNATTENDED_MAX_AUTO_RESUMES &&
-    recovery.turns.length < recovery.maxTurns;
-  if (!canAutoResume) {
-    return failUnattendedRecoveryTerminally(state, statePath, 'stay_blocked', sessionHandle, logger);
-  }
-
-  const incremented = await saveState(statePath, {
-    ...state,
-    unattendedAutoResumeCount: state.unattendedAutoResumeCount + 1,
-  });
-  await writeExecutionArtifacts(incremented);
-  await logger?.event('interactive_blocked_recovery.unattended_auto_resume', {
-    scopeNumber: incremented.currentScopeNumber,
-    sourcePhase: recovery.sourcePhase,
-    autoResumeCount: incremented.unattendedAutoResumeCount,
-    maxAutoResumes: UNATTENDED_MAX_AUTO_RESUMES,
-  });
-  return recordInteractiveBlockedRecoveryGuidance(statePath, UNATTENDED_AUTO_RESUME_GUIDANCE, logger);
-}
-
 export async function applyInteractiveBlockedRecoveryDisposition(
   state: OrchestrationState,
   statePath: string,
@@ -889,25 +613,6 @@ export async function applyInteractiveBlockedRecoveryDisposition(
     );
 
     const resultPhase = persistedState.phase === 'blocked' ? 'blocked' : 'reviewer_plan';
-    if (state.unattended && resultPhase === 'blocked') {
-      // An unattended replacement that could not produce a runnable plan must not
-      // leave the run resumable-blocked; finalize recovery and fail cleanly.
-      return failUnattendedRecoveryTerminally(
-        {
-          ...persistedState,
-          interactiveBlockedRecovery: withRecordedInteractiveBlockedRecoveryDisposition(
-            { ...persistedState, interactiveBlockedRecovery: state.interactiveBlockedRecovery },
-            disposition,
-            sessionHandle,
-            'blocked',
-          ).interactiveBlockedRecovery,
-        },
-        statePath,
-        'replace_current_scope',
-        sessionHandle,
-        logger,
-      );
-    }
     return persistFinalizedInteractiveBlockedRecovery(
       {
         ...persistedState,
@@ -968,11 +673,6 @@ export async function applyInteractiveBlockedRecoveryDisposition(
       coderRetryCount: 0,
     });
     await writeExecutionArtifacts(nextState);
-    if (nextState.unattended) {
-      // No operator will answer a stay_blocked: synthesize another conservative
-      // auto-resume turn under the bounds, or run the shared terminal-fail action.
-      return continueOrTerminateUnattendedRecovery(nextState, statePath, sessionHandle, logger);
-    }
     return nextState;
   }
 
@@ -983,25 +683,6 @@ export async function applyInteractiveBlockedRecoveryDisposition(
         derivedScopeIndex: null,
       }
     : state;
-
-  if (state.unattended) {
-    // Unattended terminal_block must not take the attended blocked + notifyBlocked
-    // path; record the coder's terminal decision for diagnostics, then run the
-    // shared classified terminal-fail action (status:'failed', no notifyBlocked).
-    const recordedTerminalState = withRecordedInteractiveBlockedRecoveryDisposition(
-      terminalBlockedState,
-      disposition,
-      sessionHandle,
-      'blocked',
-    );
-    return failUnattendedRecoveryTerminally(
-      recordedTerminalState,
-      statePath,
-      'terminal_block',
-      sessionHandle,
-      logger,
-    );
-  }
 
   const finalizedBlockedState = await persistFinalizedInteractiveBlockedRecovery(
     terminalBlockedState,

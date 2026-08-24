@@ -6,14 +6,12 @@ export type ParsedNewRunArgs = {
   planDoc: string;
   agentConfig: AgentConfig;
   squashOnCompletion: boolean;
-  unattended: boolean;
 };
 
 export type ParsedPlanAndExecuteArgs = {
   planDocs: string[];
   agentConfig: AgentConfig;
   squashOnCompletion: boolean;
-  unattended: boolean;
 };
 
 export type ParsedReviewSelector =
@@ -66,9 +64,9 @@ export function buildUsageLines(version: string) {
     `neal ${version}`,
     '',
     'Usage: neal setup',
-    '   or: neal plan <plan.md> [--unattended]',
-    '   or: neal execute <plan.md> [--no-squash] [--unattended]',
-    '   or: neal run [--no-squash] [--unattended] <plan.md> [more-plans...]',
+    '   or: neal plan <plan.md>',
+    '   or: neal execute <plan.md> [--no-squash]',
+    '   or: neal run [--no-squash] <plan.md> [more-plans...]',
     '   or: neal resume [--run <run-id>] [--message "..."]',
     '   or: neal review [message] (--last <n> | --since <base>)',
     '   or: neal squash [plan.md]',
@@ -87,10 +85,8 @@ export function buildUsageLines(version: string) {
     '  neal plan tmp/PLAN.md',
     '  neal execute tmp/PLAN.md',
     '  neal execute tmp/PLAN.md --no-squash',
-    '  neal execute tmp/PLAN.md --unattended',
     '  neal run tmp/PLAN.md',
     '  neal run --no-squash tmp/PLAN.md',
-    '  neal run --unattended tmp/PLAN.md',
     '  neal resume',
     '  neal resume --run <run-id>',
     '  neal resume --run <run-id> --message "Use the narrower helper approach."',
@@ -173,17 +169,11 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
 
   const planDoc = requireSubcommandPlanPath(command, args[1]);
   let squashOnCompletion = command === 'execute';
-  let unattended = false;
   let index = 2;
   while (index < args.length) {
     const extra = args[index];
     if (extra === '--no-squash' && command === 'execute') {
       squashOnCompletion = false;
-      index += 1;
-      continue;
-    }
-    if (extra === '--unattended') {
-      unattended = true;
       index += 1;
       continue;
     }
@@ -198,7 +188,6 @@ export function parseNewRunArgs(args: string[], defaults: AgentConfig) {
     planDoc,
     agentConfig,
     squashOnCompletion,
-    unattended,
   } satisfies ParsedNewRunArgs;
 }
 
@@ -215,17 +204,11 @@ export function parsePlanAndExecuteArgs(args: string[], defaults: AgentConfig): 
   };
   let index = 1;
   let squashOnCompletion = true;
-  let unattended = false;
 
   while (index < args.length) {
     const value = args[index];
     if (value === '--no-squash') {
       squashOnCompletion = false;
-      index += 1;
-      continue;
-    }
-    if (value === '--unattended') {
-      unattended = true;
       index += 1;
       continue;
     }
@@ -245,7 +228,6 @@ export function parsePlanAndExecuteArgs(args: string[], defaults: AgentConfig): 
     planDocs,
     agentConfig,
     squashOnCompletion,
-    unattended,
   };
 }
 

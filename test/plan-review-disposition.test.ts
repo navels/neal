@@ -454,7 +454,7 @@ test('plan review blocks at the round cap with the max-rounds reason driving blo
       derivedPlanStatus: null,
       blockedFromPhase: 'reviewer_plan',
     });
-    // Blocked-response finalization on an attended top-level plan review
+    // Blocked-response finalization on a top-level plan review
     // notifies and returns the persisted blocked state unchanged.
     assert.deepStrictEqual(JSON.parse(JSON.stringify(result)), persisted);
 

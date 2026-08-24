@@ -31,8 +31,8 @@ export const requiredPackageEntries = [
 const requiredHelpFragments = [
   `neal ${packageJson.version}`,
   'Usage: neal setup',
-  'or: neal execute <plan.md> [--no-squash] [--unattended]',
-  'or: neal run [--no-squash] [--unattended] <plan.md> [more-plans...]',
+  'or: neal execute <plan.md> [--no-squash]',
+  'or: neal run [--no-squash] <plan.md> [more-plans...]',
   'or: neal status [--json] [--run <run-id>]',
   'or: neal check',
   'or: neal squash [plan.md]',

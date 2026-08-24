@@ -817,7 +817,6 @@ export function assertValidOrchestrationState(
 
   assertSafeIntegerAtLeast(state.currentScopeNumber, 'currentScopeNumber', 0, context);
   assertSafeIntegerAtLeast(state.coderRetryCount, 'coderRetryCount', 0, context);
-  assertSafeIntegerAtLeast(state.unattendedAutoResumeCount, 'unattendedAutoResumeCount', 0, context);
   assertSafeIntegerAtLeast(state.consultantAttemptCount, 'consultantAttemptCount', 0, context);
   assertSafeIntegerAtLeast(
     state.finalCompletionContinueExecutionCount,

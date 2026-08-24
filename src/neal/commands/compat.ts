@@ -22,6 +22,7 @@ import type {
 } from '../review-findings/types.js';
 import { enableAgentSettingsIsolation } from '../providers/agent-settings-isolation.js';
 import { isNealProviderError, type NealProviderErrorKind } from '../providers/types.js';
+import { getRunDisplayStatus } from '../run-status.js';
 import { getRunDir } from '../storage-paths.js';
 import type { AgentConfig, AgentProvider, OrchestrationState } from '../types.js';
 import { verifyConfiguredProviders } from './check.js';
@@ -471,7 +472,7 @@ function hasEvent(events: RunEvent[], type: string): boolean {
 
 export type CompatWriterRunResult = {
   finalStatus: OrchestrationState['status'] | null;
-  unattended: boolean | null;
+  finalState: OrchestrationState | null;
   runDir: string;
   throwawayCwd: string;
   events: RunEvent[];
@@ -502,7 +503,7 @@ export async function runWriterFixture(options: CompatWriterRunOptions): Promise
   const planDoc = resolve(throwawayCwd, options.documentRelativePath);
 
   let finalStatus: OrchestrationState['status'] | null = null;
-  let unattended: boolean | null = null;
+  let finalState: OrchestrationState | null = null;
   let threwDuringRun = false;
   let errorMessage: string | null = null;
   let verifyExitCode: number | null = null;
@@ -514,10 +515,8 @@ export async function runWriterFixture(options: CompatWriterRunOptions): Promise
 
     const loaded = await loadOrInitialize(planDoc, throwawayCwd, options.candidateConfig, undefined, options.mode, {
       runDir,
-      unattended: true,
       allowedDirtyPaths: [planDoc],
     });
-    unattended = loaded.state.unattended;
 
     // executeRun renders its final run summary to process.stdout (runtime.ts).
     // Capture and discard that here so it never leaks into the compat
@@ -526,9 +525,9 @@ export async function runWriterFixture(options: CompatWriterRunOptions): Promise
     const realStdoutWrite = process.stdout.write.bind(process.stdout);
     process.stdout.write = (() => true) as typeof process.stdout.write;
     try {
-      const result = await executeRun(loaded.state, loaded.statePath, loaded.logger, { unattended: true });
+      const result = await executeRun(loaded.state, loaded.statePath, loaded.logger);
       finalStatus = result.finalState.status;
-      unattended = result.finalState.unattended;
+      finalState = result.finalState;
     } catch (error) {
       threwDuringRun = true;
       errorMessage = error instanceof Error ? error.message : String(error);
@@ -551,7 +550,7 @@ export async function runWriterFixture(options: CompatWriterRunOptions): Promise
 
     return {
       finalStatus,
-      unattended,
+      finalState,
       runDir,
       throwawayCwd,
       events,
@@ -569,8 +568,24 @@ export async function runWriterFixture(options: CompatWriterRunOptions): Promise
 // Failure-mode classification for writer runs
 // ---------------------------------------------------------------------------
 
+// An operator stop, derived purely from the run's final persisted state. The
+// signal mirrors the writer exit-code-2 mapping (writer-exit-codes.ts): the run
+// is structurally waiting for the operator (the interactive-recovery wait, or a
+// pending-guidance view) or persisted `status: 'blocked'` (the final-completion
+// and top-level plan-review gates).
+export function isOperatorStopFinalState(state: OrchestrationState): boolean {
+  const displayStatus = getRunDisplayStatus(state);
+  if (
+    displayStatus.effectiveStatus === 'waiting_for_operator' ||
+    displayStatus.pendingOperatorGuidance
+  ) {
+    return true;
+  }
+  return state.status === 'blocked';
+}
+
 export function classifyWriterFailure(args: {
-  finalStatus: OrchestrationState['status'] | null;
+  finalState: OrchestrationState | null;
   events: RunEvent[];
   threwDuringRun: boolean;
 }): CompatFailureMode {
@@ -589,16 +604,13 @@ export function classifyWriterFailure(args: {
     }
     return 'provider_failed';
   }
-  if (hasEvent(events, 'unattended.block_unresolved')) {
-    return 'block_unresolved';
-  }
-  if (args.finalStatus === 'blocked') {
+  if (args.finalState !== null && isOperatorStopFinalState(args.finalState)) {
     return 'block_unresolved';
   }
   if (hasEvent(events, 'phase.error')) {
     return 'structured_output';
   }
-  if (args.threwDuringRun || args.finalStatus === null) {
+  if (args.threwDuringRun || args.finalState === null) {
     return 'finalization_error';
   }
   // status 'failed' with no conclusive structural signal.
@@ -660,7 +672,7 @@ export async function evaluateCoderFixture(args: {
   }
 
   const failureMode = classifyWriterFailure({
-    finalStatus: run.finalStatus,
+    finalState: run.finalState,
     events: run.events,
     threwDuringRun: run.threwDuringRun,
   });
@@ -695,7 +707,7 @@ export async function evaluatePlannerFixture(args: {
 
   if (run.finalStatus !== 'done') {
     const failureMode = classifyWriterFailure({
-      finalStatus: run.finalStatus,
+      finalState: run.finalState,
       events: run.events,
       threwDuringRun: run.threwDuringRun,
     });
@@ -1065,6 +1077,17 @@ export function formatCompatTable(report: CompatReport): string {
 // Top-level orchestration
 // ---------------------------------------------------------------------------
 
+// Compat child runs must be structurally quiet: a child run that lands in an
+// operator-stop state would otherwise invoke the operator's configured notify
+// helper mid-matrix. `getNotifyBin` (config.ts) treats a defined-but-empty
+// NEAL_NOTIFY_BIN as "notifications disabled", so setting the empty override at
+// compat startup silences neal's own notifier for the whole process — the same
+// process-env pattern as `enableAgentSettingsIsolation`, which only isolates
+// the SDK adapters' settings, not neal's notifier.
+export function suppressCompatRunNotifications(): void {
+  process.env.NEAL_NOTIFY_BIN = '';
+}
+
 export type CompatDeps = {
   verifyProviders?: (args: { cwd: string; agentConfig: AgentConfig; stdout: Writable }) => Promise<void>;
   createReviewProvider?: CreateReviewProvider;
@@ -1085,6 +1108,7 @@ export async function runCompat(args: RunCompatArgs): Promise<CompatReport> {
   // interactive config so the probe stays quiet (no per-turn notifier hooks)
   // and repeatable. Normal neal runs never call this, so they honor the config.
   enableAgentSettingsIsolation();
+  suppressCompatRunNotifications();
   const deps = args.deps ?? {};
   const compatDir = deps.compatDir ?? getCompatExamplesDir();
   const manifest = deps.manifest ?? loadCompatManifest(compatDir);

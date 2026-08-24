@@ -41,8 +41,7 @@ document. The phases live in `src/neal/orchestrator/phases/`:
   forth without resolution, or a step that tried to break a
   scope into a smaller plan produced a plan that wasn't valid. When the fix is
   small and safe, the consultant returns a directive that neal applies, and the
-  run keeps going. Otherwise the run stops and waits for you, or fails cleanly
-  if it's running unattended.
+  run keeps going. Otherwise the run stops and waits for you.
 
 After every scope is accepted, a final-completion review
 (`final-completion-review.ts`) checks the whole plan, then neal squashes the run

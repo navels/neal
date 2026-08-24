@@ -13,7 +13,6 @@ import {
   hasPendingInteractiveBlockedRecoveryTurn,
   shouldNotifyInteractiveBlockedRecoveryEntry,
 } from '../src/neal/orchestrator/phases/recovery.js';
-import { UNATTENDED_AUTO_RESUME_GUIDANCE } from '../src/neal/blocked-guidance.js';
 import {
   clearProviderCapabilitiesOverridesForTesting,
   setProviderCapabilitiesOverrideForTesting,
@@ -142,8 +141,6 @@ async function createE2eFixture(overrides: Partial<OrchestrationState> = {}) {
     phase: 'reviewer_scope',
     status: 'running',
     blockedFromPhase: 'reviewer_scope',
-    unattended: true,
-    unattendedAutoResumeCount: 0,
     consultantAttemptCount: 0,
     agentConfig: {
       ...getDefaultAgentConfig(),
@@ -182,8 +179,8 @@ async function readRecoveryMarkdown(runDir: string): Promise<string> {
   return readFile(join(runDir, 'RECOVERY.md'), 'utf8');
 }
 
-// 1. Unattended review_stuck, recoverable -> directive injected, auto-acted.
-test('e2e: unattended review_stuck recoverable injects the directive and resolves autonomously', async () => {
+// 1. review_stuck, recoverable -> directive injected, auto-acted.
+test('e2e: review_stuck recoverable injects the directive and resolves autonomously', async () => {
   const { cwd, statePath, state } = await createE2eFixture({});
   const advisor = installAdvisorOverride({ payload: recoverableVerdict() });
   const logger = await makeLogger(cwd, statePath, state);
@@ -198,26 +195,20 @@ test('e2e: unattended review_stuck recoverable injects the directive and resolve
       nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableVerdict().resolutionDirective,
     );
-    assert.notEqual(
-      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
-      UNATTENDED_AUTO_RESUME_GUIDANCE,
-    );
     assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
     assert.equal(nextState.consultantAttemptCount, 1);
-    assert.equal(nextState.unattendedAutoResumeCount, 0);
 
     const eventTypes = await readEventTypes(state.runDir);
     assert.ok(eventTypes.includes('consultant.start'));
     assert.ok(eventTypes.includes('consultant.verdict'));
     assert.ok(eventTypes.includes('consultant.resolved'));
-    assert.ok(!eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
 });
 
-// 2. Unattended coder block, recoverable -> generalized dispatch triages it.
-test('e2e: unattended coder block is triaged by the generalized dispatch with sourcePhase coder_scope', async () => {
+// 2. Coder block, recoverable -> generalized dispatch triages it.
+test('e2e: coder block is triaged by the generalized dispatch with sourcePhase coder_scope', async () => {
   const { cwd, statePath, state } = await createE2eFixture({
     phase: 'coder_scope',
     blockedFromPhase: 'coder_scope',
@@ -245,33 +236,7 @@ test('e2e: unattended coder block is triaged by the generalized dispatch with so
   }
 });
 
-// 3. Unattended coder block, not recoverable -> terminal short-circuit.
-test('e2e: unattended not-recoverable verdict terminally short-circuits instead of auto-resuming', async () => {
-  const { cwd, statePath, state } = await createE2eFixture({
-    phase: 'coder_scope',
-    blockedFromPhase: 'coder_scope',
-  });
-  const advisor = installAdvisorOverride({ payload: nonRecoverableVerdict() });
-  const logger = await makeLogger(cwd, statePath, state);
-
-  try {
-    const nextState = await enterInteractiveBlockedRecovery(state, statePath, CODER_BLOCK_REASON, logger);
-
-    assert.equal(advisor.callCount(), 1);
-    assert.equal(nextState.status, 'failed');
-    assert.equal(nextState.phase, 'blocked');
-    assert.equal(nextState.interactiveBlockedRecovery, null);
-    assert.equal(nextState.unattendedAutoResumeCount, 0);
-
-    const eventTypes = await readEventTypes(state.runDir);
-    assert.ok(eventTypes.includes('unattended.block_unresolved'));
-    assert.ok(!eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-// 4. Anti-thrash via two real entries (no pre-seeding) + a cross-scope control.
+// 3. Anti-thrash via two real entries (no pre-seeding) + a cross-scope control.
 test('e2e: a same-scope resumed repeat short-circuits without re-invoking the advisor; a cross-scope repeat does not', async () => {
   const { cwd, statePath, state } = await createE2eFixture({
     phase: 'coder_scope',
@@ -301,7 +266,10 @@ test('e2e: a same-scope resumed repeat short-circuits without re-invoking the ad
     };
     const secondState = await enterInteractiveBlockedRecovery(secondEntryState, statePath, CODER_BLOCK_REASON, logger);
     assert.equal(advisor.callCount(), 1, 'the anti-thrash repeat does not re-invoke the advisor');
-    assert.equal(secondState.status, 'failed');
+    assert.equal(secondState.phase, 'interactive_blocked_recovery');
+    assert.equal(secondState.status, 'running');
+    assert.equal(secondState.interactiveBlockedRecovery?.turns.length, 0, 'the repeat waits for the operator');
+    assert.equal(secondState.interactiveBlockedRecovery?.consultantAdvice?.recoverable, false);
     assert.equal(secondState.recentBlocks.length, 1);
     assert.equal(secondState.recentBlocks[0]?.count, 2);
 
@@ -322,11 +290,10 @@ test('e2e: a same-scope resumed repeat short-circuits without re-invoking the ad
   }
 });
 
-// 5. Attended recoverable block, knob enabled -> auto-applies the directive, same
-//    as unattended. No operator yield, no notification.
-test('e2e: attended recoverable block auto-applies the consultant directive without yielding', async () => {
+// 4. Recoverable block, knob enabled -> auto-applies the directive.
+//    No operator yield, no notification.
+test('e2e: recoverable block auto-applies the consultant directive without yielding', async () => {
   const { cwd, statePath, state } = await createE2eFixture({
-    unattended: false,
     phase: 'coder_scope',
     blockedFromPhase: 'coder_scope',
   });
@@ -339,8 +306,8 @@ test('e2e: attended recoverable block auto-applies the consultant directive with
     assert.equal(advisor.callCount(), 1);
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
-    // The consultant's directive is injected as the pending turn, exactly like an
-    // unattended auto-fix — the run consumes it rather than waiting for the operator.
+    // The consultant's directive is injected as the pending turn — the run
+    // consumes it rather than waiting for the operator.
     assert.equal(
       nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableVerdict().resolutionDirective,
@@ -366,11 +333,10 @@ test('e2e: attended recoverable block auto-applies the consultant directive with
   }
 });
 
-// 5b. Attended non-recoverable (genuine wall), knob enabled -> advice persisted,
-//     run yields for the operator (the case that still waits for a human).
-test('e2e: attended non-recoverable block persists consultant advice in state and RECOVERY.md, then yields', async () => {
+// 4b. Non-recoverable (genuine wall), knob enabled -> advice persisted,
+//     run yields for the operator (the case that waits for a human).
+test('e2e: non-recoverable block persists consultant advice in state and RECOVERY.md, then yields', async () => {
   const { cwd, statePath, state } = await createE2eFixture({
-    unattended: false,
     phase: 'coder_scope',
     blockedFromPhase: 'coder_scope',
   });
@@ -387,7 +353,7 @@ test('e2e: attended non-recoverable block persists consultant advice in state an
     assert.equal(shouldNotifyInteractiveBlockedRecoveryEntry(nextState), true);
 
     const advice = nextState.interactiveBlockedRecovery?.consultantAdvice;
-    assert.ok(advice, 'attended advice must be persisted on a wall');
+    assert.ok(advice, 'advice must be persisted on a wall');
     assert.equal(advice?.recoverable, nonRecoverableVerdict().recoverable);
     assert.equal(advice?.triageCategory, nonRecoverableVerdict().triageCategory);
 
@@ -406,63 +372,34 @@ test('e2e: attended non-recoverable block persists consultant advice in state an
   }
 });
 
-// 6. Disable knob, both modes -> today's generic behavior, byte-for-byte.
-test('e2e: the disable knob (0) reproduces today behavior in both unattended and attended modes', async () => {
-  // Unattended: generic auto-resume, no consultant events.
-  {
-    const { cwd, statePath, state } = await createE2eFixture({});
-    await writeFixtureConfig(cwd, 0);
-    const advisor = installAdvisorOverride({ payload: recoverableVerdict() });
-    const logger = await makeLogger(cwd, statePath, state);
-    try {
-      const recentBefore = state.recentBlocks;
-      const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
+// 5. Disable knob -> the generic operator wait, byte-for-byte.
+test('e2e: the disable knob (0) yields plainly with no advice and no consultant events', async () => {
+  const { cwd, statePath, state } = await createE2eFixture({});
+  await writeFixtureConfig(cwd, 0);
+  const advisor = installAdvisorOverride({ payload: recoverableVerdict() });
+  const logger = await makeLogger(cwd, statePath, state);
+  try {
+    const recentBefore = state.recentBlocks;
+    const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
 
-      assert.equal(advisor.callCount(), 0);
-      assert.equal(
-        nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
-        UNATTENDED_AUTO_RESUME_GUIDANCE,
-      );
-      assert.deepEqual(nextState.recentBlocks, recentBefore);
+    assert.equal(advisor.callCount(), 0);
+    assert.equal(nextState.phase, 'interactive_blocked_recovery');
+    assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
+    assert.equal(nextState.interactiveBlockedRecovery?.consultantAdvice ?? null, null);
+    assert.equal(nextState.consultantAttemptCount, 0);
+    assert.deepEqual(nextState.recentBlocks, recentBefore);
 
-      const eventTypes = await readEventTypes(state.runDir);
-      assert.ok(!eventTypes.some((type) => type.startsWith('consultant.')));
-      assert.ok(eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-    } finally {
-      clearProviderCapabilitiesOverridesForTesting();
-    }
-  }
-
-  // Attended: plain yield, no advice, unchanged budget/recentBlocks, no events.
-  {
-    const { cwd, statePath, state } = await createE2eFixture({ unattended: false });
-    await writeFixtureConfig(cwd, 0);
-    const advisor = installAdvisorOverride({ payload: recoverableVerdict() });
-    const logger = await makeLogger(cwd, statePath, state);
-    try {
-      const recentBefore = state.recentBlocks;
-      const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
-
-      assert.equal(advisor.callCount(), 0);
-      assert.equal(nextState.phase, 'interactive_blocked_recovery');
-      assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
-      assert.equal(nextState.interactiveBlockedRecovery?.consultantAdvice ?? null, null);
-      assert.equal(nextState.consultantAttemptCount, 0);
-      assert.deepEqual(nextState.recentBlocks, recentBefore);
-
-      const eventTypes = await readEventTypes(state.runDir);
-      assert.ok(!eventTypes.some((type) => type.startsWith('consultant.')));
-    } finally {
-      clearProviderCapabilitiesOverridesForTesting();
-    }
+    const eventTypes = await readEventTypes(state.runDir);
+    assert.ok(!eventTypes.some((type) => type.startsWith('consultant.')));
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
   }
 });
 
-// 7. Exhausted budget, attended -> plain yield, the cap gates attended advice.
-test('e2e: an exhausted budget gates attended advice and the recentBlocks writer', async () => {
+// 6. Exhausted budget -> plain yield, the cap gates advice.
+test('e2e: an exhausted budget gates consultant advice and the recentBlocks writer', async () => {
   // Knob default is 1; seed consultantAttemptCount at the cap.
   const { cwd, statePath, state } = await createE2eFixture({
-    unattended: false,
     consultantAttemptCount: 1,
   });
   const advisor = installAdvisorOverride({ payload: recoverableVerdict() });
@@ -484,7 +421,7 @@ test('e2e: an exhausted budget gates attended advice and the recentBlocks writer
   }
 });
 
-// 8. Ineligible source phase (coder_plan) -> generic behavior, zero consultant calls.
+// 7. Ineligible source phase (coder_plan) -> generic behavior, zero consultant calls.
 test('e2e: an ineligible source phase (coder_plan) keeps generic recovery with zero consultant calls', async () => {
   const { cwd, statePath, state } = await createE2eFixture({
     phase: 'coder_plan',
@@ -498,17 +435,13 @@ test('e2e: an ineligible source phase (coder_plan) keeps generic recovery with z
     const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
 
     assert.equal(advisor.callCount(), 0, 'plan-refinement blocks must never invoke the consultant');
-    assert.equal(
-      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
-      UNATTENDED_AUTO_RESUME_GUIDANCE,
-    );
+    assert.equal(nextState.phase, 'interactive_blocked_recovery');
+    assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
     assert.equal(nextState.consultantAttemptCount, 0);
-    assert.equal(nextState.unattendedAutoResumeCount, 1);
     assert.deepEqual(nextState.recentBlocks, recentBefore);
 
     const eventTypes = await readEventTypes(state.runDir);
     assert.ok(!eventTypes.some((type) => type.startsWith('consultant.')));
-    assert.ok(eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }

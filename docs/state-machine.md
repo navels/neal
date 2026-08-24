@@ -76,10 +76,8 @@ Every block class (coder-blocked signals, reviewer `review_stuck` deadlocks, and
 the split-plan invalid-payload block) funnels through the single
 `enterInteractiveBlockedRecovery` chokepoint, where the consultant triages it (see
 Site A below). The consultant is read-only: it never grants authorization, expands
-scope, or waives verification gates. A recoverable verdict acts automatically under
-both run modes. The modes differ only on a non-recoverable verdict, which finalizes
-the run terminally under unattended runs and yields to the operator (carrying the
-verdict as advice) under attended runs.
+scope, or waives verification gates. A recoverable verdict acts automatically. A
+non-recoverable verdict yields to the operator, carrying the verdict as advice.
 
 Public resume eligibility is classified by `src/neal/resume-decision.ts` before
 any recovery mutation. That read-only decision layer combines loaded child-run
@@ -93,37 +91,39 @@ selected actions only after the selected run has been classified as executable.
 `state-invariants.ts` mirrors the allowed phase sets so changes to recovery
 behavior are visible in focused tests.
 
-## Unattended mode
+## Operator-block sites
 
-`--unattended` / `agent.unattended` resolves to a persisted
-`OrchestrationState.unattended` boolean (default `false`) for both plan and
-execute top-level modes, so a separate `neal resume` process and the `neal run`
-plan→execute hand-off see it without re-passing a flag. The flag overrides the
-config key. The resolved value is also threaded into the planner, reviewer,
-coder, final-completion, and plan-reviewer prompts, where it adds one autonomy
-line only when true. With `unattended` false the rendered prompts are
-byte-identical to attended output.
+Every operator stop lands in a controlled, operator-actionable state, and the
+writer exits with code `2` (`src/neal/commands/writer-exit-codes.ts`). Exit `2`
+means the run needs operator intervention, not that every stop accepts resume
+guidance: sites A and C below take `neal resume --message`, while site B stays
+non-mechanically blocked (`neal resume` keeps it blocked) and the operator
+inspects `neal status` and the run artifacts instead. A consumer that needs a
+hard verdict with no operator available (a benchmark harness, `neal compat`)
+treats an exit-2 operator stop as a failure itself.
 
-Unattended changes only the three structural operator-block sites. It never
-weakens verification, authorization, or squash/grading, and never removes
-`block_for_operator` from any decision surface. Every unattended branch gates on
-structural state (`state.unattended`, `actionResolution.effectiveAction`,
-`phase`, `blockedFromPhase`, the bounded auto-resume counter), never on
-substring-matching assistant or guidance text.
+Block handling never weakens verification, authorization, or squash/grading,
+and never removes `block_for_operator` from any decision surface. Every block
+branch gates on structural state (`actionResolution.effectiveAction`, `phase`,
+`blockedFromPhase`, the derived state views), never on substring-matching
+assistant or guidance text.
 
-- **Site A: execute-mode interactive recovery.** All fresh blocks funnel
-  through `enterInteractiveBlockedRecovery` (`src/neal/orchestrator/phases/recovery.ts`).
-  Under unattended, while `unattendedAutoResumeCount < UNATTENDED_MAX_AUTO_RESUMES`
-  (a module constant, reconciled so it never pushes past
-  `interactiveBlockedRecovery.maxTurns`), it appends a synthesized conservative
-  guidance turn (`UNATTENDED_AUTO_RESUME_GUIDANCE` from
-  `src/neal/blocked-guidance.ts`) via the same turn-recording helper a human
-  message uses, increments the persisted counter, and lets the run proceed into
-  the recovery phase. Past the cap (or the `maxTurns` boundary) it runs the
-  shared terminal-fail action instead of waiting.
-- **The consultant (bounded, both modes).** Inside
-  `enterInteractiveBlockedRecovery`, *before* the generic auto-resume / yield
-  decision, eligible blocks are triaged by the read-only consultant
+There are three structural block sites:
+
+- **Site A: execute-mode interactive recovery.** All fresh execute-mode blocks
+  funnel through `enterInteractiveBlockedRecovery`
+  (`src/neal/orchestrator/phases/recovery.ts`), where the block first gets
+  bounded read-only consultant triage (below). A recoverable verdict with a
+  concrete directive auto-applies and the run continues. Everything else — a
+  non-recoverable verdict, or a consultant gated off by eligibility, budget, or
+  error — yields as the operator wait: `status: 'running'` +
+  `phase: 'interactive_blocked_recovery'`, carrying any verdict as
+  `interactiveBlockedRecovery.consultantAdvice`. The wait notification
+  (`notifyBlocked`) fires only when the run is structurally waiting for the
+  operator (`shouldNotifyInteractiveBlockedRecoveryEntry` gates on the derived
+  waiting-for-guidance view), and the run resumes via `neal resume --message`.
+- **The consultant (bounded).** Inside `enterInteractiveBlockedRecovery`,
+  eligible blocks are triaged by the read-only consultant
   (`runConsultant`, in `src/neal/adjudicator/consultant.ts`,
   running through the same no-write reviewer plumbing the review/final-completion
   reviewers use, making zero commits and zero file edits). Eligible source phases
@@ -137,44 +137,34 @@ substring-matching assistant or guidance text.
   `{ recoverable, triageCategory, resolutionDirective, rationale }`. A `recoverable`
   `misunderstanding` verdict with a concrete in-scope directive enters recovery with
   that directive injected as the pending turn (consumed exactly like a human
-  `neal resume --message`) under both run modes. The modes differ only on a
-  `recoverable:false` genuine blocker (`authorization` / `external_precondition` /
-  `impossible_task`): unattended runs the shared terminal-fail action, while attended
-  persists the verdict as `interactiveBlockedRecovery.consultantAdvice` and yields for
+  `neal resume --message`). A `recoverable:false` genuine blocker
+  (`authorization` / `external_precondition` / `impossible_task`) persists the
+  verdict as `interactiveBlockedRecovery.consultantAdvice` and yields for
   the operator. It is bounded by the counter
   `consultantAttemptCount` against the `consultant_max_attempts` knob
   (default `1`, `0` disables). It's a separate budget that never touches
-  `unattendedAutoResumeCount` or `interactiveBlockedRecovery.maxTurns`. Every other
+  `interactiveBlockedRecovery.maxTurns`. Every other
   case (ineligible source phase, disabled/exhausted cap, turn cap, or any
-  consultant error) falls through to the generic auto-resume / yield path
+  consultant error) falls through to the operator wait
   unchanged, writing neither `recentBlocks` nor `consultantAdvice`.
   The decisions are auditable from the structured event log via the
-  `consultant.{start,verdict,resolved,declined}` events, which
+  `consultant.{start,verdict,resolved}` events, which
   carry `scopeNumber`, `sourcePhase`, `blockedReason`, and (on `verdict`/`resolved`)
   `recoverable`, `triageCategory`, `targetCanonicalIds`, and the post-increment
   `consultantAttemptCount`.
 - **Sites B and C: final-completion review and the top-level plan-review gate.**
-  These gates block directly (bypassing the recovery chokepoint), and their own
-  budgets (the final-completion continue-execution cap and the
-  review-round/convergence cap) already bounded the autonomous effort. Under
-  unattended they run the shared terminal-fail action immediately rather than
-  saving `status:'blocked'`. There is no auto-resume and no synthesized
-  `pendingPlanReviewGuidance`. Site C edits only the `topLevelMode !== 'execute'`
-  branch of `finalizeBlockedPlanReviewResponse`. Execute-mode derived-plan-review
-  blocks (`topLevelMode === 'execute'`) re-enter site A and are handled there.
-
-The shared terminal-fail action is `persistUnattendedBlockUnresolvedFailure`
-(`src/neal/orchestrator/phases/shared.ts`), which mirrors the
-`persistCoderFailureState` failed-run shape: save `status:'failed'` (preserving
-`phase`/`blockedFromPhase` for diagnostics), re-render execution artifacts, write
-a `failed` checkpoint retrospective, and emit the classified
-`unattended.block_unresolved` log event (`reason:'unattended_block_unresolved'`
-plus the `UnattendedBlockSite` origin), deliberately without `notifyBlocked`,
-which is the attended wait notification. The run exits with writer code `3`, and
-any produced diff/plan is left unsubmitted as an artifact. There is no top-level
-reason field on `OrchestrationState`. The classification lives in the log event and
-retrospective. Attended runs are unchanged and still wait for
-`neal resume --message` at all three sites.
+  These gates block directly with `status: 'blocked'` and the wait
+  notification, bypassing the recovery chokepoint with no consultant routing;
+  their own budgets (the final-completion continue-execution cap and the
+  review-round/convergence cap) already bound the autonomous effort. Their
+  resume semantics differ: site B's `blockedFromPhase`
+  (`final_completion_review`) is not in `RESUMABLE_BLOCKED_PHASES`, so
+  `neal resume` reports it as keep-blocked, while site C's top-level
+  plan-review block is recognized by the plan-review guidance path and resumes
+  via `neal resume --message`. Site C is the `topLevelMode !== 'execute'`
+  branch of `finalizeBlockedPlanReviewResponse`. Execute-mode
+  derived-plan-review blocks (`topLevelMode === 'execute'`) re-enter site A and
+  are handled there.
 
 ## Resume planning
 

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runFinalCompletionReviewPhase, runExecuteFinalizationPhase, runOnePass } from '../src/neal/orchestrator.js';
 import { getFinalCompletionReviewArtifactPath } from '../src/neal/final-completion-review.js';
+import { getExecuteRunResultExitCode } from '../src/neal/commands/writer-exit-codes.js';
 import { createRunLogger } from '../src/neal/logger.js';
 import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import { NealProviderError, type CoderStructuredPromptArgs, type StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
@@ -1687,6 +1688,17 @@ test('final completion review supports a direct block_for_operator verdict', asy
     assert.equal(nextState.executionShape, 'one_shot');
     assert.equal(nextState.finalCompletionReviewVerdict?.action, 'block_for_operator');
     assert.equal(nextState.finalCompletionResolvedAction, 'block_for_operator');
+    // Site B: the operator stop is the `status: 'blocked'` shape mapping to
+    // writer exit code 2.
+    assert.equal(
+      getExecuteRunResultExitCode({
+        finalState: nextState,
+        waitingForOperatorGuidance: false,
+        waitingForManualGate: false,
+        stopRequestedAfterScope: false,
+      }),
+      2,
+    );
     const notifyLog = await readFile(notifyLogPath, 'utf8');
     assert.match(notifyLog, /blocked completion for operator guidance/);
     // Operator guidance points at the recovery CLI tokens.
@@ -1696,180 +1708,6 @@ test('final completion review supports a direct block_for_operator verdict', asy
     assert.match(completionArtifact, /- Execution shape: one_shot/);
     assert.match(completionArtifact, /- Reviewer action: block_for_operator/);
     assert.match(completionArtifact, /Run blocked for operator guidance\./);
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('unattended final completion review runs the shared terminal-fail action on a direct block_for_operator (site B)', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-unattended-block-'));
-  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
-  const { statePath, state: fixtureState, createdCommit } = await createExecuteFinalizationFixture({
-    currentScopeNumber: 2,
-    executionShape: 'one_shot',
-    phase: 'final_completion_review',
-    status: 'running',
-    archivedReviewPath: '/tmp/review-final.md',
-    lastScopeMarker: 'AUTONOMY_DONE',
-    unattended: true,
-    finalCompletionSummary: {
-      planGoalSatisfied: false,
-      whatChangedOverall: 'Completed the one-shot implementation but operator confirmation is still required.',
-      verificationSummary: 'Ran orchestrator coverage for one-shot final completion.',
-      remainingKnownGaps: ['The release decision is externally constrained.'],
-    },
-  });
-  await writeRepoConfig(fixtureState.cwd, { notifyBin: notifyScriptPath });
-  const state = await saveState(statePath, {
-    ...fixtureState,
-    executionShape: 'one_shot',
-    phase: 'final_completion_review',
-    status: 'running',
-    finalCommit: createdCommit,
-    archivedReviewPath: '/tmp/review-final.md',
-    unattended: true,
-  });
-  const logger = await createRunLogger({
-    cwd: state.cwd,
-    stateDir: dirname(dirname(state.runDir)),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
-    createStructuredAdvisorAdapter() {
-      return {
-        async runStructuredRound<TStructured>() {
-          return {
-            sessionHandle: 'reviewer-final-completion-unattended-block',
-            structured: {
-              action: 'block_for_operator',
-              summary: 'A human decision is still required before this plan can be considered complete.',
-              rationale: 'The remaining gap is external and should not reopen execution.',
-              missingWork: null,
-            } as TStructured,
-          };
-        },
-      };
-    },
-  });
-
-  try {
-    const failedState = await runFinalCompletionReviewPhase(state, statePath, logger);
-    // No operator wait: clean classified terminal fail instead of status:'blocked'.
-    assert.equal(failedState.status, 'failed');
-    assert.equal(failedState.blockedFromPhase, 'final_completion_review');
-    assert.equal(failedState.finalCompletionReviewVerdict?.action, 'block_for_operator');
-    assert.equal(failedState.finalCompletionResolvedAction, 'block_for_operator');
-    // The aggregate diff is preserved unsubmitted, exactly as today's failed runs.
-    assert.equal(failedState.finalCommit, createdCommit);
-
-    const reloaded = await loadState(statePath);
-    assert.equal(reloaded.status, 'failed');
-
-    const events = await readEvents(state.runDir);
-    const eventTypes = events.map((event) => event.type as string);
-    const classified = events.find((event) => event.type === 'unattended.block_unresolved');
-    assert.ok(classified, 'expected a classified unattended.block_unresolved event for site B');
-    const classifiedData = classified?.data as Record<string, unknown> | undefined;
-    assert.equal(classifiedData?.reason, 'unattended_block_unresolved');
-    assert.equal(classifiedData?.site, 'final_completion_review');
-    assert.equal(classifiedData?.blockedFromPhase, 'final_completion_review');
-    // Mirrors the failed-run path: no attended block notification is emitted.
-    assert.ok(!eventTypes.includes('notify.blocked'));
-    const notifyLog = await readFile(notifyLogPath, 'utf8').catch(() => '');
-    assert.doesNotMatch(notifyLog, /blocked completion for operator guidance/);
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('unattended final completion review runs the shared terminal-fail action when the continue_execution cap is reached (site B)', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'neal-final-completion-unattended-cap-'));
-  const { notifyLogPath, notifyScriptPath } = await createNotifyCapture(root);
-  const { statePath, state: fixtureState, createdCommit } = await createExecuteFinalizationFixture({
-    currentScopeNumber: 5,
-    phase: 'final_completion_review',
-    status: 'running',
-    archivedReviewPath: '/tmp/review-final.md',
-    lastScopeMarker: 'AUTONOMY_DONE',
-    finalCompletionContinueExecutionCount: 1,
-    unattended: true,
-    finalCompletionSummary: {
-      planGoalSatisfied: false,
-      whatChangedOverall: 'Implemented the first reopen cycle already.',
-      verificationSummary: 'Ran orchestrator and review tests.',
-      remainingKnownGaps: ['One more final-completion repair was requested.'],
-    },
-  });
-  await writeRepoConfig(fixtureState.cwd, {
-    notifyBin: notifyScriptPath,
-    finalCompletionContinueExecutionMax: 1,
-  });
-  const state = await saveState(statePath, {
-    ...fixtureState,
-    phase: 'final_completion_review',
-    status: 'running',
-    finalCommit: createdCommit,
-    archivedReviewPath: '/tmp/review-final.md',
-    unattended: true,
-  });
-  const logger = await createRunLogger({
-    cwd: state.cwd,
-    stateDir: dirname(dirname(state.runDir)),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
-    createStructuredAdvisorAdapter() {
-      return {
-        async runStructuredRound<TStructured>() {
-          return {
-            sessionHandle: 'reviewer-final-completion-unattended-cap',
-            structured: {
-              action: 'continue_execution',
-              summary: 'Another bounded follow-on scope would normally be required.',
-              rationale: 'The completion strategy is still incomplete and needs additional repair work.',
-              missingWork: {
-                summary: 'Add one more final completion repair scope.',
-                requiredOutcome: 'Finish the remaining final-completion control-path wiring.',
-                verification: 'Run orchestrator and review tests plus typecheck.',
-              },
-            } as TStructured,
-          };
-        },
-      };
-    },
-  });
-
-  try {
-    const failedState = await runFinalCompletionReviewPhase(state, statePath, logger);
-    // The forced continue-execution cap folds into block_for_operator; unattended
-    // turns that into a clean classified terminal fail rather than status:'blocked'.
-    assert.equal(failedState.status, 'failed');
-    assert.equal(failedState.blockedFromPhase, 'final_completion_review');
-    assert.equal(failedState.finalCompletionReviewVerdict?.action, 'continue_execution');
-    assert.equal(failedState.finalCompletionResolvedAction, 'block_for_operator');
-    assert.equal(failedState.finalCompletionContinueExecutionCapReached, true);
-    assert.equal(failedState.finalCommit, createdCommit);
-
-    const reloaded = await loadState(statePath);
-    assert.equal(reloaded.status, 'failed');
-
-    const events = await readEvents(state.runDir);
-    const eventTypes = events.map((event) => event.type as string);
-    const classified = events.find((event) => event.type === 'unattended.block_unresolved');
-    assert.ok(classified, 'expected a classified unattended.block_unresolved event for the site-B cap path');
-    assert.equal(
-      (classified?.data as Record<string, unknown> | undefined)?.site,
-      'final_completion_review',
-    );
-    assert.ok(!eventTypes.includes('notify.blocked'));
-    const notifyLog = await readFile(notifyLogPath, 'utf8').catch(() => '');
-    assert.doesNotMatch(notifyLog, /continue_execution cap/);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
