@@ -10,6 +10,13 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-24
+
+### Changed
+
+- Updated `ai` from `7.0.65` to `7.0.73` and `@ai-sdk/openai-compatible` from
+  `3.0.30` to `3.0.34`.
+
 ### Removed
 
 - Removed unattended mode: the `--unattended` flag on `neal plan` /
