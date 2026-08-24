@@ -153,8 +153,8 @@ self-test (`test/compat-fixtures.test.ts`), never by a model run.
 
 Across **every** fixture for the role, the model must (1) **complete the run
 cleanly** and (2) produce the **role-correct result**. A clean run reaches
-`status: 'done'` (not `'failed'` / `'blocked'`), does not emit an
-`unattended.block_unresolved` event, and does not exceed its step/round budget.
+`status: 'done'` — not `'failed'`, `'blocked'`, or an operator-stop wait —
+and does not exceed its step/round budget.
 The role-correct result is:
 
 - **coder:** `finalState.status === 'done'` **and** the fixture's
@@ -178,8 +178,15 @@ The role-correct result is:
 Any single fundamental failure on any fixture for the role → **FAIL** for that
 role, with the mode recorded.
 
-`neal compat` forces **unattended mode** on every run so a model is never
-penalized for a halt that a human operator would simply have resumed.
+`neal compat` runs each fixture with **no operator attached**. A run that stops
+to wait for an operator is classified `block_unresolved` and FAILs: the
+fixtures are trivial, so needing a human is itself the compatibility failure.
+This is the same rule external harnesses apply — a blocked run always exits
+with writer code `2`, and a driver with no operator (neal-swebench, CI)
+records that exit as a failure verdict. Compat also silences neal's own
+operator notifier for its child runs (it sets the defined-but-empty
+`NEAL_NOTIFY_BIN` override at startup), so a blocked fixture run never pings
+the operator's configured notify helper mid-matrix.
 
 ## Failure-mode taxonomy
 
@@ -198,9 +205,12 @@ one applies, the earliest in this list (most specific cause first) is recorded:
   step/round-budget exhaustion, which the current runtime does not surface to compat
   as a distinct cap event, so writer step-cap exhaustion is reported here rather than
   as `max_step_loop`.
-- `block_unresolved`: the run emitted `unattended.block_unresolved` (the model
-  escalated to an operator block that unattended mode could not resolve within
-  budget), or the review loop's outcome was `'blocked'`.
+- `block_unresolved`: the run's final persisted state is an operator stop (the
+  model escalated to a block that only a human could answer). The signal
+  mirrors the writer exit-code-2 mapping: the run is structurally waiting for
+  the operator per `getRunDisplayStatus` (the interactive-recovery wait or a
+  pending-guidance view) or persisted `status: 'blocked'`. Also recorded when
+  the review loop's outcome was `'blocked'`.
 - `max_step_loop`: the **reviewer** loop's outcome was `'cap_reached'` (the
   review-findings convergence cap was hit). Writer (coder/planner) step-cap
   exhaustion is not separately distinguishable under the current runtime and is

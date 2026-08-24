@@ -58,14 +58,13 @@ test('persistSplitPlanRecovery routes recoverable invalid plan payloads into int
     currentScopeNumber: 5,
     phase: 'coder_scope',
     status: 'running',
-    unattended: false,
     derivedPlanPath: null,
     derivedPlanStatus: null,
     derivedFromScopeNumber: null,
     derivedScopeIndex: null,
     splitPlanCountForCurrentScope: 0,
   });
-  // Disable the consultant so the attended reroute yields plainly without a
+  // Disable the consultant so the reroute yields plainly without a
   // provider call; consultant dispatch is covered by the consultant
   // and recovery tests.
   await writeFile(
@@ -134,7 +133,7 @@ test('persistSplitPlanRecovery routes recoverable invalid plan payloads into int
   assert.equal(nextState.recentBlocks.length, 0);
   assert.equal(nextState.interactiveBlockedRecovery?.consultantAdvice ?? null, null);
   assert.equal(nextState.consultantAttemptCount, 0);
-  // Attended reroute yields waiting for the operator and notifies.
+  // The reroute yields waiting for the operator and notifies.
   assert.equal(shouldNotifyInteractiveBlockedRecoveryEntry(nextState), true);
 
   const events = await readRunEvents(state.runDir);
@@ -164,14 +163,13 @@ test('persistSplitPlanRecovery routes required coder_response invalid plan paylo
     currentScopeNumber: 5,
     phase: 'coder_response',
     status: 'running',
-    unattended: false,
     derivedPlanPath: null,
     derivedPlanStatus: null,
     derivedFromScopeNumber: null,
     derivedScopeIndex: null,
     splitPlanCountForCurrentScope: 0,
   });
-  // Disable the consultant so the attended reroute yields plainly without a provider call.
+  // Disable the consultant so the reroute yields plainly without a provider call.
   await writeFile(
     join(cwd, 'neal.yml'),
     `neal:\n  notify_bin: ${notifyScriptPath}\n  consultant_max_attempts: 0\n`,

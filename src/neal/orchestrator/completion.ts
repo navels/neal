@@ -60,7 +60,6 @@ import {
   formatDirtyWorktreeDiagnostic,
 } from '../worktree-status.js';
 import { REVIEWER_CONTENT_REFUSED_BLOCK_REASON, shouldNotifyFailure } from './failures.js';
-import { persistUnattendedBlockUnresolvedFailure } from './phases/shared.js';
 
 type ExecutionArtifactWriter = (state: OrchestrationState) => Promise<void>;
 type FinalizationRuntime = {
@@ -799,17 +798,6 @@ export async function runFinalCompletionReviewPhase(
     'orchestrator:final_completion_review',
   );
 
-  // Site B: the final-completion review gate. Under `unattended` a
-  // `block_for_operator` resolution (model-chosen or the forced
-  // continue-execution cap folded into `effectiveAction`) has no operator to
-  // answer, so run the shared terminal-fail action instead of saving
-  // `status:'blocked'`. The continue-execution cap already bounded the
-  // autonomous push, so there is no auto-resume. The aggregate diff is preserved
-  // unsubmitted by the shared action. Gate structurally on the persisted flag,
-  // never on guidance text.
-  const unattendedFinalCompletionBlock =
-    actionResolution.effectiveAction === 'block_for_operator' && state.unattended;
-
   const nextState =
     actionResolution.effectiveAction === 'accept_complete'
       ? await saveState(statePath, {
@@ -835,23 +823,12 @@ export async function runFinalCompletionReviewPhase(
             splitPlanCountForCurrentScope: 0,
             blockedFromPhase: null,
           })
-        : unattendedFinalCompletionBlock
-          ? await persistUnattendedBlockUnresolvedFailure(
-              {
-                ...baseState,
-                phase: 'blocked',
-                blockedFromPhase: 'final_completion_review',
-              },
-              statePath,
-              'final_completion_review',
-              logger,
-            )
-          : await saveState(statePath, {
-              ...baseState,
-              phase: 'blocked',
-              status: 'blocked',
-              blockedFromPhase: 'final_completion_review',
-            });
+        : await saveState(statePath, {
+            ...baseState,
+            phase: 'blocked',
+            status: 'blocked',
+            blockedFromPhase: 'final_completion_review',
+          });
 
   await runtime.writeExecutionArtifacts(nextState);
   await logger?.event('phase.complete', {
@@ -868,7 +845,7 @@ export async function runFinalCompletionReviewPhase(
   if (actionResolution.effectiveAction === 'accept_complete') {
     const finalSubject = terminalScope?.commitSubject ?? 'Finalize scope work';
     await notifyComplete(nextState, finalSubject, logger);
-  } else if (actionResolution.effectiveAction === 'block_for_operator' && !state.unattended) {
+  } else if (actionResolution.effectiveAction === 'block_for_operator') {
     const reason = getFinalCompletionReviewBlockReason({
       reviewerAction:
         reviewerResult.verdict.action === 'accept_complete' ? 'block_for_operator' : reviewerResult.verdict.action,

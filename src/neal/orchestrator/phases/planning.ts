@@ -52,7 +52,6 @@ import { enterInteractiveBlockedRecovery, shouldNotifyInteractiveBlockedRecovery
 import {
   bestEffortCleanupTimedOutCoder,
   persistCoderFailureState,
-  persistUnattendedBlockUnresolvedFailure,
   printReviewResult,
   scheduleCoderFreshSessionRetry,
   shouldRetryCoderWithFreshSession,
@@ -197,9 +196,10 @@ async function finalizePlanReviewResponseWithoutOpenFindings(
 // The structural origin of a plan-stage block, passed explicitly by the caller
 // because the phase alone cannot separate a genuine coder-authored block from a
 // dirty-worktree safety block (both share `blockedFromPhase` on the
-// `runPlanningResponsePhase` path). Only `coder_authored` takes the recoverable
-// blocked-with-reason landing; `dirty_worktree` and `reviewer_convergence` keep
-// today's terminal landing under `unattended`.
+// `runPlanningResponsePhase` path). Only `coder_authored` takes the
+// blocked-with-reason landing (a durable `blockerReason` the operator answers
+// via `neal resume --message`); `dirty_worktree` and `reviewer_convergence`
+// block without one.
 export type PlanReviewBlockCause = 'coder_authored' | 'dirty_worktree' | 'reviewer_convergence';
 
 export async function finalizeBlockedPlanReviewResponse(
@@ -217,10 +217,7 @@ export async function finalizeBlockedPlanReviewResponse(
     if (blockCause === 'coder_authored') {
       // Recoverable landing for a coder-authored *response* block: persist the
       // durable blocker reason and leave `status:'blocked'` (writer exit 2) for
-      // an operator to answer via `neal resume --message`. Attended and
-      // unattended land identically now — both blocked-with-reason — because
-      // neither could previously answer this block (attended left it blocked but
-      // reason-less; unattended terminal-failed).
+      // an operator to answer via `neal resume --message`.
       const blockedState = await saveState(statePath, {
         ...state,
         blockerReason: blocker,
@@ -230,16 +227,11 @@ export async function finalizeBlockedPlanReviewResponse(
       }
       return flushDerivedPlanNotifications(blockedState, statePath, logger, blocker);
     }
-    // Site C: a `dirty_worktree` safety block or a `reviewer_convergence`
-    // cap/stall block. Attended runs leave `status:'blocked'`; unattended runs
-    // have no operator to answer, so run the shared terminal-fail action. The
-    // dirty-worktree case must not be silently converted to the recoverable
-    // landing (the planner dirtied non-plan files with no operator to clean it),
-    // and the convergence cap already bounded the autonomous push. Any plan
-    // artifact is preserved unsubmitted, exactly as today's failed runs leave it.
-    if (state.unattended) {
-      return persistUnattendedBlockUnresolvedFailure(state, statePath, 'reviewer_plan', logger);
-    }
+    // A `dirty_worktree` safety block or a `reviewer_convergence` cap/stall
+    // block: leave `status:'blocked'` (writer exit 2) without a durable
+    // blockerReason. The dirty-worktree case must not be silently converted to
+    // the blocked-with-reason landing (the planner dirtied non-plan files), and
+    // the convergence cap already bounded the autonomous push.
     if (!derivedPlanReview) {
       await notifyBlocked(state, blocker, logger);
     }
@@ -280,7 +272,6 @@ export async function runCoderPlanPhase(state: OrchestrationState, statePath: st
       planDoc: state.planDoc,
       sessionHandle: state.plannerSessionHandle,
       coderSessionProtocol: state.plannerSessionProtocol,
-      unattended: state.unattended,
       // Reinforce an author-declared `one_shot` only for the top-level authored plan; the
       // coder_plan phase only runs for top-level `neal plan` refinement (derived-plan
       // revisions run through coder_plan_response).

@@ -124,7 +124,6 @@ export type RunPlanAndExecuteQueueArgs = {
   planDocs: string[];
   agentConfig: AgentConfig;
   squashOnCompletion?: boolean;
-  unattended?: boolean;
   deps?: PlanAndExecuteQueueRunnerDeps;
 };
 
@@ -132,7 +131,6 @@ export type ContinuePlanAndExecuteQueueArgs = {
   state: PlanAndExecuteQueueState;
   agentConfig: AgentConfig;
   squashOnCompletion?: boolean;
-  unattended?: boolean;
   deps?: PlanAndExecuteQueueRunnerDeps;
 };
 
@@ -140,7 +138,6 @@ export type ContinuePlanAndExecuteQueueFromChildRunArgs = {
   childResult: ExecuteRunResult;
   agentConfig: AgentConfig;
   squashOnCompletion?: boolean;
-  unattended?: boolean;
   deps?: PlanAndExecuteQueueRunnerDeps;
 };
 
@@ -151,7 +148,6 @@ export type RunFreshPlanAndExecuteChildArgs = {
   planDoc: string;
   agentConfig: AgentConfig;
   squashOnCompletion: boolean;
-  unattended: boolean;
 };
 
 export type InitializedQueueChildRun = {
@@ -335,7 +331,6 @@ export async function runPlanAndExecuteQueue(
     state: queue,
     agentConfig: args.agentConfig,
     squashOnCompletion: args.squashOnCompletion ?? true,
-    unattended: args.unattended ?? false,
     deps: args.deps,
   });
 }
@@ -361,7 +356,6 @@ export async function continuePlanAndExecuteQueue(
         'planning',
         args.agentConfig,
         args.squashOnCompletion ?? true,
-        args.unattended ?? false,
         deps,
       );
       if (state.status !== 'running') {
@@ -381,7 +375,6 @@ export async function continuePlanAndExecuteQueue(
         'execution',
         args.agentConfig,
         args.squashOnCompletion ?? true,
-        args.unattended ?? false,
         deps,
       );
       if (state.status !== 'running') {
@@ -450,15 +443,9 @@ export async function continuePlanAndExecuteQueueFromChildRun(
     state: advancedState,
     agentConfig: args.agentConfig,
     // Carry the squash preference forward across the cross-process
-    // queue-resume handoff the same way unattended is below: the resumed
-    // child's persisted run state wins when the caller supplies nothing.
+    // queue-resume handoff: the resumed child's persisted run state wins when
+    // the caller supplies nothing.
     squashOnCompletion: args.squashOnCompletion ?? args.childResult.finalState.autoSquashOnCompletion,
-    // Carry unattended forward across the cross-process queue-resume handoff.
-    // The resumed child's persisted finalState is the authoritative source (it
-    // was initialized with the value the original `neal run` resolved), so
-    // subsequent queue children do not silently revert to attended mode. An
-    // explicit caller-supplied value still wins.
-    unattended: args.unattended ?? args.childResult.finalState.unattended,
     deps: args.deps,
   });
 }
@@ -636,7 +623,6 @@ async function runQueueChildStage(
   stage: QueueChildStage,
   agentConfig: AgentConfig,
   squashOnCompletion: boolean,
-  unattended: boolean,
   deps: ResolvedPlanAndExecuteQueueRunnerDeps,
 ): Promise<PlanAndExecuteQueueState> {
   try {
@@ -662,7 +648,6 @@ async function runQueueChildStage(
         planDoc,
         agentConfig,
         squashOnCompletion,
-        unattended,
       },
       async (child) => {
         initialized = true;
@@ -828,7 +813,6 @@ async function runFreshPlanAndExecuteChild(
         {
           allowedDirtyPaths: args.stage === 'execution' ? [planDoc] : [],
           runDir: prepared.runDir,
-          unattended: args.unattended,
           // Seed the queue's resolved squash preference onto the child run
           // state (unstaged: planning children persist it too so a resumed
           // planning child carries it back into queue continuation). Once
@@ -852,7 +836,6 @@ async function runFreshPlanAndExecuteChild(
       });
       return executeRun(loaded.state, loaded.statePath, loaded.logger, {
         autoSquashOnCompletion: args.stage === 'execution' && args.squashOnCompletion,
-        unattended: args.unattended,
       });
     },
   );

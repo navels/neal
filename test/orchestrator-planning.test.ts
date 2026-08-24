@@ -545,10 +545,9 @@ function stubCoderPlanResponse(structured: {
   });
 }
 
-test('unattended plan-stage coder-response block lands blocked-with-reason (exit 2), not a terminal failure', async () => {
+test('plan-stage coder-response block lands blocked-with-reason (exit 2), not a terminal failure', async () => {
   const blocker = 'Need an operator decision: which module owns the shared retry budget?';
   const { cwd, statePath, state } = await createPlanReviewGuidanceResponseFixture({
-    unattended: true,
     pendingPlanReviewGuidance: null,
   });
 
@@ -557,7 +556,7 @@ test('unattended plan-stage coder-response block lands blocked-with-reason (exit
     summary: 'The plan response still needs operator input.',
     blocker,
     responses: [],
-    sessionHandle: 'coder-plan-response-session-unattended-block',
+    sessionHandle: 'coder-plan-response-session-authored-block',
   });
 
   try {
@@ -603,90 +602,12 @@ test('unattended plan-stage coder-response block lands blocked-with-reason (exit
   }
 });
 
-test('attended plan-stage coder-response block persists the durable reason (no longer an unknown blocker)', async () => {
-  const blocker = 'Need an operator decision: confirm the queue-item carrier for plan debt.';
-  const { cwd, statePath, state } = await createPlanReviewGuidanceResponseFixture({
-    unattended: false,
-    pendingPlanReviewGuidance: null,
-  });
-
-  stubCoderPlanResponse({
-    outcome: 'blocked',
-    summary: 'The plan response still needs operator input.',
-    blocker,
-    responses: [],
-    sessionHandle: 'coder-plan-response-session-attended-block',
-  });
-
-  try {
-    const nextState = await runPlanningResponsePhase(state, statePath, 'coder_plan_response');
-    const reloaded = await loadState(statePath);
-
-    assert.equal(nextState.status, 'blocked');
-    assert.equal(reloaded.status, 'blocked');
-    assert.equal(reloaded.blockerReason, blocker);
-
-    // Attended parity: the same waiting-for-guidance lifecycle and durable reason.
-    assert.equal(getRunDisplayStatus(reloaded).waitingForOperatorGuidance, true);
-    const snapshot = await buildStatusSnapshot({ cwd, statePath, now: new Date() });
-    assert.equal(snapshot.blocker.reason, blocker);
-    assert.equal(snapshot.blockedGuidance?.reason, blocker);
-    const human = renderHumanStatusSnapshot(snapshot);
-    assert.match(human, /## Why Neal Stopped/);
-    assert.ok(human.includes(blocker));
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('unattended plan-stage dirty-worktree safety block still terminal-fails (exit 3)', async () => {
-  const { cwd, statePath, state } = await createPlanReviewGuidanceResponseFixture({
-    unattended: true,
-    pendingPlanReviewGuidance: null,
-  });
-
-  stubCoderPlanResponse({
-    outcome: 'responded',
-    summary: 'Updated the plan response.',
-    blocker: '',
-    responses: [{ id: 'R1-F1', decision: 'fixed', summary: 'Resolved the recovery sequencing finding.' }],
-    sessionHandle: 'coder-plan-response-session-unattended-dirty',
-    onRun: async () => {
-      await writeFile(join(cwd, 'implementation.ts'), 'export const leaked = true;\n', 'utf8');
-    },
-  });
-
-  try {
-    const nextState = await runPlanningResponsePhase(state, statePath, 'coder_plan_response');
-    const reloaded = await loadState(statePath);
-
-    // The dirty-worktree safety block is not silently converted to the recoverable
-    // landing: it stays a terminal failure (exit 3) with no recoverable reason.
-    assert.equal(nextState.status, 'failed');
-    assert.equal(reloaded.status, 'failed');
-    assert.equal(reloaded.blockerReason, null);
-    assert.equal(
-      getExecuteRunResultExitCode({
-        finalState: reloaded,
-        waitingForOperatorGuidance: false,
-        waitingForManualGate: false,
-        stopRequestedAfterScope: false,
-      }),
-      3,
-    );
-    assert.match(await runGit(cwd, 'status', '--short'), /implementation\.ts/);
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('attended plan-stage dirty-worktree block stays a normal blocked safety state, not a --message guidance wait', async () => {
+test('plan-stage dirty-worktree block stays a normal blocked safety state, not a --message guidance wait', async () => {
   // A dirty-worktree safety block lands at the same coder_plan_response phase as a
   // coder-authored block but must NOT be exposed through the author-input route:
   // it carries no durable blockerReason, so it is not advertised or accepted as
   // waiting for --message guidance and keeps its prior bare-resume behavior.
   const { cwd, statePath, state } = await createPlanReviewGuidanceResponseFixture({
-    unattended: false,
     pendingPlanReviewGuidance: null,
   });
 
@@ -695,7 +616,7 @@ test('attended plan-stage dirty-worktree block stays a normal blocked safety sta
     summary: 'Updated the plan response.',
     blocker: '',
     responses: [{ id: 'R1-F1', decision: 'fixed', summary: 'Resolved the recovery sequencing finding.' }],
-    sessionHandle: 'coder-plan-response-session-attended-dirty',
+    sessionHandle: 'coder-plan-response-session-dirty',
     onRun: async () => {
       await writeFile(join(cwd, 'implementation.ts'), 'export const leaked = true;\n', 'utf8');
     },

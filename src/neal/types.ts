@@ -316,11 +316,13 @@ export type InteractiveBlockedRecoveryDirective = {
   terminalOnly: boolean;
 };
 
-// Read-only advice produced by the consultant for an ATTENDED run. The
-// consultant triages the block but, in attended mode, never auto-applies its
-// verdict; instead the verdict is persisted here and surfaced to the operator as
-// advice alongside the yield. Populated only when the disable knob and per-scope
-// budget allow the consultant to run; otherwise left unset (today's plain yield).
+// Read-only advice produced by the consultant when it triages a block. A
+// recoverable verdict with a concrete directive is auto-applied (the directive
+// is injected as a recovery turn and the run continues), so this record is
+// persisted only when the run yields for the operator: the verdict is surfaced
+// as advice alongside the wait so the operator sees why it stopped. Populated
+// only when the disable knob and per-scope budget allow the consultant to run;
+// otherwise left unset (a plain operator yield).
 export type InteractiveBlockedRecoveryConsultantAdvice = {
   recordedAt: string;
   recoverable: boolean;
@@ -343,9 +345,10 @@ export type InteractiveBlockedRecoveryState = {
   lastHandledTurn: number;
   turns: InteractiveBlockedRecoveryTurn[];
   pendingDirective?: InteractiveBlockedRecoveryDirective | null;
-  // Present only on an attended run where the consultant was allowed to triage
-  // the block (knob > 0, budget available, eligible source phase). Surfaced in the
-  // operator yield + RECOVERY artifact; never auto-applied.
+  // Present only when the consultant was allowed to triage the block (knob > 0,
+  // budget available, eligible source phase) and the run then yielded for the
+  // operator instead of auto-applying a recoverable directive. Surfaced in the
+  // operator yield + RECOVERY artifact.
   consultantAdvice?: InteractiveBlockedRecoveryConsultantAdvice | null;
 };
 
@@ -398,21 +401,9 @@ export type OrchestrationState = {
   topLevelMode: TopLevelMode;
   allowedDirtyPaths: string[];
   agentConfig: AgentConfig;
-  // When true, the run resolves operator-block sites autonomously (no waiting
-  // for `neal resume --message`). Persisted so resume and the plan->execute
-  // hand-off inside `neal run` see it without re-supplying a flag.
-  unattended: boolean;
-  // How many times the execute-mode interactive-recovery chokepoint has
-  // auto-resumed under `unattended` for this run. Bounds the synthesized
-  // conservative auto-resume so site A fails cleanly past the cap instead of
-  // looping. Persisted (default 0); only meaningful while `unattended` is true.
-  unattendedAutoResumeCount: number;
-  // How many times the read-only review_stuck consultant has injected a recoverable
-  // resolution directive under `unattended` for this run. Bounds autonomous
-  // review_stuck resolution via `consultant_max_attempts` (default 1).
-  // Persisted (default 0); kept strictly separate from `unattendedAutoResumeCount`
-  // so the consultant never consumes or widens the generic auto-resume budget. Only
-  // meaningful while `unattended` is true.
+  // How many times the read-only consultant has run for the current scope.
+  // Bounds autonomous block triage via `consultant_max_attempts` (default 1).
+  // Persisted (default 0); reset at every scope boundary.
   consultantAttemptCount: number;
   // When false (`--no-squash`), the completed execute run is left unsquashed.
   // Persisted so `neal resume` and queue continuation honor the operator's
@@ -505,9 +496,6 @@ export type OrchestratorInit = {
   topLevelMode: TopLevelMode;
   allowedDirtyPaths: string[];
   agentConfig: AgentConfig;
-  // Resolved unattended run flag; persisted onto the initial OrchestrationState.
-  // Optional on init (defaults false) so callers that never opt in stay terse.
-  unattended?: boolean;
   // Resolved squash-on-completion preference (`--no-squash` resolves false);
   // persisted onto the initial OrchestrationState. Optional on init (defaults
   // true) to match the historical always-squash behavior.

@@ -1,7 +1,7 @@
 import process from 'node:process';
 
 import { parsePlanAndExecuteArgs } from '../cli.js';
-import { assertWriterProvidersConfigured, getConfiguredUnattended } from '../config.js';
+import { assertWriterProvidersConfigured } from '../config.js';
 import { assertGitRepositoryWithCommit } from '../git.js';
 import { runPlanAndExecuteQueue, type PlanAndExecuteQueueRunnerDeps } from '../plan-queue.js';
 import { assertAgentConfigSupportsWriterRun } from '../providers/registry.js';
@@ -36,15 +36,11 @@ export async function runPlanAndExecuteCommand(
   };
   assertAgentConfigSupportsWriterRun(parsed.agentConfig, { context: 'plan-and-execute queue' });
   await assertGitRepositoryWithCommit(cwd, 'neal run');
-  // Flag overrides config: `--unattended` forces true, otherwise fall back to
-  // the resolved `agent.unattended` config value (default false).
-  const unattended = parsed.unattended || getConfiguredUnattended(cwd);
   const queueState = await runPlanAndExecuteQueue({
     cwd,
     planDocs: parsed.planDocs,
     agentConfig: parsed.agentConfig,
     squashOnCompletion: parsed.squashOnCompletion,
-    unattended,
     deps,
   });
   setWriterCommandExitCode(getPlanAndExecuteQueueExitCode(queueState));

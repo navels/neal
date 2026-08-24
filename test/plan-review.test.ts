@@ -72,30 +72,6 @@ test('planning prompt requires an explicit execution-shape declaration', () => {
   assert.match(prompt, /Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact/);
 });
 
-test('unattended flag renders the no-operator autonomy line into planning prompts only when true', () => {
-  // The unattended flag toggles a distinctive no-operator autonomy marker on
-  // only when true; assert presence/absence keyed on that marker, not the
-  // verbatim sentence, and the structural equality of the false case.
-  const autonomyMarker = /No operator is available to answer\./;
-
-  const attendedPlanning = buildPlanningPrompt('/tmp/PLAN.md');
-  const unattendedPlanning = buildPlanningPrompt('/tmp/PLAN.md', null, { unattended: true });
-  assert.doesNotMatch(attendedPlanning, autonomyMarker);
-  assert.match(unattendedPlanning, autonomyMarker);
-  assert.equal(buildPlanningPrompt('/tmp/PLAN.md', null, { unattended: false }), attendedPlanning);
-
-  const reviewerArgs = {
-    planDoc: '/tmp/PLAN.md',
-    round: 1,
-    reviewMarkdownPath: '/tmp/REVIEW.md',
-  };
-  const attendedReviewer = buildPlanReviewerPrompt(reviewerArgs);
-  const unattendedReviewer = buildPlanReviewerPrompt({ ...reviewerArgs, unattended: true });
-  assert.doesNotMatch(attendedReviewer, autonomyMarker);
-  assert.match(unattendedReviewer, autonomyMarker);
-  assert.equal(buildPlanReviewerPrompt({ ...reviewerArgs, unattended: false }), attendedReviewer);
-});
-
 test('authoredOneShot flag renders the single-scope reinforcement line only when true', () => {
   // The authoredOneShot flag toggles a one_shot reinforcement marker on only
   // when true; assert presence/absence keyed on the distinctive marker, not the
@@ -103,22 +79,22 @@ test('authoredOneShot flag renders the single-scope reinforcement line only when
   const planningMarker = /authored as a single-scope/;
   const reviewerMarker = /This plan was authored `one_shot`/;
 
-  const attendedPlanning = buildPlanningPrompt('/tmp/PLAN.md');
+  const basePlanning = buildPlanningPrompt('/tmp/PLAN.md');
   const oneShotPlanning = buildPlanningPrompt('/tmp/PLAN.md', null, { authoredOneShot: true });
-  assert.doesNotMatch(attendedPlanning, planningMarker);
+  assert.doesNotMatch(basePlanning, planningMarker);
   assert.match(oneShotPlanning, planningMarker);
-  assert.equal(buildPlanningPrompt('/tmp/PLAN.md', null, { authoredOneShot: false }), attendedPlanning);
+  assert.equal(buildPlanningPrompt('/tmp/PLAN.md', null, { authoredOneShot: false }), basePlanning);
 
   const reviewerArgs = {
     planDoc: '/tmp/PLAN.md',
     round: 1,
     reviewMarkdownPath: '/tmp/REVIEW.md',
   };
-  const attendedReviewer = buildPlanReviewerPrompt(reviewerArgs);
+  const baseReviewer = buildPlanReviewerPrompt(reviewerArgs);
   const oneShotReviewer = buildPlanReviewerPrompt({ ...reviewerArgs, authoredOneShot: true });
-  assert.doesNotMatch(attendedReviewer, reviewerMarker);
+  assert.doesNotMatch(baseReviewer, reviewerMarker);
   assert.match(oneShotReviewer, reviewerMarker);
-  assert.equal(buildPlanReviewerPrompt({ ...reviewerArgs, authoredOneShot: false }), attendedReviewer);
+  assert.equal(buildPlanReviewerPrompt({ ...reviewerArgs, authoredOneShot: false }), baseReviewer);
 });
 
 test('planning prompt frames the task as iterative plan refinement', () => {

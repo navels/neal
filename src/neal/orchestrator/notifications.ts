@@ -14,7 +14,7 @@ import { getDerivedPlanView } from '../state-views.js';
 import type { OrchestrationState } from '../types.js';
 
 // Concise representation of the read-only consultant advice for the
-// operator notification surface. Present only on an attended run whose active
+// operator notification surface. Present only on a run whose active
 // interactive-blocked-recovery record carries consultant advice (knob > 0,
 // budget available, eligible source phase). Returns '' otherwise so notification
 // behavior for recovery states without advice — and terminal blocked

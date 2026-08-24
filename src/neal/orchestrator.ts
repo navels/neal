@@ -121,7 +121,6 @@ export async function initializeOrchestration(
   options?: {
     allowedDirtyPaths?: string[];
     runDir?: string;
-    unattended?: boolean;
     autoSquashOnCompletion?: boolean;
     inheritedPlanReviewDebt?: ResidualReviewDebtItem[];
   },
@@ -147,7 +146,6 @@ export async function initializeOrchestration(
     topLevelMode,
     allowedDirtyPaths: options?.allowedDirtyPaths ?? [],
     agentConfig,
-    unattended: options?.unattended ?? false,
     autoSquashOnCompletion: options?.autoSquashOnCompletion ?? true,
     progressJsonPath: join(logger.runDir, 'plan-progress.json'),
     progressMarkdownPath: join(logger.runDir, 'PLAN_PROGRESS.md'),
@@ -262,7 +260,6 @@ export async function loadOrInitialize(
   options?: {
     allowedDirtyPaths?: string[];
     runDir?: string;
-    unattended?: boolean;
     autoSquashOnCompletion?: boolean;
     inheritedPlanReviewDebt?: ResidualReviewDebtItem[];
   },
@@ -312,7 +309,6 @@ export async function initializeNewRun(
   options?: {
     allowedDirtyPaths?: string[];
     runDir?: string;
-    unattended?: boolean;
     autoSquashOnCompletion?: boolean;
     inheritedPlanReviewDebt?: ResidualReviewDebtItem[];
   },

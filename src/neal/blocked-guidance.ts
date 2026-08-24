@@ -39,17 +39,9 @@ const FALLBACK_REASON = 'Neal is waiting for operator guidance before it can con
 const PLAN_REVIEW_REASON = 'Plan review requires operator guidance before Neal can continue.';
 
 // Conservative operator-facing message offered for the `unknown` blocked
-// category. Exported so the unattended site-A auto-resume can synthesize
-// guidance in the same conservative spirit without forking the wording here.
+// category.
 export const CONTINUE_WITH_GUIDANCE_MESSAGE =
   'Continue using this operator guidance. Keep existing verification requirements intact and do not assume any extra authorization.';
-
-// Synthesized guidance recorded by the unattended execute-mode interactive
-// recovery auto-resume (site A). Self-contained (no human operator text to echo
-// back) and deliberately conservative: continue autonomously, keep every
-// verification requirement, assume no extra authorization.
-export const UNATTENDED_AUTO_RESUME_GUIDANCE =
-  'No operator is available. Continue autonomously using your best judgment. Keep all existing verification requirements intact and do not assume any extra authorization.';
 
 const MISSING_EXTERNAL_PREREQUISITE_KEYWORDS = [
   'credential',

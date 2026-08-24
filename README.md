@@ -231,13 +231,11 @@ neal run tmp/A.md tmp/B.md
 neal run --no-squash tmp/A.md tmp/B.md
 ```
 
-Run headless (CI, cron, or a benchmark harness) with no operator available to
-answer an operator block:
-
-```bash
-neal execute PLAN.md --unattended
-neal run --unattended tmp/A.md tmp/B.md
-```
+When a run needs an operator it stops in a
+controlled state and the command exits with code `2`; `neal status` says
+whether it takes resume guidance or needs inspection. A harness with no
+operator available (CI, cron, a benchmark driver) treats that exit as a
+failure. See [docs/automation.md](docs/automation.md).
 
 To run an example through neal after configuring providers:
 
@@ -297,9 +295,9 @@ neal check
 neal compat [--model <slug>] [--role coder|reviewer|planner|all] [--reference openai-codex|anthropic-claude|openai-compatible:<slug>] [--json]
 
 # Plan execution
-neal run [--no-squash] [--unattended] <plan.md> [more-plans...]
-neal plan <plan.md> [--unattended]
-neal execute <plan.md> [--no-squash] [--unattended]
+neal run [--no-squash] <plan.md> [more-plans...]
+neal plan <plan.md>
+neal execute <plan.md> [--no-squash]
 neal resume [--run <run-id>] [--message "..."]
 
 # Plan-free review
@@ -341,9 +339,8 @@ work by default. Pass `--no-squash` to keep the per-scope commits.
 needs guidance or manual work, `neal resume` and `neal status` explain what is
 needed and print the command to continue.
 
-`--unattended` runs `neal plan`, `neal execute`, or `neal run` without waiting
-for an operator. See [docs/state-machine.md](docs/state-machine.md) for unattended
-blocks, manual gates, and resume behavior, and [docs/plan-format.md](docs/plan-format.md)
+See [docs/state-machine.md](docs/state-machine.md) for operator blocks, manual
+gates, and resume behavior, and [docs/plan-format.md](docs/plan-format.md)
 for execution shapes and selected-plan handling.
 
 ### Plan-free review
@@ -382,6 +379,14 @@ use this shell contract:
   manual-gate resume checks still failing.
 - `3`: failed writer run or failed `neal run` queue after neal has run
   state/result evidence.
+
+`2` means the run stopped for operator intervention; `3` means a genuine
+failure. A run that stops for an operator always exits `2`, never `3`. Not
+every exit-2 stop resumes with a message: most accept `neal resume`
+(optionally with `--message`), but some — a blocked final-completion review —
+stay blocked and need `neal status` and artifact inspection instead. Harnesses
+that need a hard verdict with no operator attached treat exit `2` as a failure
+themselves.
 
 Use `neal status --json` for the stable detailed automation interface. `neal
 status` exits `0` when it successfully reports status, even if the reported run

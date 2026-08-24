@@ -9,16 +9,6 @@ export const AUTONOMY_DONE = 'AUTONOMY_DONE';
 export const AUTONOMY_BLOCKED = 'AUTONOMY_BLOCKED';
 export const AUTONOMY_SPLIT_PLAN = 'AUTONOMY_SPLIT_PLAN';
 
-// Single autonomy line rendered into agent prompts when the run is unattended.
-// It tells the agent no operator can answer while keeping every verification
-// requirement intact (unattended means "no human to ask", not "skip checks").
-export const UNATTENDED_AUTONOMY_PROMPT_LINE =
-  'No operator is available to answer. Resolve this autonomously: do not escalate for operator guidance; make your best judgment and keep all verification requirements intact.';
-
-export function getUnattendedAutonomyLines(unattended?: boolean): string[] {
-  return unattended ? [UNATTENDED_AUTONOMY_PROMPT_LINE] : [];
-}
-
 export function getCanonicalPlanContractLines() {
   return [
     'Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.',

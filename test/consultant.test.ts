@@ -601,8 +601,8 @@ test('runConsultant proceeds to a reviewer round when the seeded record is under
   assert.equal(verdict.triageCategory, 'misunderstanding');
 });
 
-// The exact production failure the "new evidence" escape exists for: an
-// unattended coder blocks twice with identically worded blocker text for
+// The exact production failure the "new evidence" escape exists for: a
+// coder blocks twice with identically worded blocker text for
 // genuinely DIFFERENT underlying causes, having committed work in between (the
 // coder phases append the blocked round's commits before the recovery chokepoint
 // runs). The commit-trail fingerprint makes the second block a non-repeat, so

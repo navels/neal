@@ -5,22 +5,20 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { loadOrInitialize, runOnePass } from '../src/neal/orchestrator.js';
+import { loadOrInitialize } from '../src/neal/orchestrator.js';
 import { createRunLogger } from '../src/neal/logger.js';
 import { recordRecoveryGuidanceForResolvedRun } from '../src/neal/commands/recovery-guidance.js';
-import { clearProviderCapabilitiesOverridesForTesting, clearProviderDefinitionRegistrationsForTesting, registerProviderDefinitionForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
+import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import { type CoderRunPromptArgs, type CoderStructuredPromptArgs, type StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
 import { normalizeCliStderr } from './helpers/cli.js';
 import { finalizeBlockedPlanReviewResponse, runCoderPlanPhase } from '../src/neal/orchestrator/phases/planning.js';
 import { getExecuteRunResultExitCode } from '../src/neal/commands/writer-exit-codes.js';
 import { runReviewPhase } from '../src/neal/orchestrator/phases/review.js';
-import { applyInteractiveBlockedRecoveryDisposition, enterInteractiveBlockedRecovery, hasPendingInteractiveBlockedRecoveryTurn, recordInteractiveBlockedRecoveryGuidance, shouldNotifyInteractiveBlockedRecoveryEntry, UNATTENDED_MAX_AUTO_RESUMES } from '../src/neal/orchestrator/phases/recovery.js';
-import { UNATTENDED_AUTO_RESUME_GUIDANCE } from '../src/neal/blocked-guidance.js';
+import { applyInteractiveBlockedRecoveryDisposition, enterInteractiveBlockedRecovery, hasPendingInteractiveBlockedRecoveryTurn, recordInteractiveBlockedRecoveryGuidance, shouldNotifyInteractiveBlockedRecoveryEntry } from '../src/neal/orchestrator/phases/recovery.js';
 import { getDefaultAgentConfig, loadState } from '../src/neal/state.js';
 import { getPlanReviewGuidanceView, getPublicLifecycleView } from '../src/neal/state-views.js';
 import type { OrchestrationState } from '../src/neal/types.js';
-import { createFakeProviderDefinition } from './helpers/fake-provider.js';
-import { createResumeFixture, runGit, runNealCliResultInCwd, createExecuteFinalizationFixture, readEventTypes, readEvents, REVIEW_STUCK_REASON, recoverableConsultantVerdict, nonRecoverableConsultantVerdict, installConsultantAdvisorOverride, createConsultantRecoveryFixture, writeConsultantKnobConfig, createUnattendedPendingRecoveryFixture } from './helpers/orchestrator-harness.js';
+import { createResumeFixture, runGit, runNealCliResultInCwd, createExecuteFinalizationFixture, readEventTypes, readEvents, REVIEW_STUCK_REASON, recoverableConsultantVerdict, nonRecoverableConsultantVerdict, installConsultantAdvisorOverride, createConsultantRecoveryFixture, writeConsultantKnobConfig } from './helpers/orchestrator-harness.js';
 
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator-recovery');
 
@@ -157,171 +155,13 @@ test('recordInteractiveBlockedRecoveryGuidance persists operator recovery input 
   assert.match(progressMarkdown, /Recorded turns: 1/);
 });
 
-test('unattended enterInteractiveBlockedRecovery auto-resumes with synthesized guidance under the cap', async () => {
-  const { cwd, statePath, state } = await createResumeFixture({
-    currentScopeNumber: 2,
-    phase: 'reviewer_scope',
-    status: 'running',
-    blockedFromPhase: 'reviewer_scope',
-    unattended: true,
-    unattendedAutoResumeCount: 0,
-  });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  const nextState = await enterInteractiveBlockedRecovery(
-    state,
-    statePath,
-    'Reviewer needs an operator decision before continuing.',
-    logger,
-  );
-
-  assert.equal(nextState.phase, 'interactive_blocked_recovery');
-  assert.equal(nextState.status, 'running');
-  assert.equal(nextState.unattendedAutoResumeCount, 1);
-  assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 1);
-  assert.equal(
-    nextState.interactiveBlockedRecovery?.turns[0]?.operatorGuidance,
-    UNATTENDED_AUTO_RESUME_GUIDANCE,
-  );
-  // The synthesized turn makes the run loop proceed into recovery (no waiting halt).
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
-
-  const reloaded = await loadState(statePath);
-  assert.equal(reloaded.unattendedAutoResumeCount, 1);
-  assert.equal(reloaded.interactiveBlockedRecovery?.turns[0]?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
-
-  const eventTypes = await readEventTypes(state.runDir);
-  assert.ok(eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-  assert.ok(!eventTypes.includes('unattended.block_unresolved'));
-});
-
-test('unattended enterInteractiveBlockedRecovery terminal-fails past the auto-resume cap', async () => {
-  const { cwd, statePath, state } = await createResumeFixture({
-    currentScopeNumber: 2,
-    phase: 'reviewer_scope',
-    status: 'running',
-    blockedFromPhase: 'reviewer_scope',
-    unattended: true,
-    unattendedAutoResumeCount: UNATTENDED_MAX_AUTO_RESUMES,
-  });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  const failedState = await enterInteractiveBlockedRecovery(
-    state,
-    statePath,
-    'Reviewer still needs an operator decision.',
-    logger,
-  );
-
-  assert.equal(failedState.status, 'failed');
-  assert.equal(failedState.blockedFromPhase, 'reviewer_scope');
-  // No synthesized guidance turn, no waiting halt.
-  assert.equal(failedState.interactiveBlockedRecovery, null);
-  assert.equal(failedState.unattendedAutoResumeCount, UNATTENDED_MAX_AUTO_RESUMES);
-
-  const reloaded = await loadState(statePath);
-  assert.equal(reloaded.status, 'failed');
-
-  const events = await readEvents(state.runDir);
-  const eventTypes = events.map((event) => event.type as string);
-  const classified = events.find((event) => event.type === 'unattended.block_unresolved');
-  assert.ok(classified, 'expected a classified unattended.block_unresolved event');
-  const classifiedData = classified?.data as Record<string, unknown> | undefined;
-  assert.equal(classifiedData?.reason, 'unattended_block_unresolved');
-  assert.equal(classifiedData?.site, 'interactive_blocked_recovery');
-  assert.equal(classifiedData?.blockedFromPhase, 'reviewer_scope');
-  // Mirrors the failed-run path: no attended block notification is emitted.
-  assert.ok(!eventTypes.includes('notify.blocked'));
-});
-
-test('unattended enterInteractiveBlockedRecovery terminal-fails at the maxTurns boundary', async () => {
-  const { cwd, statePath, state } = await createResumeFixture({
-    currentScopeNumber: 2,
-    phase: 'interactive_blocked_recovery',
-    status: 'running',
-    blockedFromPhase: 'reviewer_scope',
-    unattended: true,
-    unattendedAutoResumeCount: 0,
-    interactiveBlockedRecovery: {
-      enteredAt: '2026-04-16T00:00:00.000Z',
-      sourcePhase: 'reviewer_scope',
-      blockedReason: 'Prior recovery turns already consumed.',
-      maxTurns: 1,
-      lastHandledTurn: 0,
-      pendingDirective: null,
-      turns: [
-        {
-          number: 1,
-          recordedAt: '2026-04-16T00:01:00.000Z',
-          operatorGuidance: UNATTENDED_AUTO_RESUME_GUIDANCE,
-          disposition: null,
-        },
-      ],
-    },
-  });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  const failedState = await enterInteractiveBlockedRecovery(
-    state,
-    statePath,
-    'Blocked again with the recovery turn cap already reached.',
-    logger,
-  );
-
-  assert.equal(failedState.status, 'failed');
-  // The active recovery record is finalized into history, not left active: the
-  // failed run must not be persisted as a waiting interactive recovery.
-  assert.equal(failedState.interactiveBlockedRecovery, null);
-  assert.notEqual(failedState.phase, 'interactive_blocked_recovery');
-  assert.equal(failedState.phase, 'blocked');
-  assert.equal(failedState.blockedFromPhase, 'reviewer_scope');
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(failedState), false);
-  assert.equal(failedState.interactiveBlockedRecoveryHistory.length, 1);
-  const lifecycle = getPublicLifecycleView(failedState);
-  assert.equal(lifecycle.waitingForOperatorGuidance, false);
-  assert.equal(lifecycle.pendingOperatorGuidance, false);
-  assert.equal(lifecycle.lifecycle, 'failed');
-
-  const events = await readEvents(state.runDir);
-  const classified = events.find((event) => event.type === 'unattended.block_unresolved');
-  assert.ok(classified, 'expected a classified unattended.block_unresolved event at the maxTurns boundary');
-  assert.equal((classified?.data as Record<string, unknown> | undefined)?.site, 'interactive_blocked_recovery');
-
-  // Resume reload sees a terminal failed run with no pending operator guidance.
-  const reloaded = await loadState(statePath);
-  assert.equal(reloaded.status, 'failed');
-  assert.equal(reloaded.interactiveBlockedRecovery, null);
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(reloaded), false);
-  assert.equal(getPublicLifecycleView(reloaded).waitingForOperatorGuidance, false);
-});
-
-test('unattended derived-plan-review block routes through the site-A auto-resume', async () => {
+test('execute-mode derived-plan-review convergence block lands the interactive-recovery operator wait', async () => {
   const { cwd, statePath, state } = await createResumeFixture({
     currentScopeNumber: 2,
     phase: 'reviewer_plan',
     status: 'running',
     blockedFromPhase: 'reviewer_plan',
     topLevelMode: 'execute',
-    unattended: true,
-    unattendedAutoResumeCount: 0,
   });
   const logger = await createRunLogger({
     cwd,
@@ -342,19 +182,17 @@ test('unattended derived-plan-review block routes through the site-A auto-resume
 
   assert.equal(nextState.phase, 'interactive_blocked_recovery');
   assert.equal(nextState.status, 'running');
-  assert.equal(nextState.unattendedAutoResumeCount, 1);
-  assert.equal(nextState.interactiveBlockedRecovery?.turns[0]?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
+  assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
+  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), false);
+  assert.equal(getPublicLifecycleView(nextState).waitingForOperatorGuidance, true);
 });
 
-test('attended enterInteractiveBlockedRecovery still waits for operator guidance', async () => {
+test('enterInteractiveBlockedRecovery waits for operator guidance and maps to writer exit code 2', async () => {
   const { cwd, statePath, state } = await createResumeFixture({
     currentScopeNumber: 2,
     phase: 'reviewer_scope',
     status: 'running',
     blockedFromPhase: 'reviewer_scope',
-    unattended: false,
-    unattendedAutoResumeCount: 0,
   });
   const logger = await createRunLogger({
     cwd,
@@ -371,19 +209,26 @@ test('attended enterInteractiveBlockedRecovery still waits for operator guidance
     logger,
   );
 
+  // Site A: the run halts as the `status: 'running'` interactive-recovery wait
+  // for `neal resume --message`.
   assert.equal(nextState.phase, 'interactive_blocked_recovery');
   assert.equal(nextState.status, 'running');
-  // No synthesized guidance: the run halts waiting for `neal resume --message`.
   assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
-  assert.equal(nextState.unattendedAutoResumeCount, 0);
   assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), false);
-
-  const eventTypes = await readEventTypes(state.runDir);
-  assert.ok(!eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-  assert.ok(!eventTypes.includes('unattended.block_unresolved'));
+  assert.equal(getPublicLifecycleView(nextState).waitingForOperatorGuidance, true);
+  assert.equal(shouldNotifyInteractiveBlockedRecoveryEntry(nextState), true);
+  assert.equal(
+    getExecuteRunResultExitCode({
+      finalState: nextState,
+      waitingForOperatorGuidance: true,
+      waitingForManualGate: false,
+      stopRequestedAfterScope: false,
+    }),
+    2,
+  );
 });
 
-test('unattended review_stuck recoverable verdict resolves autonomously with an in-scope directive', async () => {
+test('recoverable block auto-applies the consultant directive without yielding', async () => {
   const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
   const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
   const logger = await createRunLogger({
@@ -393,163 +238,13 @@ test('unattended review_stuck recoverable verdict resolves autonomously with an 
     topLevelMode: state.topLevelMode,
     runDir: state.runDir,
   });
-  const headBefore = await runGit(cwd, 'rev-parse', 'HEAD');
 
   try {
     const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
 
-    assert.equal(advisor.callCount(), 1, 'the consultant must be invoked exactly once');
-    assert.equal(nextState.phase, 'interactive_blocked_recovery');
-    assert.equal(nextState.status, 'running');
-    // The injected directive — NOT the generic auto-resume guidance — is the pending turn.
-    assert.equal(
-      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
-      recoverableConsultantVerdict().resolutionDirective,
-    );
-    assert.notEqual(
-      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
-      UNATTENDED_AUTO_RESUME_GUIDANCE,
-    );
-    assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
-    // The consultant counter advances; the generic auto-resume budget is untouched.
-    assert.equal(nextState.consultantAttemptCount, 1);
-    assert.equal(nextState.unattendedAutoResumeCount, 0);
-
-    const eventTypes = await readEventTypes(state.runDir);
-    assert.ok(eventTypes.includes('consultant.start'));
-    assert.ok(eventTypes.includes('consultant.verdict'));
-    assert.ok(eventTypes.includes('consultant.resolved'));
-    // The consultant path does not take the generic unattended auto-resume branch.
-    assert.ok(!eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-
-    assert.equal(await runGit(cwd, 'rev-parse', 'HEAD'), headBefore, 'consultant turn must make no commits');
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('unattended review_stuck non-recoverable verdict terminally short-circuits instead of auto-resuming', async () => {
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
-  const advisor = installConsultantAdvisorOverride({ payload: nonRecoverableConsultantVerdict() });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-  const headBefore = await runGit(cwd, 'rev-parse', 'HEAD');
-
-  try {
-    const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
-
-    assert.equal(advisor.callCount(), 1, 'the consultant is consulted for an eligible block');
-    // Genuine wall under unattended: terminal short-circuit, not a generic auto-resume.
-    assert.equal(nextState.status, 'failed');
-    assert.equal(nextState.phase, 'blocked');
-    assert.equal(nextState.interactiveBlockedRecovery, null);
-    assert.equal(nextState.unattendedAutoResumeCount, 0, 'the generic auto-resume budget is untouched');
-    // The consultant ran, so the shared per-scope budget is consumed and the
-    // anti-thrash window records this block.
-    assert.equal(nextState.consultantAttemptCount, 1, 'an consultant-driven terminal short-circuit consumes the budget');
-    assert.equal(nextState.recentBlocks.length, 1, 'the adjudicated block is recorded');
-    assert.equal(nextState.recentBlocks[0]?.count, 1);
-
-    const eventTypes = await readEventTypes(state.runDir);
-    assert.ok(eventTypes.includes('consultant.declined'));
-    assert.ok(eventTypes.includes('unattended.block_unresolved'));
-    assert.ok(!eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-
-    assert.equal(await runGit(cwd, 'rev-parse', 'HEAD'), headBefore);
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('unattended review_stuck consultant error falls through without crashing the run', async () => {
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
-  const advisor = installConsultantAdvisorOverride({ throwError: new Error('consultant provider exploded') });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-  const headBefore = await runGit(cwd, 'rev-parse', 'HEAD');
-
-  try {
-    const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
-
-    assert.equal(advisor.callCount(), 1);
-    // An consultant throw must be swallowed and fall through to the generic path.
-    assert.equal(nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
-    assert.equal(nextState.consultantAttemptCount, 0);
-    assert.equal(nextState.unattendedAutoResumeCount, 1);
-
-    const events = await readEvents(state.runDir);
-    const declined = events.find((event) => event.type === 'consultant.declined');
-    assert.ok(declined, 'an consultant throw must emit consultant.declined');
-    assert.ok((declined?.data as Record<string, unknown> | undefined)?.error, 'declined event must carry an error field');
-
-    assert.equal(await runGit(cwd, 'rev-parse', 'HEAD'), headBefore);
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('unattended review_stuck at the consultant cap is not invoked and takes the generic path', async () => {
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ consultantAttemptCount: 1 });
-  const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-  const headBefore = await runGit(cwd, 'rev-parse', 'HEAD');
-
-  try {
-    const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
-
-    assert.equal(advisor.callCount(), 0, 'past the cap the consultant must not be invoked');
-    assert.equal(nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
-    assert.equal(nextState.consultantAttemptCount, 1);
-    assert.equal(nextState.unattendedAutoResumeCount, 1);
-
-    const eventTypes = await readEventTypes(state.runDir);
-    // An exhausted budget restores today's generic path byte-for-byte: zero
-    // consultant events of any kind.
-    assert.ok(
-      !eventTypes.some((type) => type.startsWith('consultant.')),
-      'an exhausted budget must emit no consultant events',
-    );
-    assert.ok(eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
-
-    assert.equal(await runGit(cwd, 'rev-parse', 'HEAD'), headBefore);
-  } finally {
-    clearProviderCapabilitiesOverridesForTesting();
-  }
-});
-
-test('attended recoverable block auto-applies the consultant directive without yielding', async () => {
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ unattended: false });
-  const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
-  const logger = await createRunLogger({
-    cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  try {
-    const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
-
-    // Attended runs now apply a recoverable verdict just like unattended runs: the
-    // directive is injected and consumed, so the run continues rather than yielding.
-    assert.equal(advisor.callCount(), 1, 'attended mode triages the eligible block once');
+    // A recoverable verdict is applied directly: the directive is injected and
+    // consumed, so the run continues rather than yielding.
+    assert.equal(advisor.callCount(), 1, 'the eligible block is triaged once');
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
     assert.equal(
@@ -578,8 +273,8 @@ test('attended recoverable block auto-applies the consultant directive without y
   }
 });
 
-test('attended non-recoverable block records read-only consultant advice and yields', async () => {
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ unattended: false });
+test('non-recoverable block records read-only consultant advice and yields', async () => {
+  const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
   const advisor = installConsultantAdvisorOverride({ payload: nonRecoverableConsultantVerdict() });
   const logger = await createRunLogger({
     cwd,
@@ -592,15 +287,15 @@ test('attended non-recoverable block records read-only consultant advice and yie
   try {
     const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
 
-    // A genuine wall still yields for the operator, carrying the verdict as advice.
-    assert.equal(advisor.callCount(), 1, 'attended mode triages the eligible block once');
+    // A genuine wall yields for the operator, carrying the verdict as advice.
+    assert.equal(advisor.callCount(), 1, 'the eligible block is triaged once');
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
     assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0, 'a genuine wall still waits for guidance');
     assert.equal(shouldNotifyInteractiveBlockedRecoveryEntry(nextState), true);
 
     const advice = nextState.interactiveBlockedRecovery?.consultantAdvice;
-    assert.ok(advice, 'attended advice must be persisted on the recovery state');
+    assert.ok(advice, 'consultant advice must be persisted on the recovery state');
     assert.equal(advice?.recoverable, nonRecoverableConsultantVerdict().recoverable);
     assert.equal(advice?.triageCategory, nonRecoverableConsultantVerdict().triageCategory);
 
@@ -621,11 +316,11 @@ test('attended non-recoverable block records read-only consultant advice and yie
   }
 });
 
-test('attended eligible block swallows an consultant error and yields plainly with no events or advice', async () => {
-  // The attended consultant error fallback must be indistinguishable from the
+test('eligible block swallows an consultant error and yields plainly with no events or advice', async () => {
+  // The consultant error fallback must be indistinguishable from the
   // disabled/exhausted generic yield: the run yields waiting for the operator with
   // no advice, no budget/recentBlocks mutation, and no consultant.* events.
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ unattended: false });
+  const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
   const advisor = installConsultantAdvisorOverride({ throwError: new Error('consultant provider exploded') });
   const logger = await createRunLogger({
     cwd,
@@ -640,10 +335,10 @@ test('attended eligible block swallows an consultant error and yields plainly wi
     const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
 
     assert.equal(advisor.callCount(), 1, 'the consultant was attempted before throwing');
-    // The error is swallowed and the run yields exactly as today's plain attended block.
+    // The error is swallowed and the run yields as a plain operator block.
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
-    assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0, 'attended run still waits for guidance');
+    assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0, 'the run still waits for guidance');
     assert.equal(nextState.interactiveBlockedRecovery?.consultantAdvice ?? null, null, 'no advice on the error path');
     assert.equal(nextState.consultantAttemptCount, 0, 'budget unchanged on the error path');
     assert.deepEqual(nextState.recentBlocks, recentBefore, 'recentBlocks unchanged on the error path');
@@ -651,15 +346,15 @@ test('attended eligible block swallows an consultant error and yields plainly wi
     const eventTypes = await readEventTypes(state.runDir);
     assert.ok(
       !eventTypes.some((type) => type.startsWith('consultant.')),
-      'the attended error fallback must emit no consultant events',
+      'the error fallback must emit no consultant events',
     );
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
 });
 
-test('attended eligible block with the disable knob (0) yields plainly with no advice', async () => {
-  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ unattended: false });
+test('eligible block with the disable knob (0) yields plainly with no advice', async () => {
+  const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
   await writeConsultantKnobConfig(cwd, 0);
   const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
   const logger = await createRunLogger({
@@ -688,11 +383,10 @@ test('attended eligible block with the disable knob (0) yields plainly with no a
   }
 });
 
-test('attended eligible block at an exhausted budget yields plainly with no advice', async () => {
+test('eligible block at an exhausted budget yields plainly with no advice', async () => {
   // Knob default is 1; seed consultantAttemptCount at the cap so the budget is
   // exhausted for this scope.
   const { cwd, statePath, state } = await createConsultantRecoveryFixture({
-    unattended: false,
     consultantAttemptCount: 1,
   });
   const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
@@ -716,7 +410,7 @@ test('attended eligible block at an exhausted budget yields plainly with no advi
     const eventTypes = await readEventTypes(state.runDir);
     assert.ok(
       !eventTypes.some((type) => type.startsWith('consultant.')),
-      'an exhausted budget must emit no consultant events in attended mode either',
+      'an exhausted budget must emit no consultant events',
     );
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
@@ -747,10 +441,11 @@ test('an ineligible source phase (coder_plan) keeps the generic recovery path wi
         0,
         `the ineligible plan-refinement phase ${sourcePhase} must never invoke the consultant`,
       );
-      // Today's generic unattended auto-resume path is preserved exactly.
-      assert.equal(nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
+      // The generic operator wait is preserved exactly.
+      assert.equal(nextState.phase, 'interactive_blocked_recovery');
+      assert.equal(nextState.status, 'running');
+      assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
       assert.equal(nextState.consultantAttemptCount, 0);
-      assert.equal(nextState.unattendedAutoResumeCount, 1);
       assert.deepEqual(nextState.recentBlocks, recentBefore, 'recentBlocks unchanged for an ineligible phase');
 
       const eventTypes = await readEventTypes(state.runDir);
@@ -758,18 +453,17 @@ test('an ineligible source phase (coder_plan) keeps the generic recovery path wi
         !eventTypes.some((type) => type.startsWith('consultant.')),
         `no consultant events for ineligible phase ${sourcePhase}`,
       );
-      assert.ok(eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
     } finally {
       clearProviderCapabilitiesOverridesForTesting();
     }
   }
 });
 
-test('unattended reviewer block without the review_stuck prefix keeps the generic path', async () => {
+test('reviewer block without the review_stuck prefix keeps the generic path', async () => {
   // Reviewer phases are adjudicated ONLY for a genuine structural review_stuck
   // deadlock. An ordinary blocking-finding block that reaches recovery via a
   // reviewer phase (no `review_stuck:` prefix) is normal review back-and-forth and
-  // must keep today's generic recovery behavior with zero consultant calls.
+  // must keep the generic operator wait with zero consultant calls.
   const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
   const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
   const logger = await createRunLogger({
@@ -790,20 +484,20 @@ test('unattended reviewer block without the review_stuck prefix keeps the generi
     );
 
     assert.equal(advisor.callCount(), 0, 'a non-review_stuck reviewer block must not consult the consultant');
-    assert.equal(nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
+    assert.equal(nextState.phase, 'interactive_blocked_recovery');
+    assert.equal(nextState.status, 'running');
+    assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
     assert.equal(nextState.consultantAttemptCount, 0);
-    assert.equal(nextState.unattendedAutoResumeCount, 1);
     assert.deepEqual(nextState.recentBlocks, recentBefore, 'recentBlocks unchanged for a non-adjudicated reviewer block');
 
     const eventTypes = await readEventTypes(state.runDir);
     assert.ok(!eventTypes.some((type) => type.startsWith('consultant.')));
-    assert.ok(eventTypes.includes('interactive_blocked_recovery.unattended_auto_resume'));
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
 });
 
-test('unattended eligible coder block is triaged by the generalized dispatch regardless of reason prefix', async () => {
+test('eligible coder block is triaged by the generalized dispatch regardless of reason prefix', async () => {
   // Dispatch is now keyed on the eligible source phase, not a `review_stuck:`
   // reason prefix: a plain coder blocker on coder_scope is adjudicated.
   const { cwd, statePath, state } = await createConsultantRecoveryFixture({
@@ -844,7 +538,7 @@ test('unattended eligible coder block is triaged by the generalized dispatch reg
   }
 });
 
-test('unattended disabled/exhausted budget leaves recentBlocks unchanged on the generic path', async () => {
+test('disabled/exhausted budget leaves recentBlocks unchanged on the generic path', async () => {
   for (const overrides of [{ knob: 0, seedCount: 0 }, { knob: 1, seedCount: 1 }] as const) {
     const { cwd, statePath, state } = await createConsultantRecoveryFixture({
       phase: 'coder_scope',
@@ -868,8 +562,9 @@ test('unattended disabled/exhausted budget leaves recentBlocks unchanged on the 
       const nextState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
 
       assert.equal(advisor.callCount(), 0, 'no consultant call when disabled/exhausted');
-      assert.equal(nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance, UNATTENDED_AUTO_RESUME_GUIDANCE);
-      assert.deepEqual(nextState.recentBlocks, recentBefore, 'recentBlocks unchanged on the unattended fallback');
+      assert.equal(nextState.phase, 'interactive_blocked_recovery');
+      assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 0);
+      assert.deepEqual(nextState.recentBlocks, recentBefore, 'recentBlocks unchanged on the generic fallback');
     } finally {
       clearProviderCapabilitiesOverridesForTesting();
     }
@@ -907,7 +602,8 @@ test('recentBlocks records a real eligible block and a same-scope resumed repeat
 
     // A resumed second block with the identical blocker in the same scope identity
     // short-circuits to recoverable:false WITHOUT re-invoking the advisor; the
-    // record count increments to 2 and the run terminates.
+    // record count increments to 2 and the run yields for the operator with the
+    // non-recoverable verdict carried as advice.
     const secondEntryState: OrchestrationState = {
       ...reloaded,
       phase: 'coder_scope',
@@ -917,7 +613,10 @@ test('recentBlocks records a real eligible block and a same-scope resumed repeat
     };
     const secondState = await enterInteractiveBlockedRecovery(secondEntryState, statePath, reason, logger);
     assert.equal(advisor.callCount(), 1, 'the anti-thrash repeat does not re-invoke the advisor');
-    assert.equal(secondState.status, 'failed');
+    assert.equal(secondState.phase, 'interactive_blocked_recovery');
+    assert.equal(secondState.status, 'running');
+    assert.equal(secondState.interactiveBlockedRecovery?.turns.length, 0, 'the repeat waits for the operator');
+    assert.equal(secondState.interactiveBlockedRecovery?.consultantAdvice?.recoverable, false);
     assert.equal(secondState.recentBlocks.length, 1, 'the repeat updates the same record');
     assert.equal(secondState.recentBlocks[0]?.count, 2);
 
@@ -940,8 +639,8 @@ test('recentBlocks records a real eligible block and a same-scope resumed repeat
   }
 });
 
-test('unattended review_stuck recoverable path emits the audit-grade event sequence in order', async () => {
-  // Scope 4: the autonomous decision must be fully reconstructable from the
+test('review_stuck recoverable path emits the audit-grade event sequence in order', async () => {
+  // The autonomous decision must be fully reconstructable from the
   // structured event log alone — stable names, ordered sequence, and audit-grade
   // payload fields on every consultant event.
   const { cwd, statePath, state } = await createConsultantRecoveryFixture({});
@@ -1015,214 +714,12 @@ test('unattended review_stuck recoverable path emits the audit-grade event seque
   }
 });
 
-test('unattended stay_blocked under the bounds synthesizes another auto-resume turn', async () => {
-  const { statePath, state } = await createUnattendedPendingRecoveryFixture(1);
-  const logger = await createRunLogger({
-    cwd: state.cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  const nextState = await applyInteractiveBlockedRecoveryDisposition(
-    state,
-    statePath,
-    {
-      action: 'stay_blocked',
-      summary: 'More operator input would help.',
-      rationale: 'The path is still ambiguous.',
-      blocker: 'Need a concrete decision.',
-      replacementPlan: '',
-    },
-    'coder-session-2',
-    logger,
-  );
-
-  assert.equal(nextState.phase, 'interactive_blocked_recovery');
-  assert.equal(nextState.status, 'running');
-  assert.equal(nextState.unattendedAutoResumeCount, 2);
-  assert.equal(nextState.interactiveBlockedRecovery?.turns.length, 2);
-  assert.equal(
-    nextState.interactiveBlockedRecovery?.turns[1]?.operatorGuidance,
-    UNATTENDED_AUTO_RESUME_GUIDANCE,
-  );
-  // The synthesized turn keeps the run moving (pending guidance), not waiting.
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
-  assert.equal(getPublicLifecycleView(nextState).waitingForOperatorGuidance, false);
-});
-
-test('unattended stay_blocked at the auto-resume cap runs the shared terminal-fail action', async () => {
-  const { statePath, state } = await createUnattendedPendingRecoveryFixture(UNATTENDED_MAX_AUTO_RESUMES);
-  const logger = await createRunLogger({
-    cwd: state.cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  const failedState = await applyInteractiveBlockedRecoveryDisposition(
-    state,
-    statePath,
-    {
-      action: 'stay_blocked',
-      summary: 'Still stuck.',
-      rationale: 'No further progress without a decision.',
-      blocker: 'Need a concrete decision.',
-      replacementPlan: '',
-    },
-    'coder-session-2',
-    logger,
-  );
-
-  assert.equal(failedState.status, 'failed');
-  // Recovery finalized so the lifecycle view is no longer waiting/blocked.
-  assert.equal(failedState.interactiveBlockedRecovery, null);
-  assert.notEqual(failedState.phase, 'interactive_blocked_recovery');
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(failedState), false);
-  const lifecycle = getPublicLifecycleView(failedState);
-  assert.equal(lifecycle.waitingForOperatorGuidance, false);
-  assert.equal(lifecycle.pendingOperatorGuidance, false);
-  assert.equal(failedState.interactiveBlockedRecoveryHistory.at(-1)?.resolvedByAction, 'stay_blocked');
-
-  const events = await readEvents(state.runDir);
-  const classified = events.find((event) => event.type === 'unattended.block_unresolved');
-  assert.ok(classified, 'expected a classified unattended.block_unresolved event');
-  assert.equal((classified?.data as Record<string, unknown> | undefined)?.reason, 'unattended_block_unresolved');
-});
-
-test('unattended terminal_block runs the shared terminal-fail action without the attended blocked path', async () => {
-  const { statePath, state } = await createUnattendedPendingRecoveryFixture(0);
-  const logger = await createRunLogger({
-    cwd: state.cwd,
-    stateDir: dirname(statePath),
-    planDoc: state.planDoc,
-    topLevelMode: state.topLevelMode,
-    runDir: state.runDir,
-  });
-
-  const failedState = await applyInteractiveBlockedRecoveryDisposition(
-    state,
-    statePath,
-    {
-      action: 'terminal_block',
-      summary: 'No safe in-repo path remains.',
-      rationale: 'The blocker cannot be resolved here.',
-      blocker: 'External authorization is required.',
-      replacementPlan: '',
-    },
-    'coder-session-2',
-    logger,
-  );
-
-  assert.equal(failedState.status, 'failed');
-  assert.notEqual(failedState.status, 'blocked');
-  assert.equal(failedState.interactiveBlockedRecovery, null);
-  assert.notEqual(failedState.phase, 'interactive_blocked_recovery');
-  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(failedState), false);
-  const lifecycle = getPublicLifecycleView(failedState);
-  assert.equal(lifecycle.waitingForOperatorGuidance, false);
-  assert.equal(lifecycle.pendingOperatorGuidance, false);
-  assert.equal(failedState.interactiveBlockedRecoveryHistory.at(-1)?.resolvedByAction, 'terminal_block');
-
-  const events = await readEvents(state.runDir);
-  const eventTypes = events.map((event) => event.type as string);
-  assert.ok(eventTypes.includes('unattended.block_unresolved'));
-  // The attended blocked notification path is not taken.
-  assert.ok(!eventTypes.includes('notify.blocked'));
-});
-
-test('unattended site-A terminal-fail run-loop writes a failed retrospective and does not notify blocked', async () => {
-  const providerId = 'fake-unattended-terminal-block-coder';
-  registerProviderDefinitionForTesting(
-    createFakeProviderDefinition({
-      id: providerId,
-      coderSessionHandle: 'coder-unattended-terminal',
-      coderStructuredResponses: [
-        {
-          action: 'terminal_block',
-          summary: 'No safe in-repo path remains.',
-          rationale: 'The blocker cannot be resolved without an operator.',
-          blocker: 'External authorization is required before this scope can continue.',
-          replacementPlan: '',
-        },
-      ],
-    }),
-  );
-
-  try {
-    const { cwd, statePath, state } = await createResumeFixture({
-      currentScopeNumber: 2,
-      phase: 'interactive_blocked_recovery',
-      status: 'running',
-      blockedFromPhase: 'reviewer_scope',
-      coderSessionHandle: 'coder-unattended-terminal',
-      unattended: true,
-      unattendedAutoResumeCount: 0,
-      agentConfig: {
-        ...getDefaultAgentConfig(),
-        coder: { provider: providerId, model: null },
-      },
-      interactiveBlockedRecovery: {
-        enteredAt: '2026-04-16T00:00:00.000Z',
-        sourcePhase: 'reviewer_scope',
-        blockedReason: 'Reviewer needs an operator decision.',
-        maxTurns: 3,
-        lastHandledTurn: 0,
-        pendingDirective: null,
-        turns: [
-          {
-            number: 1,
-            recordedAt: '2026-04-16T00:01:00.000Z',
-            operatorGuidance: UNATTENDED_AUTO_RESUME_GUIDANCE,
-            disposition: null,
-          },
-        ],
-      },
-    });
-    const logger = await createRunLogger({
-      cwd,
-      stateDir: dirname(statePath),
-      planDoc: state.planDoc,
-      topLevelMode: state.topLevelMode,
-      runDir: state.runDir,
-    });
-
-    const finalState = await runOnePass(state, statePath, logger);
-
-    assert.equal(finalState.status, 'failed');
-    assert.equal(finalState.phase, 'blocked');
-    assert.equal(finalState.interactiveBlockedRecovery, null);
-
-    // The run-loop's terminal retrospective must report the failed status rather
-    // than overwrite it as a blocked retrospective.
-    const currentRetrospective = await readFile(join(state.runDir, 'RETROSPECTIVE.md'), 'utf8');
-    assert.match(currentRetrospective, /Status: failed/);
-    assert.doesNotMatch(currentRetrospective, /Status: blocked/);
-
-    const archivedFailed = await readFile(
-      join(state.runDir, 'RETROSPECTIVE-failed-scope-2.md'),
-      'utf8',
-    );
-    assert.match(archivedFailed, /Status: failed/);
-
-    const eventTypes = await readEventTypes(state.runDir);
-    assert.ok(eventTypes.includes('unattended.block_unresolved'));
-    assert.ok(!eventTypes.includes('notify.blocked'));
-  } finally {
-    clearProviderDefinitionRegistrationsForTesting();
-  }
-});
-
-test('unattended reviewer-scope block at the auto-resume cap fails without attended notifications', async () => {
+test('reviewer-scope operator block lands the interactive-recovery wait and notifies', async () => {
   const { cwd, statePath, state } = await createResumeFixture({
     currentScopeNumber: 1,
     phase: 'reviewer_scope',
     status: 'running',
     executionShape: 'multi_scope',
-    unattended: true,
-    unattendedAutoResumeCount: UNATTENDED_MAX_AUTO_RESUMES,
     currentScopeProgressJustification: {
       milestoneTargeted: 'Implement scope 1.',
       newEvidence: 'The coder produced a change for scope 1.',
@@ -1251,7 +748,7 @@ test('unattended reviewer-scope block at the auto-resume cap fails without atten
         async runStructuredRound<TStructured>(args: StructuredAdvisorRoundArgs) {
           assert.equal(args.label, 'review');
           return {
-            sessionHandle: 'reviewer-unattended-block',
+            sessionHandle: 'reviewer-operator-block',
             structured: {
               summary: 'This objective needs an operator decision.',
               findings: [],
@@ -1266,19 +763,26 @@ test('unattended reviewer-scope block at the auto-resume cap fails without atten
   });
 
   try {
-    // Normal caller path (review.ts): under unattended at the auto-resume cap the
-    // reviewer block terminal-fails inside enterInteractiveBlockedRecovery, and the
-    // caller must not emit any attended blocked / interactive-recovery notification.
+    // Normal caller path (review.ts): a reviewer block_for_operator enters
+    // interactive recovery, waits for the operator, and notifies.
     const finalState = await runReviewPhase(reviewState, statePath, logger);
 
-    assert.equal(finalState.status, 'failed');
-    assert.notEqual(finalState.phase, 'interactive_blocked_recovery');
-    assert.equal(finalState.interactiveBlockedRecovery, null);
+    assert.equal(finalState.status, 'running');
+    assert.equal(finalState.phase, 'interactive_blocked_recovery');
+    assert.equal(finalState.interactiveBlockedRecovery?.turns.length, 0);
+    assert.equal(getPublicLifecycleView(finalState).waitingForOperatorGuidance, true);
+    assert.equal(
+      getExecuteRunResultExitCode({
+        finalState,
+        waitingForOperatorGuidance: true,
+        waitingForManualGate: false,
+        stopRequestedAfterScope: false,
+      }),
+      2,
+    );
 
     const eventTypes = await readEventTypes(state.runDir);
-    assert.ok(eventTypes.includes('unattended.block_unresolved'));
-    assert.ok(!eventTypes.includes('notify.blocked'));
-    assert.ok(!eventTypes.includes('notify.interactive_blocked_recovery'));
+    assert.ok(eventTypes.includes('notify.blocked'));
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
@@ -2003,7 +1507,7 @@ test('blocked top-level plan review does not enter interactive blocked recovery'
   assert.equal(nextState.interactiveBlockedRecoveryHistory.length, 0);
 });
 
-test('unattended top-level plan-review block runs the shared terminal-fail action (site C)', async () => {
+test('top-level plan-review convergence block stays blocked and maps to writer exit code 2 (site C)', async () => {
   const { cwd, statePath, state } = await createResumeFixture({
     topLevelMode: 'plan',
     currentScopeNumber: 4,
@@ -2011,7 +1515,6 @@ test('unattended top-level plan-review block runs the shared terminal-fail actio
     status: 'blocked',
     blockedFromPhase: 'reviewer_plan',
     interactiveBlockedRecovery: null,
-    unattended: true,
   });
   const logger = await createRunLogger({
     cwd,
@@ -2021,7 +1524,7 @@ test('unattended top-level plan-review block runs the shared terminal-fail actio
     runDir: state.runDir,
   });
 
-  const failedState = await finalizeBlockedPlanReviewResponse(
+  const blockedState = await finalizeBlockedPlanReviewResponse(
     state,
     statePath,
     false,
@@ -2030,41 +1533,32 @@ test('unattended top-level plan-review block runs the shared terminal-fail actio
     logger,
   );
 
-  // No operator wait, no pendingPlanReviewGuidance resume mechanism: clean fail.
-  assert.equal(failedState.status, 'failed');
-  assert.equal(failedState.phase, 'blocked');
-  assert.equal(failedState.blockedFromPhase, 'reviewer_plan');
-  assert.equal(failedState.pendingPlanReviewGuidance, null);
-  // A failed state must carry no recoverable blocker reason (invariant).
-  assert.equal(failedState.blockerReason, null);
-  assert.equal(failedState.interactiveBlockedRecovery, null);
-  // The reviewer-convergence cap terminal-fails (writer exit 3), unchanged.
+  // Site C: the reviewer-convergence cap leaves the recognized blocked
+  // plan-review state (writer exit 2), resumable via `neal resume --message`.
+  assert.equal(blockedState.status, 'blocked');
+  assert.equal(blockedState.phase, 'blocked');
+  assert.equal(blockedState.blockedFromPhase, 'reviewer_plan');
+  // A convergence block carries no coder-authored blocker reason.
+  assert.equal(blockedState.blockerReason, null);
+  assert.equal(blockedState.interactiveBlockedRecovery, null);
   assert.equal(
     getExecuteRunResultExitCode({
-      finalState: failedState,
-      waitingForOperatorGuidance: false,
+      finalState: blockedState,
+      waitingForOperatorGuidance: true,
       waitingForManualGate: false,
       stopRequestedAfterScope: false,
     }),
-    3,
+    2,
   );
 
   const reloaded = await loadState(statePath);
-  assert.equal(reloaded.status, 'failed');
+  assert.equal(reloaded.status, 'blocked');
   assert.equal(reloaded.pendingPlanReviewGuidance, null);
-  // The top-level plan stage never waits for pendingPlanReviewGuidance resume.
-  assert.equal(getPlanReviewGuidanceView(reloaded).waitingForOperatorGuidance, false);
+  // The blocked reviewer_plan state is recognized as a message-resume wait.
+  assert.equal(getPlanReviewGuidanceView(reloaded).waitingForOperatorGuidance, true);
 
-  const events = await readEvents(state.runDir);
-  const eventTypes = events.map((event) => event.type as string);
-  const classified = events.find((event) => event.type === 'unattended.block_unresolved');
-  assert.ok(classified, 'expected a classified unattended.block_unresolved event for site C');
-  const classifiedData = classified?.data as Record<string, unknown> | undefined;
-  assert.equal(classifiedData?.reason, 'unattended_block_unresolved');
-  assert.equal(classifiedData?.site, 'reviewer_plan');
-  assert.equal(classifiedData?.blockedFromPhase, 'reviewer_plan');
-  // Mirrors the failed-run path: no attended block notification is emitted.
-  assert.ok(!eventTypes.includes('notify.blocked'));
+  const eventTypes = await readEventTypes(state.runDir);
+  assert.ok(eventTypes.includes('notify.blocked'));
 });
 
 test('plan-mode coder plan block stays blocked without execute-mode recovery', async () => {

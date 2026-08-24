@@ -95,12 +95,25 @@ commit. Create the initial baseline commit first.
 
 ## Stuck or blocked runs
 
-**Symptom:** the run stops with `status: "blocked"` (exit code 2).
-**Cause:** blocked is a controlled state, not a failure: the coder hit
-something it may not resolve alone, and attended runs wait for guidance.
-**Fix:** `neal status` explains the blocker and prints the exact
-`neal resume --run <run-id> --message "..."` command. `--message` is only
-accepted in that waiting-for-guidance state.
+**Symptom:** the run stops waiting for the operator (exit code 2), either as
+`status: "blocked"` or as a waiting-for-guidance recovery state.
+**Cause:** an operator stop is a controlled state, not a failure: the run hit
+something it may not resolve alone. Before yielding, eligible execute-mode
+blocks — coder-reported blocks and structural reviewer `review_stuck`
+deadlocks — get one bounded read-only consultant triage; a recoverable verdict
+with a concrete directive is applied automatically and the run continues
+without stopping. When the consultant is disabled
+(`consultant_max_attempts: 0`), its per-scope budget is exhausted, the block
+comes from an ineligible phase, or the consultant itself errors, the run
+yields with no consultant advice. Advice, when there is any, is carried on
+the stop.
+**Fix:** follow `neal status` — recovery is site-specific, so what it prints
+is the contract. A stop waiting for guidance prints the exact
+`neal resume --run <run-id> --message "..."` command (`--message` is only
+accepted there). Other blocked states — the final-completion review block,
+for example — are not mechanically resumable: `neal resume` reports them as
+still blocked, and `neal status` explains the blocker so you can address it
+directly.
 
 **Symptom:** `effectiveStatus: "waiting_for_manual_gate"`.
 **Cause:** the scope reached expected human work. Instructions are in the

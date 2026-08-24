@@ -103,7 +103,6 @@ export async function runFinalCompletionReviewerAdjudication(args: {
     scratchDir,
     reviewerContext: await buildAndPersistReviewerContextPacket({ state: args.state }),
     inlinedRangeDiff,
-    unattended: args.state.unattended,
     logger: args.logger,
   });
 

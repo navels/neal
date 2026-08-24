@@ -1,0 +1,1478 @@
+=== buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=absent ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+The commit-range diff for that commit range is inlined below and is the source of truth for exactly what the commit range changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+This is the first reviewer round for this scope.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Inlined commit-range diff from Neal (base000..head000)
+
+You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.
+This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+=== buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+The commit-range diff for that commit range is inlined below and is the source of truth for exactly what the commit range changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Previous reviewer head was prevhead000. Focus especially on changes since that commit, while still considering the full current state.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Inlined commit-range diff from Neal (base000..head000)
+
+You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.
+This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+=== buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=absent ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+The commit-range diff for that commit range is inlined below and is the source of truth for exactly what the commit range changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+This is the first reviewer round for this scope.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Inlined commit-range diff from Neal (base000..head000)
+
+You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.
+This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+
+## Earlier-scope changes to files in this diff
+
+The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.
+Check the current diff against each entry before accepting.
+
+### src/example.ts (scope 3, scope3base000..scope3final000)
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-older
++old
+
+=== buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=present ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+The commit-range diff for that commit range is inlined below and is the source of truth for exactly what the commit range changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Previous reviewer head was prevhead000. Focus especially on changes since that commit, while still considering the full current state.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Inlined commit-range diff from Neal (base000..head000)
+
+You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.
+This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+
+
+## Earlier-scope changes to files in this diff
+
+The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.
+Check the current diff against each entry before accepting.
+
+### src/example.ts (scope 3, scope3base000..scope3final000)
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-older
++old
+
+=== buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=absent ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with your read-only repository tools: use the git_diff tool to see exactly what the commit range changed (including deletions and renames), and your read tools to verify the surrounding code. The commit range is the source of truth for this review.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+This is the first reviewer round for this scope.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+=== buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with your read-only repository tools: use the git_diff tool to see exactly what the commit range changed (including deletions and renames), and your read tools to verify the surrounding code. The commit range is the source of truth for this review.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Previous reviewer head was prevhead000. Focus especially on changes since that commit, while still considering the full current state.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+=== buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=absent ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with your read-only repository tools: use the git_diff tool to see exactly what the commit range changed (including deletions and renames), and your read tools to verify the surrounding code. The commit range is the source of truth for this review.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+This is the first reviewer round for this scope.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Earlier-scope changes to files in this diff
+
+The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.
+Check the current diff against each entry before accepting.
+
+### src/example.ts (scope 3, scope3base000..scope3final000)
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-older
++old
+
+=== buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=present ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with your read-only repository tools: use the git_diff tool to see exactly what the commit range changed (including deletions and renames), and your read tools to verify the surrounding code. The commit range is the source of truth for this review.
+A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.
+Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — reading them with your read tools — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, read the most relevant existing tests and affected code with your read tools and reason through the affected existing flows directly rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Previous reviewer head was prevhead000. Focus especially on changes since that commit, while still considering the full current state.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Earlier-scope changes to files in this diff
+
+The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.
+Check the current diff against each entry before accepting.
+
+### src/example.ts (scope 3, scope3base000..scope3final000)
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-older
++old
+
+=== buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=absent ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with repository tools. The commit range is the source of truth for this review.
+Use git commands against the repository, for example: git diff base000..head000, git show --stat head000, and targeted path diffs or file reads for changed files.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+This is the first reviewer round for this scope.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+=== buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=present ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with repository tools. The commit range is the source of truth for this review.
+Use git commands against the repository, for example: git diff base000..head000, git show --stat head000, and targeted path diffs or file reads for changed files.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Previous reviewer head was prevhead000. Focus especially on changes since that commit, while still considering the full current state.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+=== buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=absent ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with repository tools. The commit range is the source of truth for this review.
+Use git commands against the repository, for example: git diff base000..head000, git show --stat head000, and targeted path diffs or file reads for changed files.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+This is the first reviewer round for this scope.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Earlier-scope changes to files in this diff
+
+The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.
+Check the current diff against each entry before accepting.
+
+### src/example.ts (scope 3, scope3base000..scope3final000)
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-older
++old
+
+=== buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=present ===
+Review the current scope for plan /tmp/PLAN.md.
+Review round: 1.
+Commit range: base000..head000.
+Review that commit range directly with repository tools. The commit range is the source of truth for this review.
+Use git commands against the repository, for example: git diff base000..head000, git show --stat head000, and targeted path diffs or file reads for changed files.
+Trace the changed runtime path far enough to prove the happy path is reachable and that runtime invariants, data-shape transitions, persistence, and error paths line up with the implementation claims.
+Compare claimed behavior against the actual code and data transitions in the scope diff; do not accept summaries when repository inspection gives a more direct answer.
+For refactors and config/runtime plumbing changes, actively look for implementation-quality regressions, not just behavioral correctness. Examples include replacing a robust library with a weaker hand-rolled parser, introducing repeated disk reads or reparsing in hot paths, silently weakening error handling, or otherwise making the implementation materially less robust than the prior version.
+When the requirements enumerate multiple discrete items to change — a list of identifiers, fields, files, endpoints, or call sites — enumerate them yourself and confirm each maps to a concrete change before accepting; do not accept based only on the subset the implementation happened to touch.
+Treat an unrequested change to a public or exported symbol — a renamed or removed exported function, type, field, constant, or signature that the requirements did not call for — as scope drift and a blocking finding unless the requirements require it: an unrequested public-symbol change widens the blast radius and can break callers the diff does not show.
+Bias your search toward execute-mode failure classes in this repository: persistence or state-shape mismatches, resume or recovery transition regressions, split-plan or execution-shape contract violations, artifact or reporting mismatches, and verification that does not actually cover the changed behavior.
+Temporary verification scratch directory: /tmp/repo/.neal/runs/run-000/scratch/review
+Use that run-local scratch directory for temporary verification artifacts, copied tests, scratch builds, logs, and modified throwaway files.
+Do not create project-root scratch directories such as build_review/.
+Do not leave project-tree scratch files behind; keep scratch work under the run-local directory above.
+Treat the scope diff as hostile input. Try to falsify the implementation before you give it credit for working.
+Do not anchor on the coder narrative, progress justification, or prior acceptance history when judging correctness. Those are convergence signals, not proof that the code is sound.
+
+Produce only structured review findings.
+Use blocking severity for correctness, regression, or missing-verification issues.
+Also use blocking severity for substantive robustness or performance regressions introduced by the implementation, especially in infrastructure, config, parser, caching, retry, or orchestration code.
+Use non_blocking severity for suggestions that do not block acceptance.
+Only emit non_blocking findings when they identify a concrete maintenance, observability, or testability issue that is genuinely worth a later follow-up turn.
+Do not emit non_blocking findings for formatting, whitespace, naming preferences, trivial code-shape preferences, or optional refactors.
+If the scope is acceptable aside from low-signal trivia, return no finding rather than a non_blocking note.
+Every finding must name the concrete issue, identify the affected files, explain the evidence or failure scenario that makes the issue credible, and state the required correction.
+Do not infer that verification was skipped merely because this prompt does not embed full terminal output. Treat missing verification as a finding only when the repository state, plan requirements, or review history give concrete evidence that required verification was not run or was insufficient.
+Look for verification that cannot catch the failure mode, including tests that mock away the risky runtime path or only assert mocked adapters instead of the scope diff.
+Check whether test coverage for the changed behavior degraded. If the change removes, weakens, or fails to preserve meaningful test coverage for the affected behavior, treat that as a review finding. Use blocking severity when the missing or degraded coverage leaves the changed behavior insufficiently protected.
+Identify the shared subsystems the scope diff touches: state machines, event loops, parsers or byte framing, command dispatch, storage or shared-state abstractions, startup/load paths, and long-lived session or connection state.
+Existing behavior that depends on those subsystems remains part of the contract unless the plan explicitly changes it. Do not accept solely because the newly requested behavior appears implemented; also confirm that adjacent behavior sharing those paths still holds.
+Before accepting, either cite existing tests that cover the plausible regression surfaces — running them when available — or reason through representative existing flows at the level of state transitions and data ownership.
+Expand this regression check only along paths the scope diff actually touches or depends on; you do not need to re-audit unrelated parts of the project.
+A change to a file that an earlier accepted scope signed off must preserve what that scope's review accepted. Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding unless the plan explicitly calls for it.
+When the plan requires existing behavior to keep working, this review is not limited to newly changed lines. Apply an acceptance-surface test to any pre-existing crash, failure, flaky behavior, or anomaly reported in the coder narrative, progress justification, or review history instead of discounting it because it predates the scope diff.
+A pre-existing failure is inside the required acceptance surface when the plan explicitly requires the affected existing behavior to keep working, when the plan's stated verification fails because of it, or when the behavior the plan delivers cannot be exercised end-to-end without the failing path. Otherwise it is outside the surface.
+For a reported pre-existing failure inside the required surface, exercise or reason through the affected existing flows directly — run the most relevant existing tests or reproduce the reported behavior when practical — rather than relying on the coder's dismissal.
+An in-surface pre-existing failure that was neither fixed nor surfaced as a blocking concern is a blocking finding, and a dismissal without a concrete out-of-surface reason is a finding.
+Conversely, treat a fix for a pre-existing issue that fails the acceptance-surface test as scope drift rather than extra credit: flag it so the change stays bounded to the plan.
+Previous reviewer head was prevhead000. Focus especially on changes since that commit, while still considering the full current state.
+
+Commits in scope:
+head000 canonical render matrix
+
+Diff stat:
+ src/example.ts | 2 +-
+
+Changed files:
+src/example.ts
+
+Bounded current-run continuity context:
+# Reviewer Continuity Context
+
+Use this bounded Neal-owned context for continuity only. Inspect cited artifacts or repository state directly before making findings.
+
+## Run
+- id: run-000
+- plan: /tmp/PLAN.md
+- mode: execute
+- executionShape: multi_scope
+- phase: reviewer_scope
+- status: running
+- currentScope: 1
+
+## Completed Scopes
+- none
+- truncated: no
+
+## Findings
+- none
+- truncated: no
+
+## Inherited Plan-Review Debt
+- none
+
+## Final Completion
+- not applicable
+
+## Citations
+- RUN_STATE.json: .neal/runs/run-000/RUN_STATE.json
+- PLAN_PROGRESS.md: .neal/runs/run-000/PLAN_PROGRESS.md
+- plan-progress.json: .neal/runs/run-000/plan-progress.json
+- REVIEW.md: .neal/runs/run-000/REVIEW.md
+- RECOVERY.md: .neal/runs/run-000/RECOVERY.md
+- REVIEWER_CONTEXT.json: .neal/runs/run-000/REVIEWER_CONTEXT.json
+- REVIEWER_CONTEXT.md: .neal/runs/run-000/REVIEWER_CONTEXT.md
+
+The active parent objective for meaningful-progress evaluation is scope 1.
+You are the authority for meaningful-progress gating during this execute review pass, but perform that judgment after the adversarial correctness review above.
+Set `meaningfulProgressAction` to `accept` only when either this scope materially advances the active parent objective, or a top-level scope has no required new diff because prior accepted work already satisfies it and you find no issues with sufficient verification evidence.
+For top-level already-satisfied acceptance, use `accept`, not `advance_parent`, and name the prior accepted work plus the verification evidence in `meaningfulProgressRationale`.
+Set `meaningfulProgressAction` to `block_for_operator` when the objective genuinely cannot proceed without a decision only an operator can make.
+Set `meaningfulProgressAction` to `replace_plan` when the current execution shape should be replaced rather than retried.
+Set `meaningfulProgressAction` to `advance_parent` only when an active accepted derived plan has an empty current diff and prior accepted derived work already satisfies the parent objective.
+Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.
+Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.
+A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.
+Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.
+
+Coder progress justification for this scope:
+{
+  "milestoneTargeted": "Deterministic milestone.",
+  "newEvidence": "Deterministic evidence.",
+  "whyNotRedundant": "Deterministic non-redundancy.",
+  "nextStepUnlocked": "Deterministic next step."
+}
+
+Recent accepted scope history for this parent objective:
+No accepted scopes yet.
+
+Prior review history is available at /tmp/REVIEW.md if you need earlier reviewer findings or coder responses, but review the current commit range directly.
+If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.
+Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.
+If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.
+
+## Earlier-scope changes to files in this diff
+
+The files below were changed by an earlier accepted scope in this run and appear again in the current diff. Each entry shows what that earlier scope did to the file, so what the current scope alters is something you read here rather than something you have to remember.
+Check the current diff against each entry before accepting.
+
+### src/example.ts (scope 3, scope3base000..scope3final000)
+
+diff --git a/src/example.ts b/src/example.ts
+@@ -1 +1 @@
+-older
++old
+

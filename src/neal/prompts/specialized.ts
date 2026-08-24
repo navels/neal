@@ -4,7 +4,6 @@ import { renderInlinedRangeDiffSection } from '../context/inline-review-context.
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
 import { assertPromptBuilder } from './assert-builder.js';
 import { getUserGuidanceLines } from './guidance.js';
-import { getUnattendedAutonomyLines } from './shared.js';
 import {
   getAdversarialReviewDoctrineLines,
   getCodeReviewFalsificationLines,
@@ -111,8 +110,6 @@ export function buildFinalCompletionReviewerPrompt(args: {
   inlinedRangeDiff?: string | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
-  // When true, the run is unattended: render the no-operator autonomy line.
-  unattended?: boolean;
 }) {
   const spec = assertPromptBuilder('completion_reviewer', 'buildFinalCompletionReviewerPrompt', PROMPT_MODULE_PATH);
   const finalCompletionVariant = spec.variants.find((variant) => variant.kind === 'final_completion');
@@ -198,7 +195,6 @@ export function buildFinalCompletionReviewerPrompt(args: {
     'Use `accept_complete` only when the full plan objectives are satisfied and the aggregate implementation is acceptable under ordinary code review standards.',
     'Use `continue_execution` only when the remaining work is concrete, bounded, and suitable for one explicit follow-on scope.',
     'Use `block_for_operator` when the remaining gap is ambiguous, externally constrained, or needs human direction.',
-    ...getUnattendedAutonomyLines(args.unattended),
     'When you return `continue_execution`, you must provide a non-null `missingWork` object with `summary`, `requiredOutcome`, and `verification`.',
     'When you return any other action, `missingWork` must be null.',
     '',

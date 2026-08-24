@@ -750,7 +750,6 @@ test('runOnePass routes incident-style pointer-only split plans into interactive
     currentScopeNumber: 5,
     phase: 'coder_scope',
     status: 'running',
-    unattended: false,
     derivedPlanPath: null,
     derivedPlanStatus: null,
     derivedFromScopeNumber: null,
@@ -758,7 +757,7 @@ test('runOnePass routes incident-style pointer-only split plans into interactive
     splitPlanCountForCurrentScope: 0,
     createdCommits: [],
   });
-  // Disable the consultant so the attended reroute yields plainly at the
+  // Disable the consultant so the reroute yields plainly at the
   // recovery chokepoint without a provider call; consultant dispatch is
   // covered separately by the consultant and recovery tests.
   await writeFile(

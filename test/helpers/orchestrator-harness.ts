@@ -13,7 +13,6 @@ import { flushDerivedPlanNotifications } from '../../src/neal/orchestrator/notif
 import { writeExecutionArtifacts } from '../../src/neal/orchestrator/artifacts.js';
 import { nealCliInvocation } from './cli.js';
 import { enterInteractiveBlockedRecovery } from '../../src/neal/orchestrator/phases/recovery.js';
-import { UNATTENDED_AUTO_RESUME_GUIDANCE } from '../../src/neal/blocked-guidance.js';
 import { persistBlockedScope } from '../../src/neal/orchestrator/phases/shared.js';
 import { persistSplitPlanRecovery } from '../../src/neal/orchestrator/split-plan.js';
 import { createInitialState, getDefaultAgentConfig, getRunStatePath, saveState } from '../../src/neal/state.js';
@@ -632,7 +631,7 @@ export async function readEvents(runDir: string): Promise<Array<Record<string, u
 }
 
 // ----------------------------------------------------------------------------
-// Scope 3: bounded unattended review_stuck consultant interception inside
+// Bounded read-only consultant interception inside
 // enterInteractiveBlockedRecovery. The consultant runs through the real read-only
 // reviewer plumbing; we control its verdict by overriding the reviewer
 // provider's structured-advisor adapter (mirroring test/consultant.test.ts).
@@ -687,8 +686,6 @@ export async function createConsultantRecoveryFixture(overrides: Partial<Orchest
     phase: 'reviewer_scope',
     status: 'running',
     blockedFromPhase: 'reviewer_scope',
-    unattended: true,
-    unattendedAutoResumeCount: 0,
     consultantAttemptCount: 0,
     agentConfig: {
       ...getDefaultAgentConfig(),
@@ -705,34 +702,6 @@ export async function writeConsultantKnobConfig(cwd: string, maxAttempts: number
     'utf8',
   );
   clearConfigCache(cwd);
-}
-
-export async function createUnattendedPendingRecoveryFixture(autoResumeCount: number) {
-  return createResumeFixture({
-    currentScopeNumber: 2,
-    phase: 'interactive_blocked_recovery',
-    status: 'running',
-    blockedFromPhase: 'reviewer_scope',
-    coderSessionHandle: 'coder-session-1',
-    unattended: true,
-    unattendedAutoResumeCount: autoResumeCount,
-    interactiveBlockedRecovery: {
-      enteredAt: '2026-04-16T00:00:00.000Z',
-      sourcePhase: 'reviewer_scope',
-      blockedReason: 'Reviewer needs an operator decision.',
-      maxTurns: 3,
-      lastHandledTurn: 0,
-      pendingDirective: null,
-      turns: [
-        {
-          number: 1,
-          recordedAt: '2026-04-16T00:01:00.000Z',
-          operatorGuidance: UNATTENDED_AUTO_RESUME_GUIDANCE,
-          disposition: null,
-        },
-      ],
-    },
-  });
 }
 
 export async function assertTerminalInvalidSplitPlanBlock(args: {

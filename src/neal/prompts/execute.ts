@@ -13,7 +13,6 @@ import {
   getProtocolMarkerArtifactProhibitionLines,
   getStandalonePlanPayloadSourceOfTruthLines,
   getTerminalMarkerArtifactBoundaryLines,
-  getUnattendedAutonomyLines,
 } from './shared.js';
 import { assertPromptBuilder } from './assert-builder.js';
 import { getUserGuidanceLines } from './guidance.js';
@@ -39,11 +38,7 @@ export const CODER_PREEXISTING_FAILURE_LINES = [
   'When it is outside the surface, record what you observed and why it cannot affect the required behavior in your progress justification, then continue without fixing it. Fixing out-of-surface pre-existing issues is scope drift.',
 ] as const;
 
-export function buildScopePrompt(
-  planDoc: string,
-  progressText: string,
-  options?: { unattended?: boolean },
-) {
+export function buildScopePrompt(planDoc: string, progressText: string) {
   const spec = assertPromptBuilder('scope_coder', 'buildScopePrompt', PROMPT_MODULE_PATH);
   const primaryVariant = spec.variants.find((variant) => variant.kind === 'primary');
   if (!primaryVariant) {
@@ -58,7 +53,6 @@ export function buildScopePrompt(
     '2. Read any companion docs or required-context files explicitly referenced by that plan before starting work.',
     '3. Reset your instructions for this turn from the current contents of the plan, the inlined progress state below, and required context.',
     '',
-    ...getUnattendedAutonomyLines(options?.unattended),
     'Then execute exactly one implementation scope.',
     'Do not start a second scope in this turn.',
     'Return only the structured execution envelope requested by the provider schema.',
@@ -191,8 +185,6 @@ export function buildReviewerPrompt(args: {
   earlierScopeChanges?: readonly EarlierScopeFileChange[] | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
-  // When true, the run is unattended: render the no-operator autonomy line.
-  unattended?: boolean;
 }) {
   const spec = assertPromptBuilder('scope_reviewer', 'buildReviewerPrompt', PROMPT_MODULE_PATH);
   const primaryVariant = spec.variants.find((variant) => variant.kind === 'primary');
@@ -283,7 +275,6 @@ export function buildReviewerPrompt(args: {
     'Do not use `block_for_operator` solely to ask Neal to retire an already-complete parent objective inside that derived-plan case; use `advance_parent` only for that narrow empty-derived-scope case.',
     'Keep `block_for_operator` for ambiguous already-satisfied claims, missing evidence, missing operator decisions, or unsafe parent-completion claims.',
     'A non-empty or uncertain current diff is the normal case, not a reason to escalate: handle it by accepting, requesting a bounded revision, or splitting the plan rather than choosing `block_for_operator`.',
-    ...getUnattendedAutonomyLines(args.unattended),
     'Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.',
     '',
     'Coder progress justification for this scope:',

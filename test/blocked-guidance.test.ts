@@ -8,7 +8,6 @@ import {
   buildBlockedGuidance,
   renderBlockedGuidanceSections,
   CONTINUE_WITH_GUIDANCE_MESSAGE,
-  UNATTENDED_AUTO_RESUME_GUIDANCE,
   type BlockedGuidance,
 } from '../src/neal/blocked-guidance.js';
 import { getRunDisplayStatus } from '../src/neal/run-status.js';
@@ -355,15 +354,6 @@ test('unknown waiting state uses a conservative fallback without invented author
   assert.doesNotMatch(guidance.options[0]?.command ?? '', /authorize/i);
   // The human-facing option text is the extracted constant unchanged (byte-identical).
   assert.ok((guidance.options[0]?.command ?? '').includes(CONTINUE_WITH_GUIDANCE_MESSAGE));
-});
-
-test('unattended auto-resume guidance is conservative and distinct from the human option text', async () => {
-  // Self-contained synthesized guidance (no operator text to echo) that still keeps
-  // verification intact and assumes no extra authorization.
-  assert.match(UNATTENDED_AUTO_RESUME_GUIDANCE, /No operator is available/);
-  assert.match(UNATTENDED_AUTO_RESUME_GUIDANCE, /verification requirements intact/);
-  assert.match(UNATTENDED_AUTO_RESUME_GUIDANCE, /do not assume any extra authorization/);
-  assert.notEqual(UNATTENDED_AUTO_RESUME_GUIDANCE, CONTINUE_WITH_GUIDANCE_MESSAGE);
 });
 
 test('non-waiting blocked and failed states return null', async () => {

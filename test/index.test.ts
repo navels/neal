@@ -1440,7 +1440,7 @@ test('neal usage output shows only public subcommands by default', async () => {
   assert.match(result.stderr, /Usage: neal setup/);
   assert.match(result.stderr, /neal plan <plan\.md>/);
   assert.match(result.stderr, /neal execute <plan\.md> \[--no-squash\]/);
-  assert.match(result.stderr, /neal run \[--no-squash\] \[--unattended\] <plan\.md> \[more-plans\.\.\.\]/);
+  assert.match(result.stderr, /neal run \[--no-squash\] <plan\.md> \[more-plans\.\.\.\]/);
   assert.match(result.stderr, /neal resume \[--run <run-id>\] \[--message "\.\.\."\]/);
   assert.match(result.stderr, /neal review \[message\] \(--last <n> \| --since <base>\)/);
   assert.match(result.stderr, /neal squash \[plan\.md\]/);

@@ -534,10 +534,6 @@ test('loadState rejects invalid counters, duplicate completed scope labels, and 
   }, /during load.*invalid coderRetryCount: expected safe integer greater than or equal to 0/);
 
   await assertLoadRejects((state) => {
-    state.unattendedAutoResumeCount = -1;
-  }, /during load.*invalid unattendedAutoResumeCount: expected safe integer greater than or equal to 0/);
-
-  await assertLoadRejects((state) => {
     state.consultantAttemptCount = -1;
   }, /during load.*invalid consultantAttemptCount: expected safe integer greater than or equal to 0/);
 

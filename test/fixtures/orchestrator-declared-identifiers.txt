@@ -19,7 +19,6 @@ createPlanReviewGuidance
 createPlanReviewGuidanceResponseFixture
 createResumeFixture
 createStucknessCwd
-createUnattendedPendingRecoveryFixture
 createValidFixedMultiScopePlan
 delay
 execFileAsync

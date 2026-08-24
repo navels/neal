@@ -39,7 +39,6 @@ test('parseNewRunArgs accepts only direct plan and execute subcommands', () => {
     planDoc: 'plans/PLAN.md',
     agentConfig: defaults,
     squashOnCompletion: false,
-    unattended: false,
   });
 
   assert.deepEqual(parseNewRunArgs(['execute', 'plans/PLAN.md'], defaults), {
@@ -47,7 +46,6 @@ test('parseNewRunArgs accepts only direct plan and execute subcommands', () => {
     planDoc: 'plans/PLAN.md',
     agentConfig: defaults,
     squashOnCompletion: true,
-    unattended: false,
   });
 
   assert.deepEqual(parseNewRunArgs(['execute', 'plans/PLAN.md', '--no-squash'], defaults), {
@@ -55,23 +53,6 @@ test('parseNewRunArgs accepts only direct plan and execute subcommands', () => {
     planDoc: 'plans/PLAN.md',
     agentConfig: defaults,
     squashOnCompletion: false,
-    unattended: false,
-  });
-
-  assert.deepEqual(parseNewRunArgs(['execute', 'plans/PLAN.md', '--unattended'], defaults), {
-    topLevelMode: 'execute',
-    planDoc: 'plans/PLAN.md',
-    agentConfig: defaults,
-    squashOnCompletion: true,
-    unattended: true,
-  });
-
-  assert.deepEqual(parseNewRunArgs(['plan', 'plans/PLAN.md', '--unattended'], defaults), {
-    topLevelMode: 'plan',
-    planDoc: 'plans/PLAN.md',
-    agentConfig: defaults,
-    squashOnCompletion: false,
-    unattended: true,
   });
 });
 
@@ -104,35 +85,24 @@ test('parsePlanAndExecuteArgs accepts one or more existing plan file operands', 
     planDocs: ['plans/A.md'],
     agentConfig: defaults,
     squashOnCompletion: true,
-    unattended: false,
   });
 
   assert.deepEqual(parsePlanAndExecuteArgs(['run', 'plans/A.md', 'plans/B.md'], defaults), {
     planDocs: ['plans/A.md', 'plans/B.md'],
     agentConfig: defaults,
     squashOnCompletion: true,
-    unattended: false,
   });
 
   assert.deepEqual(parsePlanAndExecuteArgs(['run', '--no-squash', 'plans/A.md'], defaults), {
     planDocs: ['plans/A.md'],
     agentConfig: defaults,
     squashOnCompletion: false,
-    unattended: false,
   });
 
-  assert.deepEqual(parsePlanAndExecuteArgs(['run', '--unattended', 'plans/A.md'], defaults), {
-    planDocs: ['plans/A.md'],
-    agentConfig: defaults,
-    squashOnCompletion: true,
-    unattended: true,
-  });
-
-  assert.deepEqual(parsePlanAndExecuteArgs(['run', '--no-squash', '--unattended', 'plans/A.md', 'plans/B.md'], defaults), {
+  assert.deepEqual(parsePlanAndExecuteArgs(['run', '--no-squash', 'plans/A.md', 'plans/B.md'], defaults), {
     planDocs: ['plans/A.md', 'plans/B.md'],
     agentConfig: defaults,
     squashOnCompletion: false,
-    unattended: true,
   });
 });
 
@@ -386,9 +356,9 @@ test('buildUsageLines teaches only the public command surface by default', () =>
   const usageLines = buildUsageLines('0.1.0');
   const usage = usageLines.join('\n');
   assert.match(usage, /^neal 0\.1\.0\n\nUsage: neal setup/m);
-  assert.match(usage, /neal plan <plan\.md> \[--unattended\]/);
-  assert.match(usage, /neal execute <plan\.md> \[--no-squash\] \[--unattended\]/);
-  assert.match(usage, /neal run \[--no-squash\] \[--unattended\] <plan\.md> \[more-plans\.\.\.\]/);
+  assert.match(usage, /neal plan <plan\.md>/);
+  assert.match(usage, /neal execute <plan\.md> \[--no-squash\]/);
+  assert.match(usage, /neal run \[--no-squash\] <plan\.md> \[more-plans\.\.\.\]/);
   assert.match(usage, /neal resume \[--run <run-id>\] \[--message "\.\.\."\]/);
   assert.match(usage, /neal review \[message\] \(--last <n> \| --since <base>\)/);
   assert.match(usage, /neal squash \[plan\.md\]/);
@@ -406,7 +376,7 @@ test('buildUsageLines teaches only the public command surface by default', () =>
   assert.doesNotMatch(usage, /# refine plan in place/);
 
   const setupUsage = usageLines.indexOf('Usage: neal setup');
-  const planUsage = usageLines.indexOf('   or: neal plan <plan.md> [--unattended]');
+  const planUsage = usageLines.indexOf('   or: neal plan <plan.md>');
   const plainResumeExample = usageLines.indexOf('  neal resume');
   const messageResumeExample = usageLines.indexOf('  neal resume --run <run-id> --message "Use the narrower helper approach."');
   const statusExample = usageLines.indexOf('  neal status');
