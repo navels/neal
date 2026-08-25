@@ -10,6 +10,8 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-25
+
 ### Fixed
 
 - Final-completion review could exceed the reviewer provider's input limit
@@ -37,6 +39,9 @@ dependency-update policy.
 - Raised the default `final_completion_continue_execution_max` from 2 to 3, so
   the final-completion reviewer gets one more round to send the coder back
   before a run blocks for the operator.
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.239` to `0.3.240`.
+  Re-qualified the native adapter with `neal compat`; no behavior change.
+
 ## [0.5.1] - 2026-08-24
 
 ### Changed
