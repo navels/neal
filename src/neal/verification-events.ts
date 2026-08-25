@@ -1,4 +1,5 @@
-import type { VerificationCommandResult } from './types.js';
+import { truncateInlineSectionBody } from './context/inline-review-context.js';
+import type { FinalCompletionVerificationTally, VerificationCommandResult } from './types.js';
 
 export type RunEvent = {
   ts?: unknown;
@@ -76,6 +77,56 @@ function renderCommandStatus(result: VerificationCommandResult) {
   }
 
   return 'unknown';
+}
+
+// Bounds for the final-completion verification tally: at most this many recent
+// failing commands, each command string capped so one pathological command
+// cannot inflate the tally.
+export const VERIFICATION_TALLY_RECENT_FAILURE_LIMIT = 10;
+export const VERIFICATION_TALLY_COMMAND_MAX_CHARS = 300;
+
+// Builds the bounded verification tally the final-completion prompts embed:
+// pass/fail/unknown counts over the latest result per distinct command, plus
+// the last few failing commands with their exit codes. Distinct commands are
+// ordered by their latest event position (not first appearance), so a repeated
+// command that failed at the end of the run counts as recent. The complete
+// per-command record stays in events.ndjson.
+export function buildVerificationTally(results: VerificationCommandResult[]): FinalCompletionVerificationTally {
+  const latestByCommand = new Map<string, { result: VerificationCommandResult; lastIndex: number }>();
+  results.forEach((result, index) => {
+    latestByCommand.set(result.command, { result, lastIndex: index });
+  });
+  const latestResults = [...latestByCommand.values()]
+    .sort((a, b) => a.lastIndex - b.lastIndex)
+    .map((entry) => entry.result);
+  let passed = 0;
+  let failed = 0;
+  let unknown = 0;
+  const failures: FinalCompletionVerificationTally['recentFailures'] = [];
+
+  for (const result of latestResults) {
+    const status = renderCommandStatus(result);
+    if (status === 'passed') {
+      passed += 1;
+    } else if (status === 'failed') {
+      failed += 1;
+      failures.push({
+        command: truncateInlineSectionBody(result.command, VERIFICATION_TALLY_COMMAND_MAX_CHARS),
+        exitCode: result.exitCode,
+      });
+    } else {
+      unknown += 1;
+    }
+  }
+
+  return {
+    totalRuns: results.length,
+    distinctCommands: latestResults.length,
+    passed,
+    failed,
+    unknown,
+    recentFailures: failures.slice(-VERIFICATION_TALLY_RECENT_FAILURE_LIMIT),
+  };
 }
 
 export function summarizeVerificationCommandResults(results: VerificationCommandResult[]) {

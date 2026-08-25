@@ -137,9 +137,14 @@ const CANNED_COMPLETION_PACKET: FinalCompletionPacket = {
   planChangedFilesSummary: 'src/example.ts',
   residualReviewDebt: [],
   residualReviewDebtSummary: 'none',
-  verificationCommands: ['pnpm typecheck'],
-  verificationCommandResults: [],
-  verificationSummary: 'pnpm typecheck',
+  verificationTally: {
+    totalRuns: 1,
+    distinctCommands: 1,
+    passed: 1,
+    failed: 0,
+    unknown: 0,
+    recentFailures: [],
+  },
   lastNonEmptyImplementationScope: {
     number: '5',
     finalCommit: HEAD_COMMIT,
@@ -581,12 +586,12 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
 };
 
 const EXPECTED_MODULE_SHAS: Record<(typeof MATRIX_BUILDER_MODULES)[number], string> = {
-  'src/neal/prompts/planning.ts': 'eb64a5fa08fae0d0608ae66585a083f3e4d6490fa2ad0fb7f018588a29037f4f',
-  'src/neal/prompts/execute.ts': '6b91bd20f1a93344a2ba7cbc57f05f98e65783a44cde05de47055cfdfa955730',
-  'src/neal/prompts/specialized.ts': '7f8e6c08ff4f219a5c8e9804f17437c951345fae6473bb2d8ad1d3daabd864a6',
-  'src/neal/agents/prompts.ts': '41d989ceb0e4abe0e7fc99f05c4c50c3eb4f986e6c3294e24bda87bacd60e88c',
+  'src/neal/prompts/planning.ts': '0d0e88130af09545f7bfb5d74bf03d333954152baabd37a7926279e361167cde',
+  'src/neal/prompts/execute.ts': '9676b2ac04e64317788a4769958cd3eb09d26931242f7204a30624ba8fec35ad',
+  'src/neal/prompts/specialized.ts': 'c5e4ceeff6bbce7fbcfa6e97b591724528e09b5315f1dcb4dab7eedc4195362c',
+  'src/neal/agents/prompts.ts': '0a79e65192d73862a9c55b8e762775a1ac4fff184ec58dd376f5e96ab1c2e981',
   'src/neal/context/reviewer-context.ts': '7168f61b26ff2c9fb9fa67ce7c608f452722fcfc5187f8c346910264a4c00674',
-  'src/neal/context/inline-review-context.ts': 'a4a139c5c98ef81a88ebf203314444a1bb9c1d244d324ea14ebe000f5289c8b4',
+  'src/neal/context/inline-review-context.ts': 'e6b355023bc3736d0958a4fe253eab9e0ab6df321b21190c67e766623de6a029',
 };
 
 function assertModuleShaMatches(relPath: (typeof MATRIX_BUILDER_MODULES)[number], expectedSha: string): void {

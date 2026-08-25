@@ -1,8 +1,9 @@
 import { Codex, type ModelReasoningEffort, type Thread, type ThreadItem, type ThreadOptions } from '@openai/codex-sdk';
 
-import { runStructuredJsonProtocol } from '../agents/structured-json.js';
+import { buildStructuredJsonPrompt, runStructuredJsonProtocol } from '../agents/structured-json.js';
 import { agentSettingsIsolated } from './agent-settings-isolation.js';
 import { agentSubprocessEnv } from './git-config-isolation.js';
+import { assertPromptWithinInputBudget } from './input-budget.js';
 import { resolveRateCost } from './pricing.js';
 import { isContentSafetyRefusalMessage, NealProviderError } from './types.js';
 import type {
@@ -22,6 +23,26 @@ import type {
 } from './types.js';
 
 const OPENAI_CODEX_PROVIDER_ID = 'openai-codex';
+
+// Codex's app-server rejects any single turn whose input exceeds this size
+// (JSON-RPC code -32602, input_error_code `input_too_large`). Declared as
+// `maxInputChars` on both role capabilities and enforced by the preflight at
+// every turn/round entry point below.
+const OPENAI_CODEX_MAX_INPUT_CHARS = 1_048_576;
+
+function assertCodexInputBudget(args: {
+  prompt: string;
+  role: ProviderRole;
+  sessionHandle?: string | null;
+}) {
+  assertPromptWithinInputBudget({
+    prompt: args.prompt,
+    maxInputChars: OPENAI_CODEX_MAX_INPUT_CHARS,
+    provider: OPENAI_CODEX_PROVIDER_ID,
+    role: args.role,
+    sessionHandle: args.sessionHandle,
+  });
+}
 
 class CodexInactivityTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -112,6 +133,12 @@ function inferCodexErrorKind(error: unknown, message: string, fallback: NealProv
   // "authorized".
   if (isContentSafetyRefusalMessage(message)) {
     return 'content_refused';
+  }
+  // Codex's app-server rejects an over-limit turn with JSON-RPC code -32602
+  // and input_error_code `input_too_large`; matching the stable error code
+  // means a limit the preflight did not predict still classifies correctly.
+  if (text.includes('input_too_large')) {
+    return 'input_too_large';
   }
   if (text.includes('permission') || text.includes('denied') || text.includes('forbidden') || text.includes('not authorized')) {
     return 'permission_denied';
@@ -735,6 +762,11 @@ class OpenAICodexCoderAdapter implements CoderAdapter {
   async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
     let thread: Thread | null = null;
     try {
+      assertCodexInputBudget({
+        prompt: args.prompt,
+        role: 'coder',
+        sessionHandle: args.resumeHandle ?? null,
+      });
       const createThread = this.options.createThread ?? createCodexThread;
       thread = createThread({
         cwd: args.cwd,
@@ -799,6 +831,16 @@ class OpenAICodexCoderAdapter implements CoderAdapter {
     while (true) {
       let thread: Thread | null = null;
       try {
+        // Preflight the exact text the initial SDK turn will send: the
+        // protocol-wrapped prompt. buildStructuredJsonPrompt is the same pure
+        // builder runStructuredJsonProtocol applies to the same inputs below,
+        // so the checked text is byte-identical to the sent text. Repair
+        // prompts are checked in runRepair before their thread is created.
+        assertCodexInputBudget({
+          prompt: buildStructuredJsonPrompt(args.prompt, args.structuredJsonProtocol),
+          role: 'coder',
+          sessionHandle: args.resumeHandle ?? null,
+        });
         const createThread = this.options.createThread ?? createCodexThread;
         thread = createThread({
           cwd: args.cwd,
@@ -837,6 +879,14 @@ class OpenAICodexCoderAdapter implements CoderAdapter {
             };
           },
           runRepair: async (prompt) => {
+            // A generated repair prompt embeds the invalid payload and the
+            // original response, so it can exceed the budget even when the
+            // initial prompt fit; preflight it before creating its thread.
+            assertCodexInputBudget({
+              prompt,
+              role: 'coder',
+              sessionHandle: thread!.id ?? args.resumeHandle ?? null,
+            });
             // Repair runs on a fresh prompt-only thread whose prompt forbids
             // tool use entirely, so nothing in the repair flow needs write
             // access; the read-only sandbox enforces that mechanically
@@ -943,6 +993,21 @@ class OpenAICodexStructuredAdvisorAdapter implements StructuredAdvisorAdapter {
     while (true) {
       let thread: Thread | null = null;
       try {
+        // Preflight the exact text the initial SDK turn will send: the
+        // protocol-wrapped prompt on the local-JSON path
+        // (buildStructuredJsonPrompt is the same pure builder
+        // runStructuredJsonProtocol applies to the same inputs below, so the
+        // checked text is byte-identical to the sent text), the bare prompt on
+        // the provider-native path. Repair prompts are checked in runRepair
+        // before their thread is created.
+        assertCodexInputBudget({
+          prompt:
+            args.structuredJsonProtocol?.protocol === 'neal-json-block-v1'
+              ? buildStructuredJsonPrompt(args.prompt, args.structuredJsonProtocol)
+              : args.prompt,
+          role: 'structured-advisor',
+          sessionHandle: args.resumeHandle ?? null,
+        });
         thread = createThread({
           cwd: args.cwd,
           sessionHandle: args.resumeHandle,
@@ -982,6 +1047,14 @@ class OpenAICodexStructuredAdvisorAdapter implements StructuredAdvisorAdapter {
               };
             },
             runRepair: async (prompt) => {
+              // A generated repair prompt embeds the invalid payload and the
+              // original response, so it can exceed the budget even when the
+              // initial prompt fit; preflight it before creating its thread.
+              assertCodexInputBudget({
+                prompt,
+                role: 'structured-advisor',
+                sessionHandle: thread!.id ?? args.resumeHandle ?? null,
+              });
               const repairThread = createThread({
                 cwd: args.cwd,
                 model: this.options.model ?? undefined,
@@ -1112,6 +1185,7 @@ export const openAICodexProviderDefinition = {
         write: true,
         shell: true,
       },
+      maxInputChars: OPENAI_CODEX_MAX_INPUT_CHARS,
       supportsSessionResume: true,
       supportsModelOverride: true,
       supportsStructuredOutput: true,
@@ -1128,6 +1202,7 @@ export const openAICodexProviderDefinition = {
         write: false,
         shell: false,
       },
+      maxInputChars: OPENAI_CODEX_MAX_INPUT_CHARS,
       supportsSessionResume: true,
       supportsModelOverride: true,
       supportsStructuredOutput: true,

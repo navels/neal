@@ -24,6 +24,7 @@ import { listRuns } from './run-registry.js';
 import { formatPublicRunStatus, getRunDisplayStatus, type EffectiveRunStatus, type RunDisplayStatus } from './run-status.js';
 import { getRunStatePath, loadState } from './state.js';
 import { getDerivedPlanView } from './state-views.js';
+import { largestSectionNameFromInputTooLargeMessage } from './providers/input-budget.js';
 import type { NealProviderErrorKind, ProviderRole } from './providers/types.js';
 import type { SquashResultArtifact } from './squash.js';
 import type { OrchestrationState, PlanReviewFindingClass, ResidualReviewDebtItem } from './types.js';
@@ -299,6 +300,7 @@ const PROVIDER_ERROR_KINDS = new Set<NealProviderErrorKind>([
   'permission_denied',
   'session_unavailable',
   'content_refused',
+  'input_too_large',
   'provider_failed',
   'unknown',
 ]);
@@ -384,16 +386,21 @@ export async function buildStatusSnapshot(args: {
   const health = classifyHealth(state, eventSummary, nowMs, finalCompletionStaleness);
   const publicStatus = formatPublicStatusForDisplayStatus(displayStatus, health);
   const publicPhase = formatPublicPhase(state.phase);
+  const providerError = summarizeProviderError(tail.events);
   const nextAction = formatNextAction({
     manualGate,
     resumeDecision,
     finalCompletionStaleness,
     runId,
     blockedGuidance,
+    // The Next Action must reflect the run's current failure, not history: the
+    // provider-error summary stays on the snapshot as historical information,
+    // but it only drives the Next Action while no later provider turn or phase
+    // has completed successfully after it.
+    providerError: providerError && isProviderErrorActive(tail.events) ? providerError : null,
   });
   const commits = summarizeCommits(state);
   const squash = await summarizeSquashArtifact(state.runDir);
-  const providerError = summarizeProviderError(tail.events);
   const build = await summarizeBuild(state);
   const patch = await summarizePatch(state, displayStatus, squash);
 
@@ -736,7 +743,7 @@ function formatLockSummary(lock: NealLockStatusSummary) {
 function formatNextAction(
   snapshot: Pick<
     NealStatusSnapshot,
-    'manualGate' | 'resumeDecision' | 'finalCompletionStaleness' | 'runId' | 'blockedGuidance'
+    'manualGate' | 'resumeDecision' | 'finalCompletionStaleness' | 'runId' | 'blockedGuidance' | 'providerError'
   >,
 ) {
   if (snapshot.manualGate) {
@@ -744,6 +751,26 @@ function formatNextAction(
   }
   if (snapshot.finalCompletionStaleness.stale && snapshot.resumeDecision.kind === 'continue') {
     return `Final completion appears stale after reviewer output. Inspect artifacts and recover explicitly after confirming the branch state: neal status --run ${snapshot.runId}`;
+  }
+  // An input_too_large failure keeps the resume decision at `continue` on
+  // purpose: the adapter-boundary preflight re-measures the actual rebuilt
+  // prompt against the provider budget on every attempt, so resume is always
+  // executable and an unchanged oversized prompt fails fast before any
+  // provider call. This branch only redirects the operator to shrink the named
+  // input before that resume. Every lever it names works on an existing run:
+  // operator guidance files are re-read at every prompt build, and upgrading
+  // neal applies the current prompt bounds on resume. Per-run provider
+  // rebinding does not exist, so a prompt that cannot fit needs a new run on a
+  // provider with a larger or no declared limit.
+  if (snapshot.providerError?.kind === 'input_too_large' && snapshot.resumeDecision.kind === 'continue') {
+    const largestSection = largestSectionNameFromInputTooLargeMessage(snapshot.providerError.message);
+    const namedInput = largestSection ? `the "${largestSection}" prompt section` : 'the oversized prompt input';
+    return (
+      `The last attempt failed because the prompt exceeded the provider's input limit. ` +
+      `Shrink ${namedInput} first (trim operator guidance files, or upgrade neal so the current prompt bounds apply), ` +
+      `then resume this run: ${snapshot.resumeDecision.resumeCommand}. ` +
+      `If the prompt cannot fit under the limit, start a new run with a provider that has a larger or no input limit.`
+    );
   }
   if (snapshot.resumeDecision.kind === 'needs_message' && snapshot.blockedGuidance) {
     const firstOption = snapshot.blockedGuidance.options[0]?.command;
@@ -775,6 +802,9 @@ export function formatStatusNextActionForState(state: OrchestrationState) {
     },
     runId,
     blockedGuidance: buildBlockedGuidance({ state, runId }),
+    // This state-only path has no events access, so it cannot see provider
+    // errors and renders the plain decision-based action.
+    providerError: null,
   });
 }
 
@@ -1511,6 +1541,31 @@ function parseSquashArtifact(value: unknown): Pick<
     originalBaseCommit,
     originalFinalCommit,
   };
+}
+
+// Events that prove the run progressed past a provider failure: a provider
+// turn or structured round finished, or a whole phase completed. A provider
+// error followed by any of these is resolved history, not the active failure.
+const PROVIDER_ERROR_RESOLUTION_EVENT_TYPES = new Set([
+  'provider.turn_completed',
+  'provider.structured_output_received',
+  'phase.complete',
+]);
+
+// True while the latest provider_error event has no later resolution event
+// after it in the tail, so conditional guidance keyed off the error (the
+// input_too_large Next Action) stops as soon as a retry or resume succeeds.
+function isProviderErrorActive(events: ParsedEvent[]): boolean {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const type = events[index].type;
+    if (type === 'provider.provider_error') {
+      return true;
+    }
+    if (PROVIDER_ERROR_RESOLUTION_EVENT_TYPES.has(type)) {
+      return false;
+    }
+  }
+  return false;
 }
 
 function summarizeProviderError(events: ParsedEvent[]): NealProviderErrorStatusSummary | null {

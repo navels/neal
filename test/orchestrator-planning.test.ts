@@ -70,6 +70,189 @@ test('runPlanningResponsePhase clears consumed plan-review guidance after succes
   }
 });
 
+test('plan response rounds batch more than 50 blocking findings without spending plan-review rounds', async () => {
+  const findings = Array.from({ length: 120 }, (_, index) => ({
+    id: `R1-F${String(index + 1).padStart(4, '0')}`,
+    canonicalId: `C${String(index + 1).padStart(4, '0')}`,
+    round: 1,
+    source: 'reviewer' as const,
+    severity: 'blocking' as const,
+    files: ['/tmp/PLAN.md'],
+    claim: `Plan gap ${String(index + 1).padStart(4, '0')}.`,
+    requiredAction: `Close plan gap ${String(index + 1).padStart(4, '0')}.`,
+    status: 'open' as const,
+    roundSummary: 'Many plan gaps remain.',
+    coderDisposition: null,
+    coderCommit: null,
+  }));
+  const { statePath, state } = await createPlanReviewGuidanceResponseFixture({
+    pendingPlanReviewGuidance: null,
+    findings,
+  });
+
+  // Each mock response dispositions exactly the batch that selection presents.
+  let batchIndex = 0;
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt(args: CoderRunPromptArgs) {
+          throw new Error(`unexpected text plan-response prompt: ${args.prompt}`);
+        },
+        async runStructuredPrompt<TStructured>(_args: CoderStructuredPromptArgs) {
+          const batch = findings.slice(batchIndex * 50, batchIndex * 50 + 50);
+          batchIndex += 1;
+          return {
+            sessionHandle: `planner-batch-${batchIndex}`,
+            structured: {
+              outcome: 'responded',
+              summary: `Handled batch ${batchIndex}.`,
+              blocker: '',
+              responses: batch.map((finding) => ({
+                id: finding.id,
+                decision: 'fixed',
+                summary: 'Addressed in the revised plan.',
+              })),
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    let currentState = state;
+    let iterations = 0;
+    while (iterations < 5) {
+      currentState = await runPlanningResponsePhase(currentState, statePath, 'coder_plan_response');
+      iterations += 1;
+      if (currentState.phase !== 'coder_plan_response') {
+        break;
+      }
+    }
+
+    // Three batches (50 + 50 + 20) clear the backlog, then review runs once.
+    assert.equal(iterations, 3);
+    assert.equal(currentState.phase, 'reviewer_plan');
+    assert.equal(
+      currentState.findings.filter((finding) => finding.severity === 'blocking' && finding.status === 'open').length,
+      0,
+    );
+    assert.equal(currentState.findings.filter((finding) => finding.status === 'fixed').length, 120);
+    // Batching consumed no plan-review rounds.
+    assert.equal(currentState.rounds.length, state.rounds.length);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('a partial optional plan response is rejected and overflow batches are presented before the plan finishes', async () => {
+  const findings = Array.from({ length: 120 }, (_, index) => ({
+    id: `R1-F${String(index + 1).padStart(4, '0')}`,
+    canonicalId: `C${String(index + 1).padStart(4, '0')}`,
+    round: 1,
+    source: 'reviewer' as const,
+    severity: 'non_blocking' as const,
+    files: ['/tmp/PLAN.md'],
+    claim: `Optional plan polish ${String(index + 1).padStart(4, '0')}.`,
+    requiredAction: `Consider polish ${String(index + 1).padStart(4, '0')}.`,
+    status: 'open' as const,
+    roundSummary: 'Many optional polish items remain.',
+    coderDisposition: null,
+    coderCommit: null,
+  }));
+  const { statePath, state } = await createPlanReviewGuidanceResponseFixture({
+    phase: 'coder_plan_optional_response',
+    pendingPlanReviewGuidance: null,
+    findings,
+  });
+
+  function makeResponses(ids: string[]) {
+    return ids.map((id) => ({ id, decision: 'fixed', summary: 'Polished.' }));
+  }
+
+  // First response is partial: 10 of the 50 presented findings. It must be
+  // rejected instead of accepting the plan over the unresolved batch and the
+  // 70 findings that were never presented.
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt(args: CoderRunPromptArgs) {
+          throw new Error(`unexpected text plan-response prompt: ${args.prompt}`);
+        },
+        async runStructuredPrompt<TStructured>(_args: CoderStructuredPromptArgs) {
+          return {
+            sessionHandle: 'planner-partial',
+            structured: {
+              outcome: 'responded',
+              summary: 'Handled a few.',
+              blocker: '',
+              responses: makeResponses(findings.slice(0, 10).map((finding) => finding.id)),
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => runPlanningResponsePhase(state, statePath, 'coder_plan_optional_response'),
+      /did not disposition every presented finding: R1-F0011/,
+    );
+    // Nothing was persisted: the phase and findings are unchanged, so the run
+    // cannot finish off a partial response.
+    const persisted = await loadState(statePath);
+    assert.equal(persisted.phase, 'coder_plan_optional_response');
+    assert.equal(persisted.findings.filter((finding) => finding.status === 'open').length, 120);
+
+    // Full per-batch responses then clear every overflow batch before the
+    // plan finishes.
+    let batchIndex = 0;
+    setProviderCapabilitiesOverrideForTesting('openai-codex', {
+      createCoderAdapter() {
+        return {
+          async runPrompt(args: CoderRunPromptArgs) {
+            throw new Error(`unexpected text plan-response prompt: ${args.prompt}`);
+          },
+          async runStructuredPrompt<TStructured>(_args: CoderStructuredPromptArgs) {
+            const batch = findings.slice(batchIndex * 50, batchIndex * 50 + 50);
+            batchIndex += 1;
+            return {
+              sessionHandle: `planner-batch-${batchIndex}`,
+              structured: {
+                outcome: 'responded',
+                summary: `Handled batch ${batchIndex}.`,
+                blocker: '',
+                responses: makeResponses(batch.map((finding) => finding.id)),
+              } as TStructured,
+            };
+          },
+        };
+      },
+    });
+
+    let currentState = persisted;
+    let iterations = 0;
+    while (iterations < 5) {
+      currentState = await runPlanningResponsePhase(currentState, statePath, 'coder_plan_optional_response');
+      iterations += 1;
+      if (currentState.phase !== 'coder_plan_optional_response') {
+        break;
+      }
+    }
+
+    // Three batches (50 + 50 + 20) resolve every finding; only then does the
+    // plan finish.
+    assert.equal(iterations, 3);
+    assert.equal(currentState.phase, 'done');
+    assert.equal(currentState.status, 'done');
+    assert.equal(currentState.findings.filter((finding) => finding.status === 'open').length, 0);
+    assert.equal(currentState.findings.filter((finding) => finding.status === 'fixed').length, 120);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
 test('runPlanningResponsePhase blocks when planner dirties non-plan files', async () => {
   const { cwd, statePath, state } = await createPlanReviewGuidanceResponseFixture();
 

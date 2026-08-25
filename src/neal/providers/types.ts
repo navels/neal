@@ -20,6 +20,13 @@ export type ProviderRoleCapabilities = {
   // meaningful for the `read-only` review doctrine; irrelevant for
   // `tool-access` (shell `git diff`).
   providesRangeDiffTool?: boolean;
+  // Hard per-turn input limit in characters, when the provider enforces one
+  // (Codex's app-server rejects any single turn over 1,048,576 chars with
+  // `input_too_large`). An adapter whose role declares this preflights every
+  // assembled prompt at its turn/round entry points and fails fast with a
+  // normalized `input_too_large` error before any SDK call (see
+  // input-budget.ts). Undefined means no known hard limit and no preflight.
+  maxInputChars?: number;
   supportsSessionResume: boolean;
   supportsModelOverride: boolean;
   supportsStructuredOutput: boolean;
@@ -95,6 +102,7 @@ export type NealProviderErrorKind =
   | 'permission_denied'
   | 'session_unavailable'
   | 'content_refused'
+  | 'input_too_large'
   | 'provider_failed'
   | 'unknown';
 

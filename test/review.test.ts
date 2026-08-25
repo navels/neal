@@ -1404,19 +1404,14 @@ test('final completion packet summarizes whole-plan completion context', async (
   assert.match(packet.completedScopeSummary, /Scope 3: accepted \(AUTONOMY_DONE\)/);
   assert.match(packet.terminalChangedFilesSummary, /src\/c\.ts/);
   assert.match(packet.planChangedFilesSummary, /src\/a\.ts/);
-  assert.match(packet.verificationSummary, /pnpm typecheck/);
-  assert.match(packet.verificationSummary, /passed \(exit 0, git final-3/);
-  assert.deepEqual(
-    packet.verificationCommandResults.map((result) => ({
-      command: result.command,
-      exitCode: result.exitCode,
-      gitHead: result.gitHead,
-    })),
-    [
-      { command: 'pnpm typecheck', exitCode: 0, gitHead: 'final-3' },
-      { command: 'pnpm exec tsx --test test/review.test.ts', exitCode: 0, gitHead: 'final-3' },
-    ],
-  );
+  assert.deepEqual(packet.verificationTally, {
+    totalRuns: 2,
+    distinctCommands: 2,
+    passed: 2,
+    failed: 0,
+    unknown: 0,
+    recentFailures: [],
+  });
   assert.match(packet.scopeAccountingSummary, /3 top-level parent\/objective record/);
   assert.deepEqual(packet.lastNonEmptyImplementationScope, {
     number: '3',
@@ -1666,7 +1661,14 @@ test('final completion packet models a verification-only terminal scope explicit
   assert.equal(packet.verificationOnlyCompletion, true);
   assert.equal(packet.terminalChangedFilesSummary, 'none');
   assert.deepEqual(packet.planChangedFiles, ['src/existing.ts']);
-  assert.match(packet.verificationSummary, /pnpm typecheck/);
+  assert.deepEqual(packet.verificationTally, {
+    totalRuns: 1,
+    distinctCommands: 1,
+    passed: 0,
+    failed: 0,
+    unknown: 1,
+    recentFailures: [],
+  });
   assert.deepEqual(packet.lastNonEmptyImplementationScope, {
     number: '3',
     finalCommit: 'final-3',
@@ -1674,6 +1676,126 @@ test('final completion packet models a verification-only terminal scope explicit
     changedFiles: ['src/existing.ts'],
     archivedReviewPath: '/tmp/review-3.md',
   });
+});
+
+test('final completion packet bounds per-scope changed-file lists in the completed-scope summary', async () => {
+  const manyFiles = Array.from({ length: 30 }, (_, index) => `src/wide-${String(index).padStart(2, '0')}.ts`);
+  const { state } = await createState({
+    currentScopeNumber: 2,
+    executionShape: 'multi_scope',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-1',
+        finalCommit: 'final-1',
+        commitSubject: 'implement scope 1',
+        changedFiles: manyFiles,
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-1.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  await writeFile(
+    join(state.runDir, 'events.ndjson'),
+    `${JSON.stringify({ type: 'coder.command_execution', data: { command: 'pnpm typecheck' } })}\n`,
+    'utf8',
+  );
+
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: {
+      finalCommit: 'final-2',
+      commitSubject: 'finish scope 2',
+      changedFiles: ['src/b.ts'],
+      archivedReviewPath: '/tmp/review-2.md',
+      marker: 'AUTONOMY_DONE',
+    },
+  });
+
+  assert.match(packet.completedScopeSummary, /30 file\(s\): /);
+  assert.match(packet.completedScopeSummary, /src\/wide-19\.ts/);
+  assert.match(packet.completedScopeSummary, /\(\+10 more\)/);
+  assert.doesNotMatch(packet.completedScopeSummary, /src\/wide-20\.ts/);
+  // The non-prompt aggregate keeps every path.
+  assert.equal(packet.planChangedFiles.length, 31);
+});
+
+test('final completion prompts stay bounded regardless of verification command count', async () => {
+  const terminalScope = {
+    finalCommit: 'final-1',
+    commitSubject: 'finish scope 1',
+    changedFiles: ['src/a.ts'],
+    archivedReviewPath: '/tmp/review-1.md',
+    marker: 'AUTONOMY_DONE' as const,
+  };
+  const summary = {
+    planGoalSatisfied: true,
+    whatChangedOverall: 'Implemented the plan.',
+    verificationSummary: 'Ran the suite.',
+    remainingKnownGaps: [],
+  };
+
+  async function buildPromptsForCommandCount(commandCount: number) {
+    const { state } = await createState({ currentScopeNumber: 1, executionShape: 'one_shot' });
+    const events = Array.from({ length: commandCount }, (_, index) =>
+      JSON.stringify({
+        ts: '2026-04-29T00:00:00.000Z',
+        type: 'coder.command_execution',
+        data: {
+          itemId: `cmd-${index}`,
+          command: `pnpm test group-${String(index).padStart(4, '0')}`,
+          status: 'completed',
+          exitCode: 1,
+          cwd: state.cwd,
+          gitHead: 'final-1',
+          outputLength: 100,
+          provider: 'openai-codex',
+        },
+      }),
+    );
+    await writeFile(join(state.runDir, 'events.ndjson'), `${events.join('\n')}\n`, 'utf8');
+
+    const packet = await buildFinalCompletionPacket({ state, terminalScope });
+    return {
+      packet,
+      summaryPrompt: buildFinalCompletionSummaryPrompt({ planDoc: '/tmp/PLAN.md', packet }),
+      reviewerPrompt: buildFinalCompletionReviewerPrompt({
+        planDoc: '/tmp/PLAN.md',
+        packet,
+        summary,
+        scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+      }),
+    };
+  }
+
+  const small = await buildPromptsForCommandCount(200);
+  const large = await buildPromptsForCommandCount(400);
+
+  assert.equal(small.packet.verificationTally.totalRuns, 200);
+  assert.equal(small.packet.verificationTally.distinctCommands, 200);
+  assert.equal(small.packet.verificationTally.failed, 200);
+  assert.equal(small.packet.verificationTally.recentFailures.length, 10);
+  assert.deepEqual(small.packet.verificationTally.recentFailures[9], {
+    command: 'pnpm test group-0199',
+    exitCode: 1,
+  });
+  assert.equal(large.packet.verificationTally.recentFailures.length, 10);
+
+  // Command names and every tally count have the same character width in the
+  // 200- and 400-command runs, so a bounded prompt renders at exactly the same
+  // length for both; any per-command scaling would show up as a length delta.
+  assert.equal(large.summaryPrompt.length, small.summaryPrompt.length);
+  assert.equal(large.reviewerPrompt.length, small.reviewerPrompt.length);
+
+  for (const prompt of [small.summaryPrompt, small.reviewerPrompt]) {
+    assert.match(prompt, /complete per-command record is in the run directory's events\.ndjson/);
+  }
 });
 
 test('final completion summary prompt requests compact whole-plan completion JSON', async () => {
@@ -1728,7 +1850,8 @@ test('final completion summary prompt requests compact whole-plan completion JSO
   assert.match(prompt, /completedScopeSummary/);
   assert.match(prompt, /acceptedScopeRecordCount/);
   assert.match(prompt, /scopeAccountingSummary/);
-  assert.match(prompt, /verificationCommandResults/);
+  assert.match(prompt, /verificationTally/);
+  assert.match(prompt, /complete per-command record is in the run directory's events\.ndjson/);
   assert.match(prompt, /regressions, quality concerns, testing gaps/);
   // The evidence-audit clause (issue #10) renders exactly once on the summary
   // surface, voice-matched so it does not claim verification that did not run.
@@ -1829,7 +1952,8 @@ test('final completion reviewer prompt requires a structured whole-plan verdict'
   assert.match(prompt, /completion-review evidence gap/);
   assert.match(prompt, /Do not treat prior per-scope acceptance as sufficient evidence/);
   assert.match(prompt, /scopeAccountingSummary/);
-  assert.match(prompt, /verificationCommandResults/);
+  assert.match(prompt, /verificationTally/);
+  assert.match(prompt, /complete per-command record is in the run directory's events\.ndjson/);
   assert.match(prompt, /accept_complete/);
   assert.match(prompt, /continue_execution/);
   assert.match(prompt, /block_for_operator/);

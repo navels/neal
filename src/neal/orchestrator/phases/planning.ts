@@ -19,6 +19,7 @@ import {
 } from '../../adjudicator/planning.js';
 import { assertAdjudicationTransitionSignal } from '../../adjudicator/specs.js';
 import { getPlanReviewDebtRoundThreshold, getReviewStuckWindow } from '../../config.js';
+import { OPEN_FINDINGS_PROMPT_ITEM_LIMIT } from '../../context/inline-review-context.js';
 import { toPlanReviewDebt } from '../../review-debt.js';
 import { writeDiagnostic } from '../../diagnostic.js';
 import { getWorktreeStatus } from '../../git.js';
@@ -521,7 +522,14 @@ export async function runPlanningResponsePhase(
       logger,
     );
   }
-  const openFindings = state.findings.filter(mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding);
+  // The bounded finding set for this response round: the prompt and the
+  // disposition eligibility below consume this same selection. Findings
+  // beyond the per-round limit stay open; when the presented set is fully
+  // dispositioned, this phase stays active and presents the next batch (see
+  // hasNextResponseBatch below), so the cap never strands a finding.
+  const openFindings = state.findings
+    .filter(mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding)
+    .slice(0, OPEN_FINDINGS_PROMPT_ITEM_LIMIT);
   // Recorded operator guidance must reach the planner. If a prior blocked response
   // closed every finding, the guidance would otherwise be silently discarded here
   // (finalizePlanReviewResponseWithoutOpenFindings clears pendingPlanReviewGuidance
@@ -584,6 +592,36 @@ export async function runPlanningResponsePhase(
   // and matches the replay harness's open-blocking eligibility guard.
   const openFindingIds = new Set(openFindings.map((finding) => finding.id));
 
+  // Optional responses must disposition every presented finding exactly once,
+  // matching execute optional response coverage: a partial optional response
+  // would otherwise land acceptance below while presented findings — and every
+  // overflow batch beyond the per-round presentation limit — were never
+  // resolved. Out-of-set ids keep their documented no-op tolerance.
+  if (mode === 'optional' && codex.payload.outcome === 'responded') {
+    const seenPresentedIds = new Set<string>();
+    const duplicateIds = new Set<string>();
+    for (const response of codex.payload.responses) {
+      if (!openFindingIds.has(response.id)) {
+        continue;
+      }
+      if (seenPresentedIds.has(response.id)) {
+        duplicateIds.add(response.id);
+      }
+      seenPresentedIds.add(response.id);
+    }
+    if (duplicateIds.size > 0) {
+      throw new Error(
+        `Planner optional response returned duplicate finding dispositions: ${[...duplicateIds].join(', ')}`,
+      );
+    }
+    const missingIds = openFindings.map((finding) => finding.id).filter((id) => !seenPresentedIds.has(id));
+    if (missingIds.length > 0) {
+      throw new Error(
+        `Planner optional response did not disposition every presented finding: ${missingIds.join(', ')}`,
+      );
+    }
+  }
+
   const findings = state.findings.map((finding) => {
     if (!openFindingIds.has(finding.id)) {
       return finding;
@@ -601,6 +639,17 @@ export async function runPlanningResponsePhase(
     };
   });
 
+  // Response rounds batch: when the presented set was fully dispositioned but
+  // open findings of this round's kind remain (they were beyond the per-round
+  // presentation limit), stay in this response phase so the next batch is
+  // presented immediately instead of spending a plan-review round per batch.
+  // The full-disposition requirement guarantees the backlog strictly shrinks;
+  // a partially-skipped presented set falls through to the reviewer so the
+  // existing convergence machinery judges it.
+  const openSelector = mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding;
+  const presentedStillOpen = findings.some((finding) => openFindingIds.has(finding.id) && openSelector(finding));
+  const hasNextResponseBatch = !presentedStillOpen && findings.some(openSelector);
+
   const nextState = await saveState(statePath, {
     ...state,
     plannerSessionHandle: codex.sessionHandle,
@@ -613,19 +662,21 @@ export async function runPlanningResponsePhase(
     phase:
       dirtyWorktreeBlocker || codex.payload.outcome === 'blocked'
         ? 'blocked'
-        : mode === 'optional'
-          ? derivedPlanReview
-            ? 'awaiting_derived_plan_execution'
-            : 'done'
-          : 'reviewer_plan',
+        : hasNextResponseBatch
+          ? phase
+          : mode === 'optional'
+            ? derivedPlanReview
+              ? 'awaiting_derived_plan_execution'
+              : 'done'
+            : 'reviewer_plan',
     status:
       dirtyWorktreeBlocker || codex.payload.outcome === 'blocked'
         ? 'blocked'
-        : mode === 'optional' && !derivedPlanReview
+        : mode === 'optional' && !derivedPlanReview && !hasNextResponseBatch
           ? 'done'
           : 'running',
     derivedPlanStatus:
-      mode === 'optional' && codex.payload.outcome !== 'blocked' && derivedPlanReview
+      mode === 'optional' && codex.payload.outcome !== 'blocked' && derivedPlanReview && !hasNextResponseBatch
         ? 'accepted'
         : state.derivedPlanStatus,
     blockedFromPhase: dirtyWorktreeBlocker || codex.payload.outcome === 'blocked' ? phase : null,

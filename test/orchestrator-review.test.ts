@@ -6,7 +6,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runExecuteFinalizationPhase } from '../src/neal/orchestrator.js';
-import { getExecuteReviewBlockReason, getOpenBlockingCanonicalSet, hasRepeatedUnresolvedBlockingCanonicals, resolveExecuteAdjudicationContext, resolveExecuteReviewDisposition, synthesizeExecuteResponseState, synthesizeExecuteReviewerState } from '../src/neal/adjudicator/execute.js';
+import { getExecuteResponseOpenFindings, getExecuteReviewBlockReason, getOpenBlockingCanonicalSet, hasRepeatedUnresolvedBlockingCanonicals, resolveExecuteAdjudicationContext, resolveExecuteReviewDisposition, synthesizeExecuteResponseState, synthesizeExecuteReviewerState } from '../src/neal/adjudicator/execute.js';
+import { buildCoderResponsePrompt } from '../src/neal/agents.js';
+import { OPEN_FINDINGS_PROMPT_ITEM_LIMIT } from '../src/neal/context/inline-review-context.js';
 import { assertAdjudicationTransitionSignal, getAdjudicationSpec } from '../src/neal/adjudicator/specs.js';
 import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
 import { createRunLogger } from '../src/neal/logger.js';
@@ -515,6 +517,39 @@ test('recent accepted scope summary surfaces repeated hotspot churn for the pare
   assert.match(summary, /Scope 5\.2/);
   assert.match(summary, /Scope 5\.3/);
   assert.match(summary, /Touched-file concentration: src\/shared\.ts \(2\/2 scopes\), src\/b\.ts \(1\/2 scopes\), src\/c\.ts \(1\/2 scopes\)/);
+});
+
+test('recent accepted scope summary bounds per-scope and concentration changed-file lists', () => {
+  const manyFiles = Array.from({ length: 30 }, (_, index) => `src/wide-${String(index).padStart(2, '0')}.ts`);
+  const summary = renderRecentAcceptedScopesSummary(
+    {
+      completedScopes: [
+        {
+          number: '1',
+          marker: 'AUTONOMY_SCOPE_DONE',
+          result: 'accepted',
+          baseCommit: 'base-1',
+          finalCommit: 'final-1',
+          commitSubject: 'scope 1',
+          changedFiles: manyFiles,
+          reviewRounds: 1,
+          findings: 0,
+          archivedReviewPath: '/tmp/review-1.md',
+          blocker: null,
+          derivedFromParentScope: null,
+          replacedByDerivedPlanPath: null,
+        },
+      ],
+    },
+    '1',
+  );
+
+  assert.match(summary, /src\/wide-19\.ts/);
+  assert.doesNotMatch(summary, /src\/wide-20\.ts/);
+  // Both the per-scope changedFiles line and the touched-file concentration
+  // line collapse the overflow into an explicit marker.
+  assert.match(summary, /changedFiles: .*\(\+10 more\)/);
+  assert.match(summary, /Touched-file concentration: .*\(\+10 more\)/);
 });
 
 test('execute review disposition permits finalization for accept and safe parent advancement only', () => {
@@ -1471,6 +1506,172 @@ test('execute reviewer synthesis does not normalize top-level advance_parent whe
     assert.match(reviewerState.meaningfulProgressVerdict.rationale, scenario.expectedPrecondition);
     assert.notEqual(reviewerState.disposition.phase, 'execute_finalization');
   }
+});
+
+test('execute response rounds batch high-cardinality open findings through one shared bounded set', async () => {
+  function makeOpenBlockingFindings(count: number): ReviewFinding[] {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `R1-F${String(index + 1).padStart(4, '0')}`,
+      canonicalId: `C${String(index + 1).padStart(4, '0')}`,
+      round: 1,
+      source: 'reviewer' as const,
+      severity: 'blocking' as const,
+      files: Array.from({ length: 30 }, (_, fileIndex) => `src/wide-${String(fileIndex).padStart(2, '0')}.ts`),
+      claim: `Claim ${String(index + 1).padStart(4, '0')} ${'c'.repeat(1_000)}`,
+      evidence: 'Deterministic evidence.',
+      requiredAction: `Action ${String(index + 1).padStart(4, '0')}`,
+      status: 'open' as const,
+      roundSummary: 'Shared round summary.',
+      coderDisposition: null,
+      coderCommit: null,
+    }));
+  }
+
+  // maxRounds 2: a design that spent one reviewer round per 50-finding batch
+  // could never clear this 120-blocker backlog before the round cap.
+  const { state } = await createResumeFixture({
+    phase: 'coder_response',
+    findings: makeOpenBlockingFindings(120),
+    maxRounds: 2,
+  });
+
+  // Prompt selection: the first OPEN_FINDINGS_PROMPT_ITEM_LIMIT open blocking
+  // findings, in state order.
+  const presented = getExecuteResponseOpenFindings(state);
+  assert.equal(presented.length, OPEN_FINDINGS_PROMPT_ITEM_LIMIT);
+  assert.equal(presented[0]?.id, 'R1-F0001');
+  assert.equal(presented.at(-1)?.id, 'R1-F0050');
+
+  // Prompt construction renders exactly the presented set (with the nested
+  // files lists bounded) and is identical however large the backlog grows.
+  const prompt = buildCoderResponsePrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: 'progress',
+    verificationHint: 'hint',
+    openFindings: presented,
+  });
+  assert.ok(prompt.includes('"R1-F0050"'));
+  assert.ok(!prompt.includes('"R1-F0051"'));
+  assert.match(prompt, /\(\+10 more\)/);
+
+  const { state: tenXState } = await createResumeFixture({
+    phase: 'coder_response',
+    findings: makeOpenBlockingFindings(1_200),
+  });
+  const tenXPrompt = buildCoderResponsePrompt({
+    planDoc: '/tmp/PLAN.md',
+    progressText: 'progress',
+    verificationHint: 'hint',
+    openFindings: getExecuteResponseOpenFindings(tenXState),
+  });
+  assert.equal(tenXPrompt, prompt);
+
+  // Batch loop: each fully-dispositioned batch keeps the response phase
+  // active for the next batch; no reviewer round is spent between batches, so
+  // the backlog clears without touching the round cap. The last batch with no
+  // open blockers left routes to the reviewer.
+  let workingFindings = state.findings;
+  const batchPhases: string[] = [];
+  const batchFirstIds: (string | undefined)[] = [];
+  for (let batch = 0; batch < 3; batch += 1) {
+    const batchState = { ...state, findings: workingFindings };
+    const presentedBatch = getExecuteResponseOpenFindings(batchState);
+    batchFirstIds.push(presentedBatch[0]?.id);
+    const synthesized = synthesizeExecuteResponseState({
+      state: batchState,
+      createdCommits: ['fix123'],
+      response: {
+        sessionHandle: 'coder-session',
+        payload: {
+          outcome: 'responded',
+          summary: 'Handled the presented batch.',
+          blocker: '',
+          derivedPlan: '',
+          responses: presentedBatch.map((finding) => ({
+            id: finding.id,
+            decision: 'fixed' as const,
+            summary: 'Addressed.',
+          })),
+        },
+      },
+    });
+    batchPhases.push(synthesized.nextPhase);
+    workingFindings = synthesized.findings;
+  }
+
+  assert.deepEqual(batchFirstIds, ['R1-F0001', 'R1-F0051', 'R1-F0101']);
+  assert.deepEqual(batchPhases, ['coder_response', 'coder_response', 'reviewer_scope']);
+  // Every blocking finding was dispositioned before the review transition.
+  assert.equal(workingFindings.filter((finding) => finding.status === 'open').length, 0);
+  assert.equal(workingFindings.filter((finding) => finding.status === 'fixed').length, 120);
+  // No reviewer rounds were consumed by the batching.
+  assert.equal(state.rounds.length, 0);
+
+  // A disposition for a finding that was not presented this round is rejected.
+  assert.throws(
+    () =>
+      synthesizeExecuteResponseState({
+        state,
+        createdCommits: [],
+        response: {
+          sessionHandle: 'coder-session',
+          payload: {
+            outcome: 'responded',
+            summary: 'Wrong batch.',
+            blocker: '',
+            derivedPlan: '',
+            responses: [{ id: 'R1-F0051', decision: 'fixed' as const, summary: 'Not presented.' }],
+          },
+        },
+      }),
+    /outside the presented open set: R1-F0051/,
+  );
+});
+
+test('an empty reviewer round can never accept over an unpresented open blocking finding', async () => {
+  const { state } = await createResumeFixture({
+    phase: 'reviewer_scope',
+    findings: [
+      {
+        id: 'R1-F0051',
+        canonicalId: 'C0051',
+        round: 1,
+        source: 'reviewer',
+        severity: 'blocking',
+        files: ['src/neal/example.ts'],
+        claim: 'A blocker beyond the presentation limit is still open.',
+        evidence: 'It was never presented in a response round.',
+        requiredAction: 'Disposition it before acceptance.',
+        status: 'open',
+        roundSummary: 'Backlog remains.',
+        coderDisposition: null,
+        coderCommit: null,
+      },
+    ],
+    maxRounds: 20,
+  });
+  const context = resolveExecuteAdjudicationContext(state);
+
+  const reviewerState = synthesizeExecuteReviewerState({
+    state,
+    context,
+    headCommit: 'head123',
+    changedFiles: ['src/neal/example.ts'],
+    reviewerResult: {
+      sessionHandle: 'reviewer-session',
+      summary: 'No new findings this round.',
+      findings: [],
+      meaningfulProgress: {
+        action: 'accept',
+        rationale: 'The scope materially advances the parent objective.',
+      },
+    },
+  });
+
+  // The merged open blocker forces another response round; finalization is
+  // impossible while any open blocking finding remains.
+  assert.notEqual(reviewerState.disposition.phase, 'execute_finalization');
+  assert.equal(reviewerState.disposition.phase, 'coder_response');
 });
 
 test('execute optional response must disposition every open non-blocking finding before execute finalization', async () => {

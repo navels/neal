@@ -1,6 +1,8 @@
 import {
   assertNoReadPromptInstructionText,
+  boundFreeTextValues,
   renderInlineReviewerContext,
+  truncateInlineSectionBody,
   type InlineReviewerContext,
 } from '../context/inline-review-context.js';
 import {
@@ -14,7 +16,7 @@ import {
   getProtocolMarkerArtifactProhibitionLines,
   getStandalonePlanPayloadSourceOfTruthLines,
 } from '../prompts/shared.js';
-import { getUserGuidanceLines } from '../prompts/guidance.js';
+import { getUserGuidanceLines, USER_GUIDANCE_MAX_CHARS } from '../prompts/guidance.js';
 import { assertPromptBuilder, resolvePrimaryVariant } from '../prompts/assert-builder.js';
 export { buildCoderResponsePrompt, buildLegacyScopePrompt, buildReviewerPrompt, buildScopePrompt } from '../prompts/execute.js';
 export {
@@ -69,7 +71,9 @@ export function buildConsultantPrompt(args: {
     ...staticInstructionLines,
     '',
     'Blocked reason:',
-    args.blockedReason,
+    // Agent-authored free text shares the fixed agent free-text cap at render
+    // time; the persisted blocked reason keeps its full text.
+    boundFreeTextValues([args.blockedReason])[0]!,
     '',
     renderInlineReviewerContext(args.inlineContext),
   ].join('\n');
@@ -143,9 +147,12 @@ export function buildBlockedRecoveryCoderPrompt(args: {
     'Do not treat operator guidance as authorization to skip verification, waive policy, or reinterpret the target beyond the current scope.',
     '',
     'Blocked recovery context:',
-    `- Blocked reason: ${args.blockedReason}`,
+    // The blocked reason is agent-authored free text and the guidance is
+    // operator-authored; each gets its class's render-time cap while the
+    // persisted values keep their full text.
+    `- Blocked reason: ${boundFreeTextValues([args.blockedReason])[0]!}`,
     `- Recovery turns used: ${args.turnsTaken} of ${args.maxTurns}`,
-    `- Latest operator guidance: ${args.operatorGuidance}`,
+    `- Latest operator guidance: ${truncateInlineSectionBody(args.operatorGuidance, USER_GUIDANCE_MAX_CHARS)}`,
     '',
     'Current progress state:',
     buildProgressSection(args.progressText),

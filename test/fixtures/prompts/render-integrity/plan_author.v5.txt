@@ -1,0 +1,802 @@
+=== buildCoderPlanResponsePrompt#mode=blocking#planReviewGuidance=absent#reviewMode=derived-plan ===
+Continue refining the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+
+Address the currently open review findings provided below.
+Edit only the derived plan artifact and directly related planning notes for that derived plan.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.
+Do not silently widen the target or convert a real blocker into a vague replan.
+Revise the derived plan so it uses the same Neal-executable contract as a top-level plan. Any derived-plan-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.
+For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape.
+A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=blocking#planReviewGuidance=absent#reviewMode=plan ===
+Continue refining the plan document at /tmp/PLAN.md into a stronger future execution plan.
+
+Address the currently open review findings provided below.
+Edit only the plan document and directly related planning artifacts.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+The final file must be a pure future execution plan for `neal execute`.
+Do not leave planning-task scaffolding behind after you respond to the findings.
+Resolve the material finding without adding planning-task scaffolding.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=blocking#planReviewGuidance=present#reviewMode=derived-plan ===
+Continue refining the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+
+Address the currently open review findings provided below.
+Edit only the derived plan artifact and directly related planning notes for that derived plan.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.
+Do not silently widen the target or convert a real blocker into a vague replan.
+Revise the derived plan so it uses the same Neal-executable contract as a top-level plan. Any derived-plan-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.
+For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape.
+A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.
+
+Operator guidance for this blocked plan-review recovery:
+Deterministic plan-review recovery guidance.
+
+This guidance supplements the open reviewer findings. It does not waive plan-contract requirements, verification requirements, or the need to address blocking findings.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=blocking#planReviewGuidance=present#reviewMode=plan ===
+Continue refining the plan document at /tmp/PLAN.md into a stronger future execution plan.
+
+Address the currently open review findings provided below.
+Edit only the plan document and directly related planning artifacts.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+The final file must be a pure future execution plan for `neal execute`.
+Do not leave planning-task scaffolding behind after you respond to the findings.
+Resolve the material finding without adding planning-task scaffolding.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+If required information is missing, return outcome=`blocked` and explain the concrete questions in `blocker`.
+
+Operator guidance for this blocked plan-review recovery:
+Deterministic plan-review recovery guidance.
+
+This guidance supplements the open reviewer findings. It does not waive plan-contract requirements, verification requirements, or the need to address blocking findings.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=optional#planReviewGuidance=absent#reviewMode=derived-plan ===
+Continue refining the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+
+The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.
+Return exactly one disposition for every finding listed below; a partial response is rejected.
+Edit only the derived plan artifact and directly related planning notes for that derived plan.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.
+Do not silently widen the target or convert a real blocker into a vague replan.
+Revise the derived plan so it uses the same Neal-executable contract as a top-level plan. Any derived-plan-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.
+For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape.
+A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=optional#planReviewGuidance=absent#reviewMode=plan ===
+Continue refining the plan document at /tmp/PLAN.md into a stronger future execution plan.
+
+The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.
+Return exactly one disposition for every finding listed below; a partial response is rejected.
+Edit only the plan document and directly related planning artifacts.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+The final file must be a pure future execution plan for `neal execute`.
+Do not leave planning-task scaffolding behind after you respond to the findings.
+Resolve the material finding without adding planning-task scaffolding.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=optional#planReviewGuidance=present#reviewMode=derived-plan ===
+Continue refining the derived implementation plan at /tmp/PLAN.md for scope 2 in parent plan /tmp/PARENT_PLAN.md.
+
+The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.
+Return exactly one disposition for every finding listed below; a partial response is rejected.
+Edit only the derived plan artifact and directly related planning notes for that derived plan.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+Keep the same target, but make the derived plan concrete enough to replace the abandoned scope safely.
+Do not silently widen the target or convert a real blocker into a vague replan.
+Revise the derived plan so it uses the same Neal-executable contract as a top-level plan. Any derived-plan-specific rationale sections are optional additive context only; they must not replace the canonical machine-consumed sections.
+For a derived plan, choose the declared execution shape first, then include only the orchestration sections valid for that shape.
+A `multi_scope` derived plan must not include a standalone `## Completion Condition` section; that section is valid only for `multi_scope_unknown` derived plans.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.
+
+Operator guidance for this blocked plan-review recovery:
+Deterministic plan-review recovery guidance.
+
+This guidance supplements the open reviewer findings. It does not waive plan-contract requirements, verification requirements, or the need to address blocking findings.
+
+Open findings:
+[]
+=== buildCoderPlanResponsePrompt#mode=optional#planReviewGuidance=present#reviewMode=plan ===
+Continue refining the plan document at /tmp/PLAN.md into a stronger future execution plan.
+
+The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.
+Return exactly one disposition for every finding listed below; a partial response is rejected.
+Edit only the plan document and directly related planning artifacts.
+Do not edit runtime source code.
+Do not make git commits.
+Keep the revised plan concise, human-reviewable, and at moderate-to-high-level implementation detail.
+Resolve material findings without expanding the plan into an exhaustive implementation inventory; leave routine discovery to execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+The final file must be a pure future execution plan for `neal execute`.
+Do not leave planning-task scaffolding behind after you respond to the findings.
+Resolve the material finding without adding planning-task scaffolding.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Use `fixed` only when you actually revised the plan to resolve the finding.
+Use `rejected` only when the finding is incorrect and your summary explains why.
+Use `deferred` only when the finding is real but not safe to resolve without user input.
+Always include a `blocker` string. Use an empty string when outcome=`responded`.
+Return outcome=`blocked` only if you are genuinely unable to make or explain a decision on these findings.
+
+Operator guidance for this blocked plan-review recovery:
+Deterministic plan-review recovery guidance.
+
+This guidance supplements the open reviewer findings. It does not waive plan-contract requirements, verification requirements, or the need to address blocking findings.
+
+Open findings:
+[]
+=== buildPlanningPrompt#authoredOneShot=false#planDocument=absent ===
+Refine the existing plan document at /tmp/PLAN.md into a stronger future execution plan for neal.
+
+Before doing anything else:
+1. Read /tmp/PLAN.md when it is accessible. If that path is outside your file-tool jail, use the inlined current plan content below as the authoritative plan text.
+2. Read any companion docs explicitly referenced by that plan.
+3. Reset your instructions for this turn from the current contents of the plan and referenced context.
+
+Then identify weaknesses in the current plan and improve it. Look specifically for:
+- Underdeveloped scopes that need enough implementation detail to guide the coder.
+- Missing major architectural constraints or dependencies.
+- Vague or missing acceptance criteria / completion criteria.
+- Ambiguous scope boundaries or hidden assumptions about the repository.
+- Poor or unclear sequencing between scopes.
+- Verification that would not meaningfully establish the scope's success.
+- Planning-task scaffolding left over from an earlier draft.
+Produce a substantively improved revision in the same file.
+If the current plan is already strong, do not invent new weaknesses; revise only what actually improves it.
+Refine for executability without expanding the author's scope. Include refactoring only when the plan calls for it, the objective genuinely requires it, or implementing the change would otherwise increase complexity such that a refactor is a natural outgrowth — not opportunistically.
+Write for both neal and the operator. Prefer the smallest human-reviewable plan that communicates the approach, scope boundaries, and important decisions.
+Use moderate-to-high-level implementation detail. Name major subsystems, important files, or key interfaces when they clarify the approach, but leave routine implementation discovery to the coder and reviewer working against the implementation.
+Inspect the repository enough to confirm that the approach fits the existing architecture and to identify major dependencies, constraints, and affected subsystems. Do not try to complete the implementation or its full blast-radius analysis in the plan.
+Leave routine file, symbol, caller, and test discovery to execution. Avoid line-by-line change lists, exhaustive inventories, exact assertions, pinned values, and fixture recipes unless they preserve a fixed decision or prevent a known failure.
+Use allowed-path lists, forbidden-path lists, and detailed blocker handling only when the task has a real boundary or known hazard that needs to survive into execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+
+Revise only plan-related artifacts.
+Do not edit runtime source code outside the plan itself and adjacent planning notes.
+Do not make git commits.
+Your output must be a pure future execution plan, not a planning-task checklist.
+Replace the plan in place so the resulting file is meant to be run later with `neal execute`, not `neal plan`.
+Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.
+Your refined plan will be reviewed for execution readiness on three dimensions; satisfy each before finalizing: scope granularity (the work is divided into coherent, bounded scopes without exhaustive path inventories), verification concreteness (each scope names meaningful checks without specifying every possible oracle), and resume safety (scopes have understandable ordering and clean stopping points).
+Make the final plan explicit about its execution shape, scope goals and approach, sequencing, meaningful verification, and success conditions. Add constraints, non-goals, or blocker handling only where the task needs them.
+Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.
+Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time and the total number of scopes is intentionally unknown until an explicit completion condition is satisfied.
+Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.
+Return only a structured planning envelope with these fields:
+- `action`: `ready_for_review` after the plan file has been revised and is ready for review, or `blocked` when critical information is missing.
+- `message`: concise human-readable summary of what changed or why you are blocked.
+- `executionShape`: exactly the chosen shape for the final plan: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+- `planBody`: the complete final contents of the plan file when `action` is `ready_for_review`; otherwise an empty string.
+- `blockedReason`: concrete missing information when `action` is `blocked`; otherwise an empty string.
+Do not use terminal marker lines for this primary planning response.
+=== buildPlanningPrompt#authoredOneShot=false#planDocument=present ===
+Refine the existing plan document at /tmp/PLAN.md into a stronger future execution plan for neal.
+
+Before doing anything else:
+1. Read /tmp/PLAN.md when it is accessible. If that path is outside your file-tool jail, use the inlined current plan content below as the authoritative plan text.
+2. Read any companion docs explicitly referenced by that plan.
+3. Reset your instructions for this turn from the current contents of the plan and referenced context.
+
+Then identify weaknesses in the current plan and improve it. Look specifically for:
+- Underdeveloped scopes that need enough implementation detail to guide the coder.
+- Missing major architectural constraints or dependencies.
+- Vague or missing acceptance criteria / completion criteria.
+- Ambiguous scope boundaries or hidden assumptions about the repository.
+- Poor or unclear sequencing between scopes.
+- Verification that would not meaningfully establish the scope's success.
+- Planning-task scaffolding left over from an earlier draft.
+Produce a substantively improved revision in the same file.
+If the current plan is already strong, do not invent new weaknesses; revise only what actually improves it.
+Refine for executability without expanding the author's scope. Include refactoring only when the plan calls for it, the objective genuinely requires it, or implementing the change would otherwise increase complexity such that a refactor is a natural outgrowth — not opportunistically.
+Write for both neal and the operator. Prefer the smallest human-reviewable plan that communicates the approach, scope boundaries, and important decisions.
+Use moderate-to-high-level implementation detail. Name major subsystems, important files, or key interfaces when they clarify the approach, but leave routine implementation discovery to the coder and reviewer working against the implementation.
+Inspect the repository enough to confirm that the approach fits the existing architecture and to identify major dependencies, constraints, and affected subsystems. Do not try to complete the implementation or its full blast-radius analysis in the plan.
+Leave routine file, symbol, caller, and test discovery to execution. Avoid line-by-line change lists, exhaustive inventories, exact assertions, pinned values, and fixture recipes unless they preserve a fixed decision or prevent a known failure.
+Use allowed-path lists, forbidden-path lists, and detailed blocker handling only when the task has a real boundary or known hazard that needs to survive into execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+
+Revise only plan-related artifacts.
+Do not edit runtime source code outside the plan itself and adjacent planning notes.
+Do not make git commits.
+Your output must be a pure future execution plan, not a planning-task checklist.
+Replace the plan in place so the resulting file is meant to be run later with `neal execute`, not `neal plan`.
+Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.
+Your refined plan will be reviewed for execution readiness on three dimensions; satisfy each before finalizing: scope granularity (the work is divided into coherent, bounded scopes without exhaustive path inventories), verification concreteness (each scope names meaningful checks without specifying every possible oracle), and resume safety (scopes have understandable ordering and clean stopping points).
+Make the final plan explicit about its execution shape, scope goals and approach, sequencing, meaningful verification, and success conditions. Add constraints, non-goals, or blocker handling only where the task needs them.
+Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.
+Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time and the total number of scopes is intentionally unknown until an explicit completion condition is satisfied.
+Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.
+
+Current plan document content:
+```markdown
+# Plan
+Deterministic inline plan document body.
+
+```
+Use the inlined plan content above as the source of truth if the plan path itself cannot be read by your tools.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.
+Return only a structured planning envelope with these fields:
+- `action`: `ready_for_review` after the plan file has been revised and is ready for review, or `blocked` when critical information is missing.
+- `message`: concise human-readable summary of what changed or why you are blocked.
+- `executionShape`: exactly the chosen shape for the final plan: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+- `planBody`: the complete final contents of the plan file when `action` is `ready_for_review`; otherwise an empty string.
+- `blockedReason`: concrete missing information when `action` is `blocked`; otherwise an empty string.
+Do not use terminal marker lines for this primary planning response.
+=== buildPlanningPrompt#authoredOneShot=true#planDocument=absent ===
+Refine the existing plan document at /tmp/PLAN.md into a stronger future execution plan for neal.
+
+Before doing anything else:
+1. Read /tmp/PLAN.md when it is accessible. If that path is outside your file-tool jail, use the inlined current plan content below as the authoritative plan text.
+2. Read any companion docs explicitly referenced by that plan.
+3. Reset your instructions for this turn from the current contents of the plan and referenced context.
+
+Then identify weaknesses in the current plan and improve it. Look specifically for:
+- Underdeveloped scopes that need enough implementation detail to guide the coder.
+- Missing major architectural constraints or dependencies.
+- Vague or missing acceptance criteria / completion criteria.
+- Ambiguous scope boundaries or hidden assumptions about the repository.
+- Poor or unclear sequencing between scopes.
+- Verification that would not meaningfully establish the scope's success.
+- Planning-task scaffolding left over from an earlier draft.
+Produce a substantively improved revision in the same file.
+If the current plan is already strong, do not invent new weaknesses; revise only what actually improves it.
+Refine for executability without expanding the author's scope. Include refactoring only when the plan calls for it, the objective genuinely requires it, or implementing the change would otherwise increase complexity such that a refactor is a natural outgrowth — not opportunistically.
+Write for both neal and the operator. Prefer the smallest human-reviewable plan that communicates the approach, scope boundaries, and important decisions.
+Use moderate-to-high-level implementation detail. Name major subsystems, important files, or key interfaces when they clarify the approach, but leave routine implementation discovery to the coder and reviewer working against the implementation.
+Inspect the repository enough to confirm that the approach fits the existing architecture and to identify major dependencies, constraints, and affected subsystems. Do not try to complete the implementation or its full blast-radius analysis in the plan.
+Leave routine file, symbol, caller, and test discovery to execution. Avoid line-by-line change lists, exhaustive inventories, exact assertions, pinned values, and fixture recipes unless they preserve a fixed decision or prevent a known failure.
+Use allowed-path lists, forbidden-path lists, and detailed blocker handling only when the task has a real boundary or known hazard that needs to survive into execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+
+Revise only plan-related artifacts.
+Do not edit runtime source code outside the plan itself and adjacent planning notes.
+Do not make git commits.
+Your output must be a pure future execution plan, not a planning-task checklist.
+Replace the plan in place so the resulting file is meant to be run later with `neal execute`, not `neal plan`.
+Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.
+Your refined plan will be reviewed for execution readiness on three dimensions; satisfy each before finalizing: scope granularity (the work is divided into coherent, bounded scopes without exhaustive path inventories), verification concreteness (each scope names meaningful checks without specifying every possible oracle), and resume safety (scopes have understandable ordering and clean stopping points).
+Make the final plan explicit about its execution shape, scope goals and approach, sequencing, meaningful verification, and success conditions. Add constraints, non-goals, or blocker handling only where the task needs them.
+Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.
+Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time and the total number of scopes is intentionally unknown until an explicit completion condition is satisfied.
+Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.
+This plan was authored as a single-scope (`one_shot`) plan; keep it one scope, make the smallest complete change, and do not restructure it into multiple scopes.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.
+Return only a structured planning envelope with these fields:
+- `action`: `ready_for_review` after the plan file has been revised and is ready for review, or `blocked` when critical information is missing.
+- `message`: concise human-readable summary of what changed or why you are blocked.
+- `executionShape`: exactly the chosen shape for the final plan: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+- `planBody`: the complete final contents of the plan file when `action` is `ready_for_review`; otherwise an empty string.
+- `blockedReason`: concrete missing information when `action` is `blocked`; otherwise an empty string.
+Do not use terminal marker lines for this primary planning response.
+=== buildPlanningPrompt#authoredOneShot=true#planDocument=present ===
+Refine the existing plan document at /tmp/PLAN.md into a stronger future execution plan for neal.
+
+Before doing anything else:
+1. Read /tmp/PLAN.md when it is accessible. If that path is outside your file-tool jail, use the inlined current plan content below as the authoritative plan text.
+2. Read any companion docs explicitly referenced by that plan.
+3. Reset your instructions for this turn from the current contents of the plan and referenced context.
+
+Then identify weaknesses in the current plan and improve it. Look specifically for:
+- Underdeveloped scopes that need enough implementation detail to guide the coder.
+- Missing major architectural constraints or dependencies.
+- Vague or missing acceptance criteria / completion criteria.
+- Ambiguous scope boundaries or hidden assumptions about the repository.
+- Poor or unclear sequencing between scopes.
+- Verification that would not meaningfully establish the scope's success.
+- Planning-task scaffolding left over from an earlier draft.
+Produce a substantively improved revision in the same file.
+If the current plan is already strong, do not invent new weaknesses; revise only what actually improves it.
+Refine for executability without expanding the author's scope. Include refactoring only when the plan calls for it, the objective genuinely requires it, or implementing the change would otherwise increase complexity such that a refactor is a natural outgrowth — not opportunistically.
+Write for both neal and the operator. Prefer the smallest human-reviewable plan that communicates the approach, scope boundaries, and important decisions.
+Use moderate-to-high-level implementation detail. Name major subsystems, important files, or key interfaces when they clarify the approach, but leave routine implementation discovery to the coder and reviewer working against the implementation.
+Inspect the repository enough to confirm that the approach fits the existing architecture and to identify major dependencies, constraints, and affected subsystems. Do not try to complete the implementation or its full blast-radius analysis in the plan.
+Leave routine file, symbol, caller, and test discovery to execution. Avoid line-by-line change lists, exhaustive inventories, exact assertions, pinned values, and fixture recipes unless they preserve a fixed decision or prevent a known failure.
+Use allowed-path lists, forbidden-path lists, and detailed blocker handling only when the task has a real boundary or known hazard that needs to survive into execution.
+A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
+Otherwise, do not introduce it. If the plan already contains an unnecessary broader guarantee, narrow or remove it instead of expanding the implementation or verification scope to satisfy it.
+
+Revise only plan-related artifacts.
+Do not edit runtime source code outside the plan itself and adjacent planning notes.
+Do not make git commits.
+Your output must be a pure future execution plan, not a planning-task checklist.
+Replace the plan in place so the resulting file is meant to be run later with `neal execute`, not `neal plan`.
+Do not leave planning-only scaffolding in the final file. Remove or replace sections such as planning mode instructions, Required Inputs for the planner, Verification For This Planning Task, and Completion Criteria For This Planning Task.
+Your refined plan will be reviewed for execution readiness on three dimensions; satisfy each before finalizing: scope granularity (the work is divided into coherent, bounded scopes without exhaustive path inventories), verification concreteness (each scope names meaningful checks without specifying every possible oracle), and resume safety (scopes have understandable ordering and clean stopping points).
+Make the final plan explicit about its execution shape, scope goals and approach, sequencing, meaningful verification, and success conditions. Add constraints, non-goals, or blocker handling only where the task needs them.
+Choose `multi_scope` when the work changes orchestration or state-machine behavior, resume semantics, persistence or schema shape, multiple independent subsystems, or otherwise naturally falls into staged rollout checkpoints.
+Choose `multi_scope_unknown` when the work repeats one bounded recurring slice at a time and the total number of scopes is intentionally unknown until an explicit completion condition is satisfied.
+Choose `one_shot` only when the work can realistically be executed, reviewed, and verified as one bounded scope without hidden staging assumptions.
+
+Current plan document content:
+```markdown
+# Plan
+Deterministic inline plan document body.
+
+```
+Use the inlined plan content above as the source of truth if the plan path itself cannot be read by your tools.
+This plan was authored as a single-scope (`one_shot`) plan; keep it one scope, make the smallest complete change, and do not restructure it into multiple scopes.
+Protocol markers are terminal-response control signals, not artifact content.
+Never write AUTONOMY_DONE, AUTONOMY_BLOCKED, AUTONOMY_SCOPE_DONE, or AUTONOMY_SPLIT_PLAN into any authored markdown or JSON artifact unless the file is explicitly about Neal protocol markers.
+Bad example: appending a marker line to the plan or recovery artifact itself.
+Good example: leave the file content marker-free.
+Choose exactly one execution shape: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+Declare that choice in the plan document with a literal `## Execution Shape` section followed by exactly one line: `executionShape: one_shot`, `executionShape: multi_scope`, or `executionShape: multi_scope_unknown`.
+If the plan should complete in one scope, declare `executionShape: one_shot` and keep the plan single-scope.
+If the plan requires multiple scopes, declare `executionShape: multi_scope` and make scope selection and completion rules explicit.
+If the plan requires one bounded recurring scope at a time but the total number of scopes is intentionally unknown at authoring time, declare `executionShape: multi_scope_unknown` and use one recurring scope template plus an explicit completion condition.
+Shape-specific section rules are mandatory:
+`executionShape: one_shot` must not include a literal `## Execution Queue` section, literal `## Execution Loop` section, or standalone `## Completion Condition` section.
+`executionShape: multi_scope` must include a literal `## Execution Queue` section and must not include a literal `## Execution Loop` section or standalone `## Completion Condition` section.
+`executionShape: multi_scope_unknown` must include a literal `## Execution Loop` section and standalone `## Completion Condition` section and must not include a literal `## Execution Queue` section.
+For `multi_scope` plans, include a literal `## Execution Queue` section.
+Inside `## Execution Queue`, use literal `### Scope N:` headings with contiguous numbering starting at 1.
+Each `### Scope N:` entry must include these labeled bullets: `- Goal:`, `- Verification:`, and `- Success Condition:`.
+For `multi_scope_unknown` plans, include a literal `## Execution Loop` section containing exactly one literal `### Recurring Scope` entry with `- Goal:`, `- Verification:`, and `- Success Condition:` bullets, followed by a literal `## Completion Condition` section.
+Minimal accepted multi-scope shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: Example scope
+- Goal: Implement one bounded slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The bounded slice is complete and verified.
+```
+Minimal accepted multi-scope-unknown recurring shape:
+```md
+## Execution Shape
+
+executionShape: multi_scope_unknown
+
+## Execution Loop
+
+### Recurring Scope
+- Goal: Implement one bounded recurring slice.
+- Verification: `pnpm typecheck`
+- Success Condition: The recurring slice is complete and reviewable.
+
+## Completion Condition
+
+Stop when the explicit plan-completion condition is satisfied.
+```
+If critical information is missing, do not invent it. Surface the concrete missing questions in your final response.
+Return only a structured planning envelope with these fields:
+- `action`: `ready_for_review` after the plan file has been revised and is ready for review, or `blocked` when critical information is missing.
+- `message`: concise human-readable summary of what changed or why you are blocked.
+- `executionShape`: exactly the chosen shape for the final plan: `one_shot`, `multi_scope`, or `multi_scope_unknown`.
+- `planBody`: the complete final contents of the plan file when `action` is `ready_for_review`; otherwise an empty string.
+- `blockedReason`: concrete missing information when `action` is `blocked`; otherwise an empty string.
+Do not use terminal marker lines for this primary planning response.

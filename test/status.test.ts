@@ -643,6 +643,103 @@ test('buildStatusSnapshot preserves the content_refused provider-error kind inst
   assert.equal(snapshot.providerError?.retryable, false);
 });
 
+test('buildStatusSnapshot preserves the input_too_large provider-error kind and its section report', async () => {
+  const now = new Date('2026-04-25T18:15:52.082Z');
+  const fixture = await createStatusFixture({
+    now,
+    status: 'failed',
+  });
+  const sectionReport =
+    'Prompt is 1,259,386 chars; openai-codex accepts at most 1,048,576 input chars per turn.\n' +
+    'Largest sections: "Final Completion Packet" 900,000 chars; "Aggregate Diff" 200,000 chars; "instructions" 40,000 chars.';
+  await writeEvents(fixture.eventsPath, [
+    event(secondsBefore(now, 30), 'provider.provider_error', {
+      provider: 'openai-codex',
+      role: 'structured-advisor',
+      label: 'final-completion',
+      sessionHandle: 'reviewer-session',
+      errorKind: 'input_too_large',
+      retryable: false,
+      message: sectionReport,
+    }),
+  ]);
+
+  const snapshot = await buildStatusSnapshot({ cwd: fixture.cwd, statePath: fixture.statePath, now });
+  assert.equal(snapshot.providerError?.source, 'provider_event');
+  assert.equal(snapshot.providerError?.kind, 'input_too_large');
+  assert.equal(snapshot.providerError?.retryable, false);
+  // The section report is short enough to survive the 1,000-char status
+  // truncation intact.
+  assert.equal(snapshot.providerError?.message, sectionReport);
+  // Resume stays executable — the live preflight is the only input-size gate —
+  // but the Next Action is conditional: it names the largest section to shrink
+  // and only then points at the resume command, never a bare "Resume this run".
+  assert.equal(snapshot.resumeDecision.kind, 'continue');
+  assert.match(snapshot.nextAction, /prompt exceeded the provider's input limit/);
+  assert.match(snapshot.nextAction, /Shrink the "Final Completion Packet" prompt section first/);
+  assert.match(snapshot.nextAction, /trim operator guidance files, or upgrade neal/);
+  assert.ok(snapshot.nextAction.includes(`neal resume --run ${runIdForFixture(fixture)}`));
+  assert.match(snapshot.nextAction, /start a new run with a provider that has a larger or no input limit/);
+  assert.doesNotMatch(snapshot.nextAction, /^Resume this run:/);
+});
+
+test('status Next Action falls back to generic shrink wording for a provider-side input_too_large rejection', async () => {
+  const now = new Date('2026-04-25T18:15:52.082Z');
+  const fixture = await createStatusFixture({
+    now,
+    status: 'failed',
+  });
+  await writeEvents(fixture.eventsPath, [
+    // A provider-authored rejection carries Codex's raw wording with no
+    // section report to parse a section name from.
+    event(secondsBefore(now, 30), 'provider.provider_error', {
+      provider: 'openai-codex',
+      role: 'structured-advisor',
+      label: 'final-completion',
+      sessionHandle: 'reviewer-session',
+      errorKind: 'input_too_large',
+      retryable: false,
+      message: 'Codex rejected the request: code -32602, input_error_code: input_too_large, max_chars 1048576, actual_chars 1259386',
+    }),
+  ]);
+
+  const snapshot = await buildStatusSnapshot({ cwd: fixture.cwd, statePath: fixture.statePath, now });
+  assert.equal(snapshot.providerError?.kind, 'input_too_large');
+  assert.match(snapshot.nextAction, /Shrink the oversized prompt input first/);
+  assert.ok(snapshot.nextAction.includes(`neal resume --run ${runIdForFixture(fixture)}`));
+});
+
+test('status Next Action drops the shrink guidance once a later successful turn supersedes input_too_large', async () => {
+  const now = new Date('2026-04-25T18:15:52.082Z');
+  const fixture = await createStatusFixture({
+    now,
+    status: 'running',
+  });
+  await writeEvents(fixture.eventsPath, [
+    event(secondsBefore(now, 90), 'provider.provider_error', {
+      provider: 'openai-codex',
+      role: 'coder',
+      errorKind: 'input_too_large',
+      retryable: false,
+      message:
+        'Prompt is 1,259,386 chars; openai-codex accepts at most 1,048,576 input chars per turn.\n' +
+        'Largest sections: "Oversized Section" 1,200,000 chars.',
+    }),
+    // The resumed attempt succeeded: the provider turn and the phase both
+    // completed after the failure, so the error is resolved history.
+    event(secondsBefore(now, 40), 'provider.turn_completed', { provider: 'openai-codex', role: 'coder' }),
+    event(secondsBefore(now, 30), 'phase.complete', { phase: 'coder_scope' }),
+  ]);
+
+  const snapshot = await buildStatusSnapshot({ cwd: fixture.cwd, statePath: fixture.statePath, now });
+  // The provider-error line still reports the last recorded failure as
+  // history, but the Next Action returns to the plain resume command.
+  assert.equal(snapshot.providerError?.kind, 'input_too_large');
+  assert.equal(snapshot.resumeDecision.kind, 'continue');
+  assert.match(snapshot.nextAction, /^Resume this run: neal resume --run /);
+  assert.doesNotMatch(snapshot.nextAction, /Shrink/);
+});
+
 test('buildStatusSnapshot reads persisted build metadata and RunLogger preserves it on resume', async () => {
   const now = new Date('2026-04-25T18:15:52.082Z');
   const fixture = await createStatusFixture({ now });

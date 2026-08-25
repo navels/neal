@@ -1,4 +1,5 @@
 import type { PendingPlanReviewGuidance, ReviewFinding } from '../types.js';
+import { boundOpenFindingsForPrompt, truncateInlineSectionBody } from '../context/inline-review-context.js';
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
 import {
   AUTONOMY_BLOCKED,
@@ -9,7 +10,7 @@ import {
   getTerminalMarkerArtifactBoundaryLines,
 } from './shared.js';
 import { assertPromptBuilder } from './assert-builder.js';
-import { getUserGuidanceLines } from './guidance.js';
+import { getUserGuidanceLines, USER_GUIDANCE_MAX_CHARS } from './guidance.js';
 import { type ReviewDoctrineAccessMode } from './review-doctrine.js';
 
 const PROMPT_MODULE_PATH = 'src/neal/prompts/planning.ts' as const;
@@ -359,6 +360,9 @@ export function buildCoderPlanResponsePrompt(args: {
     mode === 'blocking'
       ? 'Address the currently open review findings provided below.'
       : 'The currently open review findings below are non-blocking. Decide whether to address each one now or explicitly reject/defer it with rationale.',
+    ...(mode === 'optional'
+      ? ['Return exactly one disposition for every finding listed below; a partial response is rejected.']
+      : []),
     reviewMode === 'derived-plan'
       ? 'Edit only the derived plan artifact and directly related planning notes for that derived plan.'
       : 'Edit only the plan document and directly related planning artifacts.',
@@ -389,13 +393,15 @@ export function buildCoderPlanResponsePrompt(args: {
     ...(args.planReviewGuidance
       ? [
           'Operator guidance for this blocked plan-review recovery:',
-          args.planReviewGuidance.message,
+          // Same render-time cap as the operator guidance files; the persisted
+          // guidance record keeps its full message.
+          truncateInlineSectionBody(args.planReviewGuidance.message, USER_GUIDANCE_MAX_CHARS),
           '',
           'This guidance supplements the open reviewer findings. It does not waive plan-contract requirements, verification requirements, or the need to address blocking findings.',
           '',
         ]
       : []),
     'Open findings:',
-    JSON.stringify(args.openFindings, null, 2),
+    JSON.stringify(boundOpenFindingsForPrompt(args.openFindings), null, 2),
   ].join('\n');
 }

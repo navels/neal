@@ -171,8 +171,15 @@ test('prompt fixtures cover the known ambiguity regressions from the prompt-spec
   assert.doesNotMatch(renderedScopeReviewer, /any case needing operator judgment/);
   assert.doesNotMatch(renderedScopeReviewer, /any non-empty or uncertain current diff/);
   // Completion reviewer: injected aggregate range, scratch-path markers, verdict
-  // action enums, and the squash-commit-message field surface.
+  // action enums, the squash-commit-message field surface, and the bounded
+  // verification tally with its events.ndjson pointer.
   assert.match(renderedCompletionReviewer, /aggregate range base123\.\.abc123/);
+  assert.match(renderedCompletionReviewer, /"verificationTally":/);
+  assert.match(renderedCompletionReviewer, /"recentFailures":/);
+  assert.match(
+    renderedCompletionReviewer,
+    /`verificationTally` is a bounded summary of the run's recorded verification commands; the complete per-command record is in the run directory's events\.ndjson\./,
+  );
   assert.match(renderedCompletionReviewer, /\.neal\/runs\//);
   assert.match(renderedCompletionReviewer, /\/scratch\//);
   assert.match(renderedCompletionReviewer, /`continue_execution`/);
