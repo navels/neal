@@ -7,6 +7,7 @@ import { Readable, Writable } from 'node:stream';
 
 import { runNealCheckCli } from '../src/neal/commands/check.js';
 import { clearConfigCache } from '../src/neal/config.js';
+import { clearUserGuidanceCache, USER_GUIDANCE_MAX_CHARS } from '../src/neal/prompts/guidance.js';
 import {
   clearProviderDefinitionRegistrationsForTesting,
   registerProviderDefinitionForTesting,
@@ -220,6 +221,40 @@ test('neal check prints the compat pointer for an openai-compatible writer provi
       stdout.chunks.join(''),
       /This is an openai-compatible model - run `neal compat` to confirm it can drive the full loop\./,
     );
+  });
+});
+
+test('neal check warns about guidance files that exceed the prompt inline cap', async () => {
+  await withIsolatedHome(async () => {
+    const previousGuidanceDir = process.env.NEAL_GUIDANCE_DIR;
+    const guidanceDir = await mkdtemp(join(tmpdir(), 'neal-check-guidance-'));
+    process.env.NEAL_GUIDANCE_DIR = guidanceDir;
+    clearUserGuidanceCache();
+    try {
+      const cwd = await mkdtemp(join(tmpdir(), 'neal-check-guidance-cwd-'));
+      await writeExplicitWriterConfig(cwd);
+      await writeFile(join(guidanceDir, 'reviewer.md'), 'g'.repeat(USER_GUIDANCE_MAX_CHARS + 1), 'utf8');
+      await writeFile(join(guidanceDir, 'coder.md'), 'Short guidance.', 'utf8');
+      const stdout = new CaptureStream();
+
+      await runNealCheckCli({ cwd, stdin: createClosedInput(false), stdout });
+
+      const output = stdout.chunks.join('');
+      assert.match(
+        output,
+        new RegExp(
+          `warning: reviewer guidance at .* is ${USER_GUIDANCE_MAX_CHARS + 1} characters; prompts inline the first ${USER_GUIDANCE_MAX_CHARS} and truncate the rest`,
+        ),
+      );
+      assert.doesNotMatch(output, /warning: coder guidance/);
+    } finally {
+      if (previousGuidanceDir === undefined) {
+        delete process.env.NEAL_GUIDANCE_DIR;
+      } else {
+        process.env.NEAL_GUIDANCE_DIR = previousGuidanceDir;
+      }
+      clearUserGuidanceCache();
+    }
   });
 });
 

@@ -4,12 +4,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import type { Thread } from '@openai/codex-sdk';
 import { runOnePass } from '../src/neal/orchestrator.js';
 import { createRunLogger } from '../src/neal/logger.js';
+import { openAICodexProviderTestHooks } from '../src/neal/providers/openai-codex.js';
 import { clearProviderCapabilitiesOverridesForTesting, clearProviderDefinitionRegistrationsForTesting, registerProviderDefinitionForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import { type CoderRunPromptArgs, type CoderStructuredPromptArgs } from '../src/neal/providers/types.js';
 import { runCoderScopePhase, runExecuteResponsePhase } from '../src/neal/orchestrator/phases/coder.js';
+import { decideResumeAction } from '../src/neal/resume-decision.js';
+import { applyResumeActions, planResumeActions } from '../src/neal/resume-planner.js';
 import { buildStatusSnapshot } from '../src/neal/status.js';
 import { loadState, saveState } from '../src/neal/state.js';
 import { createFakeProviderDefinition } from './helpers/fake-provider.js';
@@ -130,6 +134,155 @@ test('Codex provider-authored failure propagates through failed coder artifacts'
     const narrativeMarkdown = await readFile(join(failedState.runDir, 'RUN_NARRATIVE.md'), 'utf8');
     assert.match(narrativeMarkdown, /Selected model is at capacity/);
     assert.doesNotMatch(narrativeMarkdown, new RegExp(genericProcessMessage));
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+// Resume attempts re-run the input-budget preflight against the actual rebuilt
+// prompt: there is no sticky gate keyed off the historical input_too_large
+// error, so an unchanged oversized prompt fails fast before any SDK call and a
+// shrunk prompt resumes normally with no state surgery. The scope prompt inlines
+// PLAN_PROGRESS.md verbatim, so an oversized progress file is a faithful way to
+// push the assembled prompt over Codex's 1,048,576-char turn budget.
+test('input_too_large resume attempts re-run the preflight and proceed once the prompt shrinks', async () => {
+  const fixture = await createCoderScopeManualGateFixture();
+  const runId = basename(fixture.runDir);
+  const scopeDoneResponse = [
+    'Scope complete.',
+    '',
+    '```neal-json',
+    JSON.stringify(
+      {
+        action: 'scope_done',
+        message: 'Implemented the bounded execution slice.',
+        progress: {
+          milestoneTargeted: 'Preflight resume regression',
+          newEvidence: 'The coder round ran after the prompt shrank under the provider budget.',
+          whyNotRedundant: 'This proves a cleared input-size condition resumes without state surgery.',
+          nextStepUnlocked: 'Reviewer can review the scope.',
+        },
+        manualGate: null,
+        derivedPlan: '',
+        blockedReason: '',
+      },
+      null,
+      2,
+    ),
+    '```',
+  ].join('\n');
+  const threadCreations: string[] = [];
+  const createThread = (): Thread => {
+    threadCreations.push('created');
+    return {
+      id: 'codex-resume-preflight',
+      runStreamed: (_prompt: string) =>
+        ({
+          events: (async function* () {
+            yield { type: 'thread.started', thread_id: 'codex-resume-preflight' };
+            yield {
+              type: 'item.completed',
+              item: { type: 'agent_message', id: 'msg-1', text: scopeDoneResponse },
+            };
+            yield {
+              type: 'turn.completed',
+              usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
+            };
+          })(),
+        }) as unknown as Awaited<ReturnType<Thread['runStreamed']>>,
+    } as unknown as Thread;
+  };
+  const adapter = openAICodexProviderTestHooks.createCoderAdapterWithThreadFactory(createThread);
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter: () => adapter,
+  });
+
+  try {
+    // A run whose previous coder attempt failed; the progress markdown that the
+    // next scope prompt will inline is far over the Codex turn budget.
+    const failedState = await saveState(fixture.statePath, {
+      ...fixture.state,
+      agentConfig: {
+        ...fixture.state.agentConfig,
+        coder: { provider: 'openai-codex', model: null },
+      },
+      coderSessionHandle: null,
+      coderSessionProtocol: null,
+      status: 'failed',
+    });
+    await writeFile(failedState.progressMarkdownPath, `## Current Scope\n${'x'.repeat(1_100_000)}\n`, 'utf8');
+    const logger = await createRunLogger({
+      cwd: failedState.cwd,
+      stateDir: dirname(fixture.statePath),
+      planDoc: failedState.planDoc,
+      topLevelMode: failedState.topLevelMode,
+      runDir: failedState.runDir,
+    });
+
+    // Resume stays executable: the decision layer has no input-size gate.
+    const decision = decideResumeAction({
+      state: failedState,
+      selectedRunId: runId,
+      statePath: fixture.statePath,
+    });
+    assert.equal(decision.kind, 'continue');
+    const normalized = await applyResumeActions(failedState, fixture.statePath, logger, planResumeActions(failedState));
+    assert.equal(normalized.status, 'running');
+
+    // The still-oversized prompt fails at the preflight before any SDK call.
+    await assert.rejects(
+      () => runCoderScopePhase(normalized, fixture.statePath, logger),
+      (error) => {
+        assert.equal((error as { kind?: unknown }).kind, 'input_too_large');
+        assert.equal((error as { retryable?: unknown }).retryable, false);
+        return true;
+      },
+    );
+    assert.equal(threadCreations.length, 0);
+
+    const refailedState = await loadState(fixture.statePath);
+    assert.equal(refailedState.phase, 'coder_scope');
+    assert.equal(refailedState.status, 'failed');
+    const events = await readRunEvents(refailedState.runDir);
+    const providerError = events.find(
+      (event) => event.type === 'provider.provider_error' && event.data?.errorKind === 'input_too_large',
+    );
+    assert.notEqual(providerError, undefined);
+    assert.match(String(providerError?.data?.message ?? ''), /Largest sections:/);
+
+    // Status renders the conditional fix-then-resume action, not a bare resume.
+    const snapshot = await buildStatusSnapshot({ cwd: fixture.cwd, statePath: fixture.statePath });
+    assert.equal(snapshot.providerError?.kind, 'input_too_large');
+    assert.match(snapshot.nextAction, /prompt exceeded the provider's input limit/);
+    assert.match(snapshot.nextAction, /Shrink/);
+    assert.ok(snapshot.nextAction.includes(`neal resume --run ${runId}`));
+
+    // Shrinking the input clears the condition; the same resume path proceeds
+    // past the preflight to the provider and completes the coder round.
+    await writeFile(refailedState.progressMarkdownPath, '## Current Scope\n- Number: 2\n', 'utf8');
+    const clearedDecision = decideResumeAction({
+      state: refailedState,
+      selectedRunId: runId,
+      statePath: fixture.statePath,
+    });
+    assert.equal(clearedDecision.kind, 'continue');
+    const normalizedAgain = await applyResumeActions(
+      refailedState,
+      fixture.statePath,
+      logger,
+      planResumeActions(refailedState),
+    );
+    const nextState = await runCoderScopePhase(normalizedAgain, fixture.statePath, logger);
+    assert.equal(threadCreations.length, 1);
+    assert.equal(nextState.phase, 'reviewer_scope');
+    assert.equal(nextState.status, 'running');
+
+    // The successful retry supersedes the recorded input_too_large failure:
+    // status returns to the plain resume action instead of repeating the
+    // shrink guidance for a resolved condition.
+    const resolvedSnapshot = await buildStatusSnapshot({ cwd: fixture.cwd, statePath: fixture.statePath });
+    assert.match(resolvedSnapshot.nextAction, /^Resume this run: neal resume --run /);
+    assert.doesNotMatch(resolvedSnapshot.nextAction, /Shrink/);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }

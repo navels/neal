@@ -18,6 +18,7 @@ import {
   getReviewStuckWindow,
 } from '../config.js';
 import { getNealDirGitIgnoreStatus } from '../git.js';
+import { collectGuidanceDiagnostics, USER_GUIDANCE_MAX_CHARS } from '../prompts/guidance.js';
 import { runWithAgentTurnLiveness } from '../providers/liveness.js';
 import {
   getCoderAdapter,
@@ -453,6 +454,14 @@ export async function runNealCheckCli(options: NealCheckCliOptions = {}) {
   writeLine(stdout, `  ${describeRole('coder', agentConfig.coder)}`);
   writeLine(stdout, `  ${describeRole('reviewer', agentConfig.reviewer)}`);
   writeLine(stdout, `  ${describeNotificationScript(notifyBin)}`);
+  for (const entry of collectGuidanceDiagnostics()) {
+    if (entry.chars > USER_GUIDANCE_MAX_CHARS) {
+      writeLine(
+        stdout,
+        `  warning: ${entry.role} guidance at ${entry.path} is ${entry.chars} characters; prompts inline the first ${USER_GUIDANCE_MAX_CHARS} and truncate the rest. Trim the file.`,
+      );
+    }
+  }
   writeLine(stdout, '');
 
   // Native adapters drive their providers directly; any other writer provider is

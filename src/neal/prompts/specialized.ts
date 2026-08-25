@@ -1,6 +1,14 @@
 import type { FinalCompletionPacket, FinalCompletionSummary } from '../types.js';
 import { guardStructuredJsonOutputFormatLines } from '../agents/structured-json.js';
-import { renderInlinedRangeDiffSection } from '../context/inline-review-context.js';
+import {
+  AGENT_FREE_TEXT_SECTION_MAX_CHARS,
+  boundChangedFileList,
+  boundCommitSubjectList,
+  boundFreeTextValues,
+  GIT_SUMMARY_SECTION_MAX_CHARS,
+  renderInlinedRangeDiffSection,
+  truncateInlineSectionBody,
+} from '../context/inline-review-context.js';
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
 import { assertPromptBuilder } from './assert-builder.js';
 import { getUserGuidanceLines } from './guidance.js';
@@ -48,9 +56,8 @@ export function buildFinalCompletionSummaryPrompt(args: {
     throw new Error('Prompt spec completion_coder is missing a final_completion variant');
   }
 
-  const lastImplementationScope = args.packet.lastNonEmptyImplementationScope
-    ? JSON.stringify(args.packet.lastNonEmptyImplementationScope, null, 2)
-    : 'null';
+  const boundedLastScope = boundLastImplementationScope(args.packet.lastNonEmptyImplementationScope);
+  const lastImplementationScope = boundedLastScope ? JSON.stringify(boundedLastScope, null, 2) : 'null';
 
   return [
     `Summarize whether the execute-mode plan at ${args.planDoc} is complete as a whole.`,
@@ -74,15 +81,14 @@ export function buildFinalCompletionSummaryPrompt(args: {
         currentScopeLabel: args.packet.currentScopeLabel,
         acceptedScopeRecordCount: args.packet.acceptedScopeCount,
         blockedScopeCount: args.packet.blockedScopeCount,
-        scopeAccountingSummary: args.packet.scopeAccountingSummary,
+        scopeAccountingSummary: boundScopeAccountingSummary(args.packet.scopeAccountingSummary),
         verificationOnlyCompletion: args.packet.verificationOnlyCompletion,
-        aggregateReviewContext: args.packet.aggregateReviewContext,
-        completedScopeSummary: args.packet.completedScopeSummary,
+        aggregateReviewContext: boundAggregateReviewContext(args.packet.aggregateReviewContext),
+        completedScopeSummary: boundCompletedScopeSummary(args.packet.completedScopeSummary),
         terminalChangedFilesSummary: args.packet.terminalChangedFilesSummary,
         planChangedFilesSummary: args.packet.planChangedFilesSummary,
-        verificationCommandResults: args.packet.verificationCommandResults,
-        verificationSummary: args.packet.verificationSummary,
-        lastNonEmptyImplementationScope: args.packet.lastNonEmptyImplementationScope,
+        verificationTally: args.packet.verificationTally,
+        lastNonEmptyImplementationScope: boundedLastScope,
         continueExecutionCount: args.packet.continueExecutionCount,
         continueExecutionMax: args.packet.continueExecutionMax,
       },
@@ -90,12 +96,84 @@ export function buildFinalCompletionSummaryPrompt(args: {
       2,
     ),
     '',
+    '`verificationTally` is a bounded summary of the run\'s recorded verification commands; the complete per-command record is in the run directory\'s events.ndjson.',
     'If the completion is verification-only, say so directly in `whatChangedOverall` or `remainingKnownGaps` instead of pretending there was a terminal implementation diff.',
     ...getUserGuidanceLines('coder'),
     '',
     'Last non-empty implementation scope reference:',
     lastImplementationScope,
   ].join('\n');
+}
+
+// Maximum remaining-known-gap entries rendered per completion prompt. Gaps
+// beyond the limit collapse to one explicit overflow entry so the rendered
+// list stays bounded as the gap count grows. Also keeps the summary's
+// free-text value count far under boundFreeTextValues' cardinality bound.
+const REMAINING_GAPS_PROMPT_ITEM_LIMIT = 100;
+
+// Render-only view of the coder's completion summary: planGoalSatisfied is
+// copied exactly, the free-text fields and the first
+// REMAINING_GAPS_PROMPT_ITEM_LIMIT gap entries share the fixed aggregate
+// free-text budget, and any further gaps collapse to one explicit overflow
+// entry. The stored summary keeps its full text.
+function boundCompletionSummaryForPrompt(summary: FinalCompletionSummary) {
+  const gaps = summary.remainingKnownGaps.slice(0, REMAINING_GAPS_PROMPT_ITEM_LIMIT);
+  const bounded = boundFreeTextValues([summary.whatChangedOverall, summary.verificationSummary, ...gaps]);
+  const remainingKnownGaps = bounded.slice(2);
+  const omittedGaps = summary.remainingKnownGaps.length - gaps.length;
+  if (omittedGaps > 0) {
+    remainingKnownGaps.push(`(+${omittedGaps} more remaining known gaps omitted from this prompt)`);
+  }
+  return {
+    planGoalSatisfied: summary.planGoalSatisfied,
+    whatChangedOverall: bounded[0]!,
+    verificationSummary: bounded[1]!,
+    remainingKnownGaps,
+  };
+}
+
+// Prompt-render view of the completion packet's aggregate review context with
+// its run-scaling fields bounded: the commit-subject and changed-file lists
+// collapse past their limits and the diff stat truncates with a marker. The
+// packet keeps the full values for non-prompt consumers.
+function boundAggregateReviewContext(context: FinalCompletionPacket['aggregateReviewContext']) {
+  return {
+    ...context,
+    commitSubjects: boundCommitSubjectList(context.commitSubjects),
+    diffStat: truncateInlineSectionBody(context.diffStat, GIT_SUMMARY_SECTION_MAX_CHARS),
+    changedFiles: boundChangedFileList(context.changedFiles),
+  };
+}
+
+// Prompt-render view of the packet's completed-scope summary. The summary
+// carries agent-authored blocker and residual-debt text for every completed
+// scope, so it shares the fixed agent free-text cap; the packet keeps the full
+// string for non-prompt consumers.
+function boundCompletedScopeSummary(summary: string) {
+  return truncateInlineSectionBody(summary, AGENT_FREE_TEXT_SECTION_MAX_CHARS);
+}
+
+// Prompt-render view of the packet's last non-empty implementation scope: the
+// changed-file list is bounded, and the agent-authored commit subject gets the
+// fixed free-text cap while a null subject stays null. The packet keeps the
+// full values for non-prompt consumers.
+function boundLastImplementationScope(scope: FinalCompletionPacket['lastNonEmptyImplementationScope']) {
+  if (!scope) {
+    return null;
+  }
+  return {
+    ...scope,
+    commitSubject: scope.commitSubject === null ? null : boundFreeTextValues([scope.commitSubject])[0]!,
+    changedFiles: boundChangedFileList(scope.changedFiles),
+  };
+}
+
+// Prompt-render view of the packet's scope-accounting summary. The summary
+// grows with derived-plan replacements (one path per replaced parent scope),
+// so it shares the fixed agent free-text cap; the packet keeps the full string
+// for non-prompt consumers.
+function boundScopeAccountingSummary(summary: string) {
+  return truncateInlineSectionBody(summary, AGENT_FREE_TEXT_SECTION_MAX_CHARS);
 }
 
 export function buildFinalCompletionReviewerPrompt(args: {
@@ -125,9 +203,8 @@ export function buildFinalCompletionReviewerPrompt(args: {
   const rangeDiffInlined =
     accessMode === 'read-only' && args.inlinedRangeDiff !== null && args.inlinedRangeDiff !== undefined;
   const completionSummary = args.summary;
-  const lastImplementationScope = args.packet.lastNonEmptyImplementationScope
-    ? JSON.stringify(args.packet.lastNonEmptyImplementationScope, null, 2)
-    : 'null';
+  const boundedLastScope = boundLastImplementationScope(args.packet.lastNonEmptyImplementationScope);
+  const lastImplementationScope = boundedLastScope ? JSON.stringify(boundedLastScope, null, 2) : 'null';
   const aggregateRange = args.packet.aggregateReviewContext.range;
   const falsificationLines = getCodeReviewFalsificationLines({
     rangeLabel: aggregateRange ? `aggregate range ${aggregateRange}` : null,
@@ -208,7 +285,7 @@ export function buildFinalCompletionReviewerPrompt(args: {
     '- Invalid example: subject "Finish scope 4 cleanup"; bullets ["Summarize per-scope plan work", "Describe reviewer process"].',
     '',
     'Coder whole-plan completion summary:',
-    JSON.stringify(completionSummary, null, 2),
+    JSON.stringify(boundCompletionSummaryForPrompt(completionSummary), null, 2),
     '',
     'Whole-plan completion packet:',
     JSON.stringify(
@@ -217,16 +294,15 @@ export function buildFinalCompletionReviewerPrompt(args: {
         currentScopeLabel: args.packet.currentScopeLabel,
         acceptedScopeRecordCount: args.packet.acceptedScopeCount,
         blockedScopeCount: args.packet.blockedScopeCount,
-        scopeAccountingSummary: args.packet.scopeAccountingSummary,
+        scopeAccountingSummary: boundScopeAccountingSummary(args.packet.scopeAccountingSummary),
         verificationOnlyCompletion: args.packet.verificationOnlyCompletion,
-        aggregateReviewContext: args.packet.aggregateReviewContext,
+        aggregateReviewContext: boundAggregateReviewContext(args.packet.aggregateReviewContext),
         finalCommit: args.packet.finalCommit,
-        completedScopeSummary: args.packet.completedScopeSummary,
+        completedScopeSummary: boundCompletedScopeSummary(args.packet.completedScopeSummary),
         terminalChangedFilesSummary: args.packet.terminalChangedFilesSummary,
         planChangedFilesSummary: args.packet.planChangedFilesSummary,
-        verificationCommandResults: args.packet.verificationCommandResults,
-        verificationSummary: args.packet.verificationSummary,
-        lastNonEmptyImplementationScope: args.packet.lastNonEmptyImplementationScope,
+        verificationTally: args.packet.verificationTally,
+        lastNonEmptyImplementationScope: boundedLastScope,
         continueExecutionCount: args.packet.continueExecutionCount,
         continueExecutionMax: args.packet.continueExecutionMax,
       },
@@ -234,6 +310,7 @@ export function buildFinalCompletionReviewerPrompt(args: {
       2,
     ),
     '',
+    '`verificationTally` is a bounded summary of the run\'s recorded verification commands; the complete per-command record is in the run directory\'s events.ndjson.',
     'If this was a verification-only terminal scope, judge the whole-plan result directly instead of pretending there was a final implementation diff.',
     ...getUserGuidanceLines('reviewer'),
     '',

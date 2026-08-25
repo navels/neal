@@ -18,6 +18,8 @@ import { openAICodexProviderTestHooks } from '../src/neal/providers/openai-codex
 import { resolveRateCost } from '../src/neal/providers/pricing.js';
 import { createProviderTelemetrySink } from '../src/neal/providers/telemetry.js';
 import { NealProviderError, type ProviderRuntimeEvent } from '../src/neal/providers/types.js';
+import { buildReviewFindingsInlinedDiffSection } from '../src/neal/review-findings/prompts.js';
+import type { ReviewFindingsContext } from '../src/neal/review-findings/types.js';
 
 class FakeFooter {
   readonly writes: string[] = [];
@@ -1784,4 +1786,327 @@ test('Codex coder structured prompt rejects promptly when the external signal is
   );
   assert.equal(fake.receivedSignals.length, 1);
   assert.equal(fake.receivedSignals[0]?.aborted, true);
+});
+
+// --- Input-budget preflight ---------------------------------------------------
+//
+// Codex declares maxInputChars on both roles, so every turn/round entry point
+// preflights the assembled prompt and rejects an over-limit prompt before the
+// SDK is touched: the thread factory below records creations, so a nonzero
+// count proves an SDK call would have started.
+
+const CODEX_MAX_INPUT_CHARS = 1_048_576;
+
+function threadCreationRecorder() {
+  const calls: number[] = [];
+  const createThread = (): Thread => {
+    calls.push(calls.length);
+    throw new Error('unexpected Codex test thread creation');
+  };
+  return { calls, createThread };
+}
+
+function oversizedCodexPrompt() {
+  return `## Oversized Section\n${'p'.repeat(CODEX_MAX_INPUT_CHARS)}`;
+}
+
+function assertInputTooLargeError(error: unknown, role: 'coder' | 'structured-advisor') {
+  assert.equal(error instanceof NealProviderError, true);
+  const providerError = error as NealProviderError;
+  assert.equal(providerError.provider, 'openai-codex');
+  assert.equal(providerError.role, role);
+  assert.equal(providerError.kind, 'input_too_large');
+  assert.equal(providerError.retryable, false);
+  assert.match(providerError.message, /accepts at most 1,048,576 input chars per turn/);
+  // The reported size varies by path (structured turns preflight the
+  // protocol-wrapped prompt, which is slightly larger than the base prompt),
+  // so pin the section name and the magnitude rather than an exact figure.
+  assert.match(providerError.message, /Largest sections: "Oversized Section" 1,0\d{2},\d{3} chars/);
+  return providerError;
+}
+
+test('Codex structured-advisor round rejects an over-budget prompt before any SDK call', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  const fake = threadCreationRecorder();
+  const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fake.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredRound({
+        label: 'review',
+        cwd: process.cwd(),
+        prompt: oversizedCodexPrompt(),
+        schema: buildReviewerSchema(),
+        inactivityTimeoutMs: 600_000,
+        apiRetryLimit: 2,
+        structuredJsonProtocol: reviewerProtocol(),
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assertInputTooLargeError(error, 'structured-advisor');
+      return true;
+    },
+  );
+
+  assert.equal(fake.calls.length, 0);
+  const errors = providerErrorEvents(events);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].errorKind, 'input_too_large');
+  assert.match(errors[0].message, /Largest sections:/);
+});
+
+test('Codex coder runPrompt rejects an over-budget prompt before any SDK call', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  const fake = threadCreationRecorder();
+  const adapter = openAICodexProviderTestHooks.createCoderAdapterWithThreadFactory(fake.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runPrompt({
+        cwd: process.cwd(),
+        prompt: oversizedCodexPrompt(),
+        inactivityTimeoutMs: 600_000,
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assertInputTooLargeError(error, 'coder');
+      return true;
+    },
+  );
+
+  assert.equal(fake.calls.length, 0);
+  const errors = providerErrorEvents(events);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].errorKind, 'input_too_large');
+});
+
+test('Codex coder structured prompt rejects an over-budget prompt without burning API-retry budget', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  const fake = threadCreationRecorder();
+  const adapter = openAICodexProviderTestHooks.createCoderAdapterWithThreadFactory(fake.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredPrompt({
+        cwd: process.cwd(),
+        prompt: oversizedCodexPrompt(),
+        schema: coderProtocol().schema as Record<string, unknown>,
+        label: 'Coder response round',
+        inactivityTimeoutMs: 600_000,
+        structuredJsonProtocol: coderProtocol(),
+        apiRetryLimit: 2,
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assertInputTooLargeError(error, 'coder');
+      return true;
+    },
+  );
+
+  assert.equal(fake.calls.length, 0);
+  assert.equal(providerErrorEvents(events).length, 1);
+  assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
+});
+
+test('Codex advisor round rejects an oversized inlined review-findings diff before any SDK call', async () => {
+  const fake = threadCreationRecorder();
+  const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fake.createThread);
+  const context: ReviewFindingsContext = {
+    version: 1,
+    instruction: 'review the selected range',
+    instructionSource: 'default',
+    selector: { kind: 'last', count: 1 },
+    baseRef: 'base',
+    headRef: 'head',
+    externalBaseCommit: 'a'.repeat(40),
+    externalHeadCommit: 'b'.repeat(40),
+    externalCommits: ['b'.repeat(40)],
+    externalCommitSubjects: ['change'],
+    externalChangedFiles: ['src/example.ts'],
+    diffStat: '1 file changed',
+    diff: `diff --git a/src/example.ts b/src/example.ts\n${'+x\n'.repeat(400_000)}`,
+  };
+  const prompt = `## Review Findings Adjudication\nAdjudicate the draft.\n\n${buildReviewFindingsInlinedDiffSection(context)}`;
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredRound({
+        label: 'review-findings',
+        cwd: process.cwd(),
+        prompt,
+        schema: buildReviewerSchema(),
+        inactivityTimeoutMs: 600_000,
+        apiRetryLimit: 2,
+        structuredJsonProtocol: reviewerProtocol(),
+      }),
+    (error) => {
+      assert.equal(error instanceof NealProviderError, true);
+      const providerError = error as NealProviderError;
+      assert.equal(providerError.kind, 'input_too_large');
+      assert.equal(providerError.retryable, false);
+      assert.match(providerError.message, /"Inlined Selected-Range Diff"/);
+      return true;
+    },
+  );
+  assert.equal(fake.calls.length, 0);
+});
+
+test('Codex provider-side input_too_large rejection normalizes to the same non-retryable kind', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  const fakeThreads = fakeStructuredAdvisorThreadFactory([
+    {
+      id: 'codex-input-too-large',
+      errorMessage:
+        'Codex rejected the request: code -32602, input_error_code: input_too_large, max_chars 1048576, actual_chars 1259386',
+    },
+  ]);
+  const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fakeThreads.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredRound({
+        label: 'review',
+        cwd: process.cwd(),
+        prompt: 'review current scope',
+        schema: buildReviewerSchema(),
+        inactivityTimeoutMs: 600_000,
+        apiRetryLimit: 2,
+        structuredJsonProtocol: reviewerProtocol(),
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assert.equal(error instanceof NealProviderError, true);
+      const providerError = error as NealProviderError;
+      assert.equal(providerError.kind, 'input_too_large');
+      assert.equal(providerError.retryable, false);
+      return true;
+    },
+  );
+
+  // A non-retryable input-size rejection must not burn the API-retry budget.
+  assert.equal(fakeThreads.calls.length, 1);
+  assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
+});
+
+// A base prompt that fits under the budget on its own but crosses it once the
+// neal-json protocol wrapper (transport instructions plus the schema JSON) is
+// appended, proving the preflight measures the exact wrapped text sent to the
+// SDK rather than the base prompt.
+function nearLimitBasePrompt() {
+  const prompt = `## Oversized Section\n${'p'.repeat(CODEX_MAX_INPUT_CHARS - 30)}`;
+  assert.ok(prompt.length <= CODEX_MAX_INPUT_CHARS);
+  return prompt;
+}
+
+test('Codex structured-advisor round preflights the wrapped protocol prompt, not just the base prompt', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  const fake = threadCreationRecorder();
+  const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fake.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredRound({
+        label: 'review',
+        cwd: process.cwd(),
+        prompt: nearLimitBasePrompt(),
+        schema: buildReviewerSchema(),
+        inactivityTimeoutMs: 600_000,
+        apiRetryLimit: 2,
+        structuredJsonProtocol: reviewerProtocol(),
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assertInputTooLargeError(error, 'structured-advisor');
+      return true;
+    },
+  );
+
+  assert.equal(fake.calls.length, 0);
+  assert.equal(providerErrorEvents(events).length, 1);
+});
+
+test('Codex coder structured prompt preflights the wrapped protocol prompt, not just the base prompt', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  const fake = threadCreationRecorder();
+  const adapter = openAICodexProviderTestHooks.createCoderAdapterWithThreadFactory(fake.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredPrompt({
+        cwd: process.cwd(),
+        prompt: nearLimitBasePrompt(),
+        schema: coderProtocol().schema as Record<string, unknown>,
+        label: 'Coder response round',
+        inactivityTimeoutMs: 600_000,
+        structuredJsonProtocol: coderProtocol(),
+        apiRetryLimit: 2,
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assertInputTooLargeError(error, 'coder');
+      return true;
+    },
+  );
+
+  assert.equal(fake.calls.length, 0);
+  assert.equal(providerErrorEvents(events).length, 1);
+});
+
+test('Codex oversized repair prompt creates no repair thread and surfaces one input_too_large error', async () => {
+  const events: ProviderRuntimeEvent[] = [];
+  // The initial turn returns a payload that parses as JSON but fails schema
+  // validation and is large enough that the generated repair prompt (which
+  // embeds the invalid JSON) exceeds the budget, even though the initial
+  // wrapped prompt fit.
+  const fakeThreads = fakeStructuredAdvisorThreadFactory([
+    {
+      id: 'codex-repair-too-large',
+      responseText: reviewerJsonBlock({ summary: 'x'.repeat(CODEX_MAX_INPUT_CHARS + 1000) }),
+    },
+  ]);
+  const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fakeThreads.createThread);
+
+  await assert.rejects(
+    () =>
+      adapter.runStructuredRound({
+        label: 'review',
+        cwd: process.cwd(),
+        prompt: 'review current scope',
+        schema: buildReviewerSchema(),
+        inactivityTimeoutMs: 600_000,
+        apiRetryLimit: 2,
+        structuredJsonProtocol: reviewerProtocol(),
+        events: (event) => {
+          events.push(event);
+        },
+      }),
+    (error) => {
+      assert.equal(error instanceof NealProviderError, true);
+      const providerError = error as NealProviderError;
+      assert.equal(providerError.kind, 'input_too_large');
+      assert.equal(providerError.retryable, false);
+      assert.equal(providerError.sessionHandle, 'codex-repair-too-large');
+      return true;
+    },
+  );
+
+  // Only the primary thread was created; the repair preflight rejected before
+  // a repair thread existed and without burning API-retry budget.
+  assert.equal(fakeThreads.calls.length, 1);
+  const errors = providerErrorEvents(events);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].errorKind, 'input_too_large');
+  assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
 });

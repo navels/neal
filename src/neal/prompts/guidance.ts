@@ -2,9 +2,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { truncateInlineSectionBody } from '../context/inline-review-context.js';
 import type { RunLogger } from '../logger.js';
 
 export type GuidanceRole = 'coder' | 'reviewer' | 'planner';
+
+// Per-role character cap for operator guidance inlined into prompts. Guidance
+// beyond the cap is truncated at render time with an explicit marker; the
+// guidance file itself is never modified. `neal check` warns when a guidance
+// file exceeds this cap.
+export const USER_GUIDANCE_MAX_CHARS = 20_000;
 
 export const GUIDANCE_ROLES: readonly GuidanceRole[] = ['coder', 'reviewer', 'planner'];
 
@@ -57,7 +64,7 @@ export function getUserGuidanceLines(role: GuidanceRole): string[] {
   if (!content) {
     return [];
   }
-  return ['', GUIDANCE_SECTION_HEADER, '', content];
+  return ['', GUIDANCE_SECTION_HEADER, '', truncateInlineSectionBody(content, USER_GUIDANCE_MAX_CHARS)];
 }
 
 export function clearUserGuidanceCache() {
@@ -67,6 +74,9 @@ export function clearUserGuidanceCache() {
 export type GuidanceDiagnosticsEntry = {
   role: GuidanceRole;
   bytes: number;
+  // Character count of the guidance content, comparable against
+  // USER_GUIDANCE_MAX_CHARS (the cap is in characters, not bytes).
+  chars: number;
   path: string;
 };
 
@@ -78,6 +88,7 @@ export function collectGuidanceDiagnostics(): GuidanceDiagnosticsEntry[] {
     entries.push({
       role,
       bytes: Buffer.byteLength(entry.content, 'utf8'),
+      chars: entry.content.length,
       path: entry.path,
     });
   }

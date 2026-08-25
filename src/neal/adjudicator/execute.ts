@@ -1,7 +1,10 @@
 import { mkdir } from 'node:fs/promises';
 
 import { runCoderResponseRound, runReviewerRound } from '../agents.js';
-import { readOnlyReviewerNeedsInlinedDiff } from '../context/inline-review-context.js';
+import {
+  OPEN_FINDINGS_PROMPT_ITEM_LIMIT,
+  readOnlyReviewerNeedsInlinedDiff,
+} from '../context/inline-review-context.js';
 import { buildAndPersistReviewerContextPacket } from '../context/reviewer-context.js';
 import { getReviewStuckWindow } from '../config.js';
 import { getDiffForRangePaths } from '../git.js';
@@ -344,20 +347,30 @@ export function buildVerificationHint(state: OrchestrationState) {
   ].join('\n');
 }
 
+// The bounded finding set for one coder response round. Both the response
+// prompt and validateExecuteResponseCoverage consume this same selection, so
+// the coder is asked to disposition exactly the findings it can see. At most
+// OPEN_FINDINGS_PROMPT_ITEM_LIMIT findings are presented per round; findings
+// beyond the limit stay open and synthesizeExecuteResponseState keeps the
+// response phase active, presenting the next batch immediately, until every
+// open finding of the round's kind has been dispositioned.
 export function getExecuteResponseOpenFindings(
   state: OrchestrationState,
   mode: 'blocking' | 'optional' = 'blocking',
 ) {
   const selector = mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding;
-  return state.findings.filter(selector).map((finding) => ({
-    id: finding.id,
-    source: finding.source,
-    claim: finding.claim,
-    requiredAction: finding.requiredAction,
-    severity: finding.severity,
-    files: finding.files,
-    roundSummary: finding.roundSummary,
-  }));
+  return state.findings
+    .filter(selector)
+    .slice(0, OPEN_FINDINGS_PROMPT_ITEM_LIMIT)
+    .map((finding) => ({
+      id: finding.id,
+      source: finding.source,
+      claim: finding.claim,
+      requiredAction: finding.requiredAction,
+      severity: finding.severity,
+      files: finding.files,
+      roundSummary: finding.roundSummary,
+    }));
 }
 
 function validateExecuteResponseCoverage(args: {
@@ -395,7 +408,7 @@ function validateExecuteResponseCoverage(args: {
   }
 
   if (unknownIds.size > 0) {
-    throw new Error(`Coder ${args.mode} response returned dispositions for non-open findings: ${[...unknownIds].join(', ')}`);
+    throw new Error(`Coder ${args.mode} response returned dispositions for findings outside the presented open set: ${[...unknownIds].join(', ')}`);
   }
 
   if (args.response.payload.outcome !== 'responded') {
@@ -738,7 +751,13 @@ export function synthesizeExecuteReviewerState(args: {
     ];
     mergedFindings = [...args.state.findings, ...findings];
   }
-  const hasBlockingFindings = findings.some((finding) => finding.severity === 'blocking');
+  // Deliberately derived from the merged set as well as the current reviewer
+  // payload: a prior round's still-open blocker (for example one beyond the
+  // batched response round's presentation limit) must keep forcing a revision
+  // even when the current reviewer round is empty, so an empty round can never
+  // accept over an open blocking finding.
+  const hasBlockingFindings =
+    findings.some((finding) => finding.severity === 'blocking') || mergedFindings.some(isOpenBlockingFinding);
   const hasOpenNonBlockingFindings = mergedFindings.some(isOpenNonBlockingFinding);
   const openBlockingCanonicalSet = getOpenBlockingCanonicalSet(mergedFindings);
   const openBlockingCanonicalIds = [...openBlockingCanonicalSet].sort();
@@ -864,12 +883,23 @@ export function synthesizeExecuteResponseState(args: {
   });
 
   const outcome = args.response.payload.outcome;
-  const nextPhase: 'blocked' | 'reviewer_scope' | ExecuteFinalizationPhase =
+  // Response rounds batch: when open findings of this round's kind remain
+  // after the dispositions are applied (they were beyond the per-round
+  // presentation limit), stay in the same response phase so the next batch is
+  // presented immediately instead of spending a reviewer round per batch.
+  // Coverage validation guarantees the presented batch was fully
+  // dispositioned, so the backlog strictly shrinks and the loop terminates.
+  const hasNextResponseBatch = findings.some(mode === 'optional' ? isOpenNonBlockingFinding : isOpenBlockingFinding);
+  const nextPhase: 'blocked' | 'coder_response' | 'coder_optional_response' | 'reviewer_scope' | ExecuteFinalizationPhase =
     outcome === 'blocked' || outcome === 'split_plan'
       ? 'blocked'
       : mode === 'optional'
-        ? EXECUTE_FINALIZATION_PHASE
-        : 'reviewer_scope';
+        ? hasNextResponseBatch
+          ? 'coder_optional_response'
+          : EXECUTE_FINALIZATION_PHASE
+        : hasNextResponseBatch
+          ? 'coder_response'
+          : 'reviewer_scope';
 
   return {
     findings,

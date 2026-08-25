@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 
+import { boundChangedFileList } from './context/inline-review-context.js';
 import { validatePlanDocument } from './plan-validation.js';
 import { getDerivedPlanIdentityView, type DerivedPlanIdentityFields } from './state-views.js';
 import type {
@@ -618,15 +619,17 @@ export function renderRecentAcceptedScopesSummary(
   const concentrationSummary =
     touchedFileCounts.size === 0
       ? '(no changed files recorded)'
-      : [...touchedFileCounts.entries()]
-          .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-          .map(([file, touches]) => `${file} (${touches}/${recentScopes.length} scopes)`)
-          .join(', ');
+      : boundChangedFileList(
+          [...touchedFileCounts.entries()]
+            .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+            .map(([file, touches]) => `${file} (${touches}/${recentScopes.length} scopes)`),
+        ).join(', ');
 
   return [
     `Accepted scope history for parent objective ${parentScopeLabel} (oldest to newest, last ${window} max):`,
     ...recentScopes.map((scope) => {
-      const changedFiles = scope.changedFiles.length > 0 ? scope.changedFiles.join(', ') : '(no changed files)';
+      const changedFiles =
+        scope.changedFiles.length > 0 ? boundChangedFileList(scope.changedFiles).join(', ') : '(no changed files)';
       return [
         `- Scope ${scope.number}`,
         `  commit: ${scope.finalCommit ?? 'pending'}`,

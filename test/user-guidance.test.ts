@@ -19,6 +19,7 @@ import {
   clearUserGuidanceCache,
   collectGuidanceDiagnostics,
   GUIDANCE_SECTION_HEADER,
+  USER_GUIDANCE_MAX_CHARS,
 } from '../src/neal/prompts/guidance.js';
 
 function withGuidanceDir(write: (dir: string) => void, run: () => void) {
@@ -115,10 +116,18 @@ const COMPLETION_REVIEWER_ARGS = {
       changedFiles: ['src/example.ts'],
       unavailableReason: null,
     },
-    completedScopeSummary: [],
-    terminalChangedFilesSummary: [],
-    planChangedFilesSummary: [],
-    verificationSummary: [],
+    completedScopeSummary: '- Scope 1: accepted',
+    scopeAccountingSummary: '1 accepted top-level record',
+    terminalChangedFilesSummary: 'src/example.ts',
+    planChangedFilesSummary: 'src/example.ts',
+    verificationTally: {
+      totalRuns: 1,
+      distinctCommands: 1,
+      passed: 1,
+      failed: 0,
+      unknown: 0,
+      recentFailures: [],
+    },
     lastNonEmptyImplementationScope: null,
     continueExecutionCount: 0,
     continueExecutionMax: 2,
@@ -331,6 +340,37 @@ test('guidance is additive: structured actions and contract still present after 
       assert.match(planning, /`action`: `ready_for_review`/);
       assert.match(planning, /Do not use terminal marker lines for this primary planning response/);
       assert.match(planning, /## Execution Shape/);
+    },
+  );
+});
+
+test('over-cap guidance is truncated at render time with an explicit marker', () => {
+  const head = 'HEAD-OF-GUIDANCE '.repeat(4);
+  const body = `${head}${'g'.repeat(USER_GUIDANCE_MAX_CHARS)}TAIL-BEYOND-CAP`;
+  withGuidanceDir(
+    (dir) => writeGuidance(dir, 'coder', body),
+    () => {
+      const prompt = buildScopePrompt('/tmp/PLAN.md', 'progress here');
+      assert.match(prompt, new RegExp(GUIDANCE_SECTION_HEADER));
+      assert.match(prompt, /HEAD-OF-GUIDANCE/);
+      assert.match(prompt, /\[truncated \d+ character\(s\)\]/);
+      assert.doesNotMatch(prompt, /TAIL-BEYOND-CAP/);
+
+      // Diagnostics report the full character count of the file content.
+      const entries = collectGuidanceDiagnostics();
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].chars, body.length);
+    },
+  );
+});
+
+test('under-cap guidance is inlined without a truncation marker', () => {
+  withGuidanceDir(
+    (dir) => writeGuidance(dir, 'coder', 'Short guidance.'),
+    () => {
+      const prompt = buildScopePrompt('/tmp/PLAN.md', 'progress here');
+      assert.match(prompt, /Short guidance\./);
+      assert.doesNotMatch(prompt, /\[truncated \d+ character\(s\)\]/);
     },
   );
 });

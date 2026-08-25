@@ -242,6 +242,24 @@ export type VerificationCommandResult = {
   outputLength: number | null;
 };
 
+// Bounded tally of the run's recorded verification commands for the
+// final-completion prompts. Counts cover the latest result per distinct
+// command; recentFailures carries at most the last few failing commands with
+// command strings capped, so the tally stays a fixed size regardless of how
+// many verification commands the run recorded. The complete per-command record
+// lives in the run's events.ndjson.
+export type FinalCompletionVerificationTally = {
+  totalRuns: number;
+  distinctCommands: number;
+  passed: number;
+  failed: number;
+  unknown: number;
+  recentFailures: {
+    command: string;
+    exitCode: number | null;
+  }[];
+};
+
 export type FinalCompletionAggregateReviewContext = {
   baseCommit: string | null;
   headCommit: string | null;
@@ -270,9 +288,7 @@ export type FinalCompletionPacket = {
   planChangedFilesSummary: string;
   residualReviewDebt: ResidualReviewDebtItem[];
   residualReviewDebtSummary: string;
-  verificationCommands: string[];
-  verificationCommandResults: VerificationCommandResult[];
-  verificationSummary: string;
+  verificationTally: FinalCompletionVerificationTally;
   lastNonEmptyImplementationScope: FinalCompletionReferenceScope | null;
   continueExecutionCount: number;
   continueExecutionMax: number;

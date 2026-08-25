@@ -6,11 +6,9 @@
   "args": {
     "planDoc": "/tmp/PLAN.md",
     "packet": {
+      "planDoc": "/tmp/PLAN.md",
       "executionShape": "multi_scope",
       "currentScopeLabel": "6",
-      "acceptedScopeCount": 5,
-      "blockedScopeCount": 0,
-      "verificationOnlyCompletion": false,
       "finalCommit": "abc123",
       "aggregateReviewContext": {
         "baseCommit": "base123",
@@ -25,36 +23,52 @@
         ],
         "unavailableReason": null
       },
-      "completedScopeSummary": [
-        "1 accepted",
-        "2 accepted"
-      ],
-      "terminalChangedFilesSummary": [
+      "completedScopeSummary": "Scope 1: accepted. Scope 2: accepted.",
+      "acceptedScopeCount": 5,
+      "blockedScopeCount": 0,
+      "scopeAccounting": {
+        "acceptedScopeRecords": 5,
+        "acceptedTopLevelScopeRecords": 5,
+        "acceptedDerivedSubScopeRecords": 0,
+        "blockedScopeRecords": 0,
+        "blockedTopLevelScopeRecords": 0,
+        "blockedDerivedSubScopeRecords": 0,
+        "replacedParentScopes": [],
+        "summary": "Accepted scope records: 5 total (5 top-level parent/objective record(s), 0 derived sub-scope record(s))."
+      },
+      "scopeAccountingSummary": "Accepted scope records: 5 total (5 top-level parent/objective record(s), 0 derived sub-scope record(s)).",
+      "verificationOnlyCompletion": false,
+      "terminalChangedFiles": [
         "src/neal/prompts/execute.ts"
       ],
-      "planChangedFilesSummary": [
+      "terminalChangedFilesSummary": "src/neal/prompts/execute.ts",
+      "planChangedFiles": [
         "src/neal/prompts/execute.ts",
         "src/neal/prompts/specs.ts"
       ],
-      "verificationSummary": [
-        "pnpm typecheck",
-        "tsx --test test/prompt-spec-fixtures.test.ts"
-      ],
+      "planChangedFilesSummary": "src/neal/prompts/execute.ts, src/neal/prompts/specs.ts",
+      "residualReviewDebt": [],
+      "residualReviewDebtSummary": "none",
+      "verificationTally": {
+        "totalRuns": 3,
+        "distinctCommands": 2,
+        "passed": 1,
+        "failed": 1,
+        "unknown": 0,
+        "recentFailures": [
+          {
+            "command": "tsx --test test/prompt-spec-fixtures.test.ts",
+            "exitCode": 1
+          }
+        ]
+      },
       "lastNonEmptyImplementationScope": {
         "number": "5",
-        "marker": "AUTONOMY_SCOPE_DONE",
-        "result": "accepted",
-        "baseCommit": "base123",
         "finalCommit": "head456",
         "commitSubject": "tighten prompt-spec fixtures",
         "changedFiles": [
           "src/neal/prompts/specs.ts"
         ],
-        "reviewRounds": 1,
-        "findings": 0,
-        "meaningfulProgress": null,
-        "createdAt": "2026-04-17T00:00:00.000Z",
-        "completedAt": "2026-04-17T00:05:00.000Z",
         "archivedReviewPath": "/tmp/REVIEW-5.md"
       },
       "continueExecutionCount": 0,
@@ -80,7 +94,10 @@
     "`block_for_operator`",
     "`missingWork`",
     "Squash commit message rules:",
-    "`squashCommitMessage`"
+    "`squashCommitMessage`",
+    "\"verificationTally\":",
+    "\"totalRuns\": 3",
+    "`verificationTally` is a bounded summary of the run's recorded verification commands; the complete per-command record is in the run directory's events.ndjson."
   ],
   "excludes": [
     "Ordered Derived Scopes"

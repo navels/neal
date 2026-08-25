@@ -175,6 +175,84 @@ older run state.
 
 If a prompt change would force validator or retained parser behavior to change, treat that as a contract change and review the prompt spec, prompt builder, schema builder, and tests together.
 
+## Prompt size bounds
+
+Prompt inputs that grow with run length are either capped at render time or
+deliberately left unbounded with the provider input budget as their backstop,
+and each section below says which. The contract has four parts.
+
+**The completion packet carries a verification tally, not the history.**
+`buildFinalCompletionPacket()` embeds `verificationTally`
+(`buildVerificationTally` in `src/neal/verification-events.ts`): total command
+runs, distinct commands, passed/failed/unknown counts over the latest result
+per distinct command, and the last 10 failing commands with exit codes, each
+command string capped at 300 characters. Both completion prompts embed the
+tally and point at the run directory's `events.ndjson` for the complete
+per-command record. The events file is the source of truth; the packet never
+carries the full history and no extra artifact is written.
+
+**Run-scaling sections are capped where they enter a prompt.** The shared
+helpers live in `src/neal/context/inline-review-context.ts` and truncation is
+render-time only: stored state, persisted artifacts, and schema-validated
+coder outputs are never mutated to satisfy a bound.
+
+- Inlined range-diff sections: `INLINE_SECTION_MAX_CHARS` (200,000
+  characters) via `truncateInlineSectionBody`, with an explicit truncation
+  marker.
+- Operator guidance: `USER_GUIDANCE_MAX_CHARS` (20,000 characters) applies
+  per role file (`src/neal/prompts/guidance.ts`; `neal check` warns when a
+  guidance file exceeds the cap), to the persisted plan-review recovery
+  guidance message, and to the latest blocked-recovery guidance line.
+- Agent-authored free text (completion summaries, finding claims, round
+  summaries, blocked reasons, the last implementation scope's commit
+  subject): `boundFreeTextValues` shares
+  `AGENT_FREE_TEXT_SECTION_MAX_CHARS` (20,000 characters) across each fixed
+  group of values, markers included. The completion packet's completed-scope
+  summary, its scope-accounting summary, and the scope reviewer's recent
+  accepted-scope history are single strings capped at the same constant via
+  `truncateInlineSectionBody`.
+- Changed-file lists: `boundChangedFileList` renders the first
+  `CHANGED_FILE_LIST_LIMIT` (20) paths and collapses the rest to a
+  `(+N more)` entry; the underlying arrays keep every path for non-prompt
+  consumers.
+- Commit-subject lists (the aggregate completion range and the scope
+  review's commits-in-scope list): `boundCommitSubjectList` renders the
+  first `COMMIT_SUBJECT_LIST_LIMIT` (20) subjects under the shared free-text
+  budget and collapses the rest to a `(+N more)` entry.
+- Git diff-stat blocks (aggregate completion range and scope review):
+  `GIT_SUMMARY_SECTION_MAX_CHARS` (20,000 characters) via
+  `truncateInlineSectionBody`.
+
+Every bound is a module constant, not configuration. Three sections are
+intentionally unbounded and rely on the provider input budget below as their
+backstop: the inlined plan text, the progress text, and the review-findings
+selected-range diff (`buildReviewFindingsInlinedDiffSection` in
+`src/neal/review-findings/prompts.ts` inlines the full resolved-range diff
+for read-only reviewers because it is the source of truth for what the range
+changed — only the separate draft-prompt preview is capped, at
+`DIFF_PREVIEW_LIMIT`). The `INLINE_SECTION_MAX_CHARS` cap applies to the
+inlined range-diff sections built through `truncateInlineSectionBody`, not to
+every diff that reaches a prompt.
+
+**Providers with a hard limit reject oversized prompts before the SDK call.**
+A capability role that declares `maxInputChars` gets an adapter-boundary
+preflight on the exact text each turn sends; over-limit prompts fail fast
+with a non-retryable `input_too_large` error naming the prompt size, the
+limit, and the three largest `## ` sections. See
+[providers.md](providers.md) for the capability field, the preflight
+mechanics, and the error kind.
+
+**Input-size failures are recoverable without state surgery.** There is no
+sticky gate: the preflight re-measures the actual rebuilt prompt on every
+attempt, so `neal resume` after the prompt shrinks proceeds normally, while
+an unchanged oversized prompt fails fast before any provider call. While the
+latest failure is `input_too_large`, `neal status` renders a conditional Next
+Action: shrink the named largest input first (trim operator guidance files,
+or upgrade neal so current prompt bounds apply on resume), then resume; if
+the prompt can't fit under the limit, start a new run on a provider with a
+larger or no declared limit, because per-run provider rebinding doesn't
+exist.
+
 ## Provider variants
 
 Provider-specific variants are allowed, but they are not the default escape hatch. Each spec declares `providerVariants` for `shared` (status `default`) plus `openai-codex` and `anthropic-claude` (status `reserved_for_justified_divergence`).

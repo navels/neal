@@ -10,6 +10,31 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- Final-completion review could exceed the reviewer provider's input limit
+  because the completion packet embedded the run's whole verification-command
+  history in both completion prompts, and `neal resume` rebuilt the same
+  oversized prompt and failed the same way (#28).
+
+### Changed
+
+- The completion packet now carries a small verification tally (pass/fail/unknown
+  counts plus the last 10 failing commands) and points at `events.ndjson` for the
+  full record, instead of embedding every command (#28).
+- Prompt inputs that grow with run length — operator guidance, agent-authored
+  free text, changed-file lists, commit subjects, diff stats, and completed-scope
+  history — are capped when the prompt is built, with a visible truncation marker
+  (#28).
+- A provider can declare a hard input limit (Codex is 1,048,576 characters). neal
+  checks the prompt against it before the call and fails fast with a non-retryable
+  `input_too_large` error that names the three largest sections. Codex's own
+  over-limit rejection maps to the same error (#28).
+- `neal status` explains an input-size failure and tells you to trim the named
+  input and resume, rather than just saying to resume. Resume still runs and
+  re-measures the prompt each time, so it works once the input is smaller (#28).
+  See [docs/prompt-specs.md](docs/prompt-specs.md) for the prompt-size contract.
+
 ## [0.5.1] - 2026-08-24
 
 ### Changed

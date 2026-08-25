@@ -72,6 +72,7 @@ Each provider capability role declares:
 
 - whether the role is supported
 - read, write, and shell tool access
+- an optional hard per-turn input limit in characters (`maxInputChars`)
 - session resume support
 - model override support
 - neal structured control protocol support
@@ -85,6 +86,16 @@ structured-advisor capability and read tool access: every reviewer inspects
 the repository directly. Session resume support is required when a persisted
 session handle is present.
 
+A role that declares `maxInputChars` gets an input-budget preflight
+(`src/neal/providers/input-budget.ts`) in the adapter on the exact text each
+SDK turn sends: the bare prompt for plain turns, the protocol-wrapped prompt
+for structured turns, and each generated repair prompt before its repair
+thread is created. Every call site is covered without per-site wiring. A
+prompt over the limit fails fast with a non-retryable `input_too_large` error
+before any SDK call and without consuming API-retry budget; the error message
+names the prompt size, the limit, and the three largest `## ` sections. Roles
+without a declared limit skip the preflight.
+
 Current built-in capabilities are intentionally conservative:
 
 - OpenAI Codex supports coder and structured-advisor roles. The coder role is
@@ -92,6 +103,8 @@ Current built-in capabilities are intentionally conservative:
   broad local access. The structured-advisor (reviewer) role is read capable
   but never write or shell capable (see
   [The read-only reviewer invariant](#the-read-only-reviewer-invariant)).
+  Both roles declare `maxInputChars: 1,048,576` — the size at which Codex's
+  app-server rejects a turn with its `input_too_large` input-error code.
 - Anthropic Claude supports coder and structured-advisor roles. The coder role
   is read, write, and shell capable. The structured-advisor (reviewer) role is
   read capable but never write or shell capable.
@@ -402,6 +415,12 @@ Normalized error kinds are:
 - `structured_output_invalid`
 - `permission_denied`
 - `session_unavailable`
+- `input_too_large` (the assembled prompt exceeds the role's declared
+  `maxInputChars`; thrown by the adapter's preflight before any SDK call, and
+  a provider-side over-limit rejection — Codex's `input_too_large`
+  input-error code — normalizes to the same kind. Always non-retryable; the
+  message names the prompt size, the limit, and the three largest `## `
+  sections)
 - `provider_failed`
 - `unknown`
 

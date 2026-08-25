@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { getFinalCompletionContinueExecutionMax } from './config.js';
+import { boundChangedFileList } from './context/inline-review-context.js';
 import {
   getChangedFilesForRange,
   getCommitRange,
@@ -12,9 +13,8 @@ import { toResidualReviewDebt } from './review-debt.js';
 import { buildScopeAccountingSummary, getCurrentScopeLabel } from './scopes.js';
 import { getDerivedPlanView, getFinalCompletionView } from './state-views.js';
 import {
+  buildVerificationTally,
   extractVerificationCommandResults,
-  latestCommandResultPerCommand,
-  summarizeVerificationCommandResults,
   type RunEvent,
 } from './verification-events.js';
 import type {
@@ -54,7 +54,7 @@ function renderCompletedScopeSummary(scopes: ProgressScope[]) {
     .map((scope) => {
       const changedFiles =
         scope.changedFiles.length > 0
-          ? `${scope.changedFiles.length} file(s): ${scope.changedFiles.join(', ')}`
+          ? `${scope.changedFiles.length} file(s): ${boundChangedFileList(scope.changedFiles).join(', ')}`
           : 'no changed files';
       const commit = scope.finalCommit ?? 'pending';
       const parent = scope.derivedFromParentScope ? ` | parent ${scope.derivedFromParentScope}` : '';
@@ -254,8 +254,6 @@ export async function buildFinalCompletionPacket(args: {
   const finalCommit = terminalScope?.finalCommit ?? args.state.finalCommit;
   const effectiveScopes = mergeCompletedScopesWithTerminalScope(args.state, terminalScope);
   const allVerificationCommandResults = await loadVerificationCommandResults(args.state.runDir);
-  const verificationCommandResults = latestCommandResultPerCommand(allVerificationCommandResults);
-  const verificationCommands = verificationCommandResults.map((result) => result.command);
   const scopeAccounting = buildScopeAccountingSummary(effectiveScopes);
   const terminalChangedFiles = [...(terminalScope?.changedFiles ?? [])];
   const planChangedFiles = uniqueFiles(
@@ -285,9 +283,7 @@ export async function buildFinalCompletionPacket(args: {
     planChangedFilesSummary: summarizeChangedFiles(planChangedFiles),
     residualReviewDebt,
     residualReviewDebtSummary: summarizeResidualReviewDebt(effectiveScopes),
-    verificationCommands,
-    verificationCommandResults,
-    verificationSummary: summarizeVerificationCommandResults(verificationCommandResults),
+    verificationTally: buildVerificationTally(allVerificationCommandResults),
     lastNonEmptyImplementationScope: findLastNonEmptyImplementationScope(effectiveScopes, terminalScope, args.state),
     continueExecutionCount: finalCompletion?.continueExecutionCount ?? 0,
     continueExecutionMax: Math.max(0, getFinalCompletionContinueExecutionMax(args.state.cwd)),

@@ -1,5 +1,14 @@
 import type { ReviewFinding } from '../types.js';
-import { renderInlinedRangeDiffSection, truncateInlineSectionBody } from '../context/inline-review-context.js';
+import {
+  AGENT_FREE_TEXT_SECTION_MAX_CHARS,
+  boundChangedFileList,
+  boundCommitSubjectList,
+  boundFreeTextValues,
+  boundOpenFindingsForPrompt,
+  GIT_SUMMARY_SECTION_MAX_CHARS,
+  renderInlinedRangeDiffSection,
+  truncateInlineSectionBody,
+} from '../context/inline-review-context.js';
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
 import {
   AUTONOMY_BLOCKED,
@@ -150,6 +159,29 @@ export type EarlierScopeFileChange = {
 
 export const EARLIER_SCOPE_CHANGES_SECTION_HEADING = '## Earlier-scope changes to files in this diff';
 
+// Render-only view of the coder's progress justification: the four free-text
+// fields share the fixed aggregate free-text budget; the stored payload keeps
+// its full text.
+function boundProgressJustificationForPrompt(justification: {
+  milestoneTargeted: string;
+  newEvidence: string;
+  whyNotRedundant: string;
+  nextStepUnlocked: string;
+}) {
+  const bounded = boundFreeTextValues([
+    justification.milestoneTargeted,
+    justification.newEvidence,
+    justification.whyNotRedundant,
+    justification.nextStepUnlocked,
+  ]);
+  return {
+    milestoneTargeted: bounded[0]!,
+    newEvidence: bounded[1]!,
+    whyNotRedundant: bounded[2]!,
+    nextStepUnlocked: bounded[3]!,
+  };
+}
+
 // Rendered for every execute-scope review, with or without an overlap: a
 // tool-access reviewer can find earlier-scope history itself, and the rule
 // about what that history means must not depend on whether Neal inlined it.
@@ -200,8 +232,9 @@ export function buildReviewerPrompt(args: {
   // instead of falling back to git_diff-tool phrasing the reviewer cannot use.
   const rangeDiffInlined =
     accessMode === 'read-only' && args.inlinedRangeDiff !== null && args.inlinedRangeDiff !== undefined;
-  const changedFilesText = args.changedFiles.length > 0 ? args.changedFiles.join('\n') : '(no changed files)';
-  const commitsText = args.commits.length > 0 ? args.commits.join('\n') : '(no commits recorded)';
+  const changedFilesText =
+    args.changedFiles.length > 0 ? boundChangedFileList(args.changedFiles).join('\n') : '(no changed files)';
+  const commitsText = args.commits.length > 0 ? boundCommitSubjectList(args.commits).join('\n') : '(no commits recorded)';
   const falsificationLines = getCodeReviewFalsificationLines({
     rangeLabel: 'commit range',
     gitInspectionExamples: `Use git commands against the repository, for example: git diff ${args.baseCommit}..${args.headCommit}, git show --stat ${args.headCommit}, and targeted path diffs or file reads for changed files.`,
@@ -259,7 +292,7 @@ export function buildReviewerPrompt(args: {
     commitsText,
     '',
     'Diff stat:',
-    args.diffStat || '(no diff stat)',
+    args.diffStat ? truncateInlineSectionBody(args.diffStat, GIT_SUMMARY_SECTION_MAX_CHARS) : '(no diff stat)',
     '',
     'Changed files:',
     changedFilesText,
@@ -278,10 +311,10 @@ export function buildReviewerPrompt(args: {
     'Use `meaningfulProgressRationale` to explain the convergence judgment against the parent objective and recent accepted-scope history. Do not use it to restate correctness findings.',
     '',
     'Coder progress justification for this scope:',
-    JSON.stringify(args.progressJustification, null, 2),
+    JSON.stringify(boundProgressJustificationForPrompt(args.progressJustification), null, 2),
     '',
     'Recent accepted scope history for this parent objective:',
-    args.recentHistorySummary,
+    truncateInlineSectionBody(args.recentHistorySummary, AGENT_FREE_TEXT_SECTION_MAX_CHARS),
     '',
     reviewHistoryLine,
     'If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.',
@@ -395,7 +428,7 @@ export function buildCoderResponsePrompt(args: {
     ...getUserGuidanceLines('coder'),
     '',
     'Open findings:',
-    JSON.stringify(args.openFindings, null, 2),
+    JSON.stringify(boundOpenFindingsForPrompt(args.openFindings), null, 2),
     '',
     'Current progress state:',
     buildProgressSection(args.progressText),
