@@ -40,7 +40,7 @@
 #
 #   # Maximum number of times final completion review may send execution back
 #   # for more work before neal stops reopening the plan.
-#   final_completion_continue_execution_max: 2
+#   final_completion_continue_execution_max: 3
 #
 #   # Optional local notification command. Leave commented to keep
 #   # notifications disabled.
