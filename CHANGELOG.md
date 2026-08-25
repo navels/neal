@@ -34,7 +34,9 @@ dependency-update policy.
   input and resume, rather than just saying to resume. Resume still runs and
   re-measures the prompt each time, so it works once the input is smaller (#28).
   See [docs/prompt-specs.md](docs/prompt-specs.md) for the prompt-size contract.
-
+- Raised the default `final_completion_continue_execution_max` from 2 to 3, so
+  the final-completion reviewer gets one more round to send the coder back
+  before a run blocks for the operator.
 ## [0.5.1] - 2026-08-24
 
 ### Changed

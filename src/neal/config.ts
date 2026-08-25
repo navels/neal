@@ -133,7 +133,7 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     agent_turn_startup_timeout_ms: 300_000,
     agent_turn_retry_limit: 1,
     interactive_blocked_recovery_max_turns: 3,
-    final_completion_continue_execution_max: 2,
+    final_completion_continue_execution_max: 3,
     consultant_max_attempts: 1,
     notify_bin: null,
   },
