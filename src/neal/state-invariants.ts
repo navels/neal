@@ -295,11 +295,17 @@ function assertValidInteractiveBlockedRecoveryState(args: {
       `must not exceed recorded turn count ${recovery.turns.length}`,
     );
   }
-  if (recovery.turns.length > recovery.maxTurns) {
+  // A recovery that reaches the turn cap and is then resolved by a turn-cap
+  // terminal directive records one terminal-resolution turn beyond `maxTurns`,
+  // so the recorded count may be `maxTurns + 1`. That extra turn is only ever
+  // the terminal resolution: past the cap, new guidance becomes a
+  // `pendingDirective` rather than an appended turn, so nothing else can push
+  // the count higher.
+  if (recovery.turns.length > recovery.maxTurns + 1) {
     throwStateInvariant(
       context,
       `${fieldPath}.turns`,
-      `recorded turn count ${recovery.turns.length} exceeds maxTurns ${recovery.maxTurns}`,
+      `recorded turn count ${recovery.turns.length} exceeds maxTurns ${recovery.maxTurns} by more than the one terminal-resolution turn`,
     );
   }
 

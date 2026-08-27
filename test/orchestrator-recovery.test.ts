@@ -1811,6 +1811,75 @@ test('interactive blocked recovery can finalize into a terminal blocked run', as
   assert.match(supportMarkdown, /Recovery turn 1 coder action: terminal_block/);
 });
 
+test('a turn-cap terminal_block persists without tripping the recovery history turn-count invariant (#37)', async () => {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 4,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    coderSessionHandle: 'coder-session-4',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-05-01T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 3,
+      pendingDirective: {
+        recordedAt: '2026-05-01T00:04:00.000Z',
+        operatorGuidance: 'Give up on this scope.',
+        terminalOnly: true,
+        origin: 'operator',
+      },
+      turns: [1, 2, 3].map((n) => ({
+        number: n,
+        recordedAt: `2026-05-01T00:0${n}:00.000Z`,
+        operatorGuidance: `Instruction ${n}.`,
+        origin: 'operator' as const,
+        disposition: {
+          recordedAt: `2026-05-01T00:0${n}:30.000Z`,
+          sessionHandle: 'coder-session-4',
+          action: 'resume_current_scope' as const,
+          summary: 'Continued.',
+          rationale: 'Operator input.',
+          blocker: '',
+          replacementPlan: '',
+          laterScopeNumber: 0,
+          laterScopeBody: '',
+          resultingPhase: 'coder_response' as const,
+        },
+      })),
+    },
+  });
+
+  // A turn-cap terminal_block records the terminal-resolution turn beyond the
+  // cap and archives the recovery; the persisted state must satisfy the history
+  // turn-count invariant, not throw.
+  const nextState = await applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'terminal_block',
+      summary: 'Blocking for the operator.',
+      rationale: 'No safe way to continue.',
+      blocker: 'The scope cannot proceed without operator direction.',
+      replacementPlan: '',
+      laterScopeNumber: 0,
+      laterScopeBody: '',
+    },
+    'coder-session-4b',
+  );
+
+  assert.equal(nextState.phase, 'blocked');
+  assert.equal(nextState.status, 'blocked');
+  const archived = nextState.interactiveBlockedRecoveryHistory.at(-1);
+  assert.equal(archived?.resolvedByAction, 'terminal_block');
+  assert.equal(archived?.turns.length, 4);
+  assert.equal(archived?.turns.at(-1)?.origin, 'operator');
+
+  const reloaded = await loadState(statePath);
+  assert.equal(reloaded.interactiveBlockedRecoveryHistory.at(-1)?.turns.length, 4);
+});
+
 test('terminal blocked recovery abandons an active pending derived-plan review as rejected', async () => {
   const derivedPlanPath = '/tmp/DERIVED_PLAN_SCOPE_7.md';
   const { statePath, state } = await createResumeFixture({
