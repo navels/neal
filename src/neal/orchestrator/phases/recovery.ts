@@ -24,7 +24,6 @@ import type {
   CoderBlockedRecoveryDisposition,
   InteractiveBlockedRecoveryConsultantAdvice,
   InteractiveBlockedRecoveryState,
-  InteractiveBlockedRecoveryTurnOrigin,
   OrchestrationState,
   ConsultantVerdict,
   RecentBlockRecord,
@@ -236,9 +235,7 @@ async function applyRecoverableConsultantDirective(args: {
     sourcePhase: enteredState.interactiveBlockedRecovery?.sourcePhase,
     blockedReason: reason,
   });
-  const resolvedState = await recordInteractiveBlockedRecoveryGuidance(statePath, resolutionDirective, logger, {
-    origin: 'consultant',
-  });
+  const resolvedState = await recordInteractiveBlockedRecoveryTurn(statePath, resolutionDirective, 'consultant', logger);
   await logger?.event('consultant.resolved', {
     scopeNumber: resolvedState.currentScopeNumber,
     sourcePhase,
@@ -334,9 +331,18 @@ export async function recordInteractiveBlockedRecoveryGuidance(
   statePath: string,
   operatorGuidance: string,
   logger?: RunLogger,
-  options?: { origin?: InteractiveBlockedRecoveryTurnOrigin },
 ) {
-  const origin = options?.origin ?? 'operator';
+  return recordInteractiveBlockedRecoveryTurn(statePath, operatorGuidance, 'operator', logger);
+}
+
+// Shared by operator guidance (`neal resume --message`) and the consultant
+// injection path; `origin` marks the turn with whichever created it.
+async function recordInteractiveBlockedRecoveryTurn(
+  statePath: string,
+  operatorGuidance: string,
+  origin: NonNullable<InteractiveBlockedRecoveryState['turns'][number]['origin']>,
+  logger?: RunLogger,
+) {
   const trimmedGuidance = operatorGuidance.trim();
   if (!trimmedGuidance) {
     throw new Error('Recovery guidance must not be empty');

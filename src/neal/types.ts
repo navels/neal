@@ -323,16 +323,14 @@ export type InteractiveBlockedRecoveryTurnDisposition = {
   resultingPhase: OrchestrationPhase;
 };
 
-// Who authored a recovery turn's guidance. `null` means the turn was persisted
-// before the marker existed, which is treated like a consultant turn wherever
-// operator authorship matters.
-export type InteractiveBlockedRecoveryTurnOrigin = 'operator' | 'consultant';
-
 export type InteractiveBlockedRecoveryTurn = {
   number: number;
   recordedAt: string;
   operatorGuidance: string;
-  origin: InteractiveBlockedRecoveryTurnOrigin | null;
+  // Who authored the guidance. `null` means the turn was persisted before the
+  // marker existed, which is treated like a consultant turn wherever operator
+  // authorship matters.
+  origin: 'operator' | 'consultant' | null;
   disposition: InteractiveBlockedRecoveryTurnDisposition | null;
 };
 
