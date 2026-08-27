@@ -30,7 +30,7 @@ function appendInteractiveBlockedRecoverySection(
 
   if (recovery.pendingDirective) {
     lines.push(
-      `- Pending ${recovery.pendingDirective.terminalOnly ? 'terminal' : 'consultant'} directive at ${recovery.pendingDirective.recordedAt}: ${recovery.pendingDirective.operatorGuidance}`,
+      `- Pending terminal directive at ${recovery.pendingDirective.recordedAt}: ${recovery.pendingDirective.operatorGuidance}`,
     );
   }
 
@@ -52,7 +52,7 @@ function appendInteractiveBlockedRecoverySection(
 
   for (const turn of recovery.turns) {
     lines.push(
-      `- Recovery turn ${turn.number} at ${turn.recordedAt}: ${turn.operatorGuidance}`,
+      `- Recovery turn ${turn.number} at ${turn.recordedAt} (${turn.origin ?? 'unrecorded'} origin): ${turn.operatorGuidance}`,
     );
 
     if (turn.disposition) {

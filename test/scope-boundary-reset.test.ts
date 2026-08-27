@@ -170,6 +170,7 @@ function seedInteractiveBlockedRecovery(): InteractiveBlockedRecoveryState {
         number: 1,
         recordedAt: '2026-07-11T02:00:00.000Z',
         operatorGuidance: 'seed operator guidance',
+        origin: 'operator',
         disposition: null,
       },
     ],

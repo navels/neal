@@ -50,6 +50,8 @@ import {
 } from './state-invariants.js';
 
 const TOP_LEVEL_MODES = new Set<TopLevelMode>(['plan', 'execute']);
+const INTERACTIVE_BLOCKED_RECOVERY_TURN_ORIGINS = ['operator', 'consultant'] as const;
+
 const INTERACTIVE_BLOCKED_RECOVERY_SOURCE_PHASES = new Set<InteractiveBlockedRecoveryState['sourcePhase']>([
   'coder_plan',
   'reviewer_plan',
@@ -855,6 +857,7 @@ function hydrateInteractiveBlockedRecoveryTurn(
     number: readSafeInteger(turn, 'number', `${fieldPath}.number`),
     recordedAt: readString(turn, 'recordedAt', `${fieldPath}.recordedAt`),
     operatorGuidance: readString(turn, 'operatorGuidance', `${fieldPath}.operatorGuidance`),
+    origin: readOptionalNullableEnum(turn, 'origin', INTERACTIVE_BLOCKED_RECOVERY_TURN_ORIGINS, `${fieldPath}.origin`) ?? null,
     disposition: hydrateInteractiveBlockedRecoveryTurnDisposition(
       readRequired(turn, 'disposition', `${fieldPath}.disposition`),
       `${fieldPath}.disposition`,

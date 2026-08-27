@@ -221,6 +221,7 @@ test('state round-trip preserves a fully populated v1 state', async () => {
             number: 1,
             recordedAt: '2026-05-05T23:01:00.000Z',
             operatorGuidance: 'Keep the recovery narrow.',
+            origin: 'operator',
             disposition: null,
           },
         ],
@@ -744,6 +745,7 @@ test('state hydration defaults a recovery disposition without later-scope fields
           number: 1,
           recordedAt: '2026-08-27T00:01:00.000Z',
           operatorGuidance: 'Keep going.',
+          origin: 'operator',
           disposition: {
             recordedAt: '2026-08-27T00:02:00.000Z',
             sessionHandle: 'coder-session-1',
@@ -771,4 +773,40 @@ test('state hydration defaults a recovery disposition without later-scope fields
 
   assert.equal(loadedState.interactiveBlockedRecovery?.turns[0]?.disposition?.laterScopeNumber, 0);
   assert.equal(loadedState.interactiveBlockedRecovery?.turns[0]?.disposition?.laterScopeBody, '');
+});
+
+test('state hydration treats a recovery turn without an origin marker as unrecorded (null)', async () => {
+  const { state, statePath } = await createMinimalStateFixture('neal-state-legacy-turn-origin-');
+  await saveState(statePath, {
+    ...state,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-08-27T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      pendingDirective: null,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-08-27T00:01:00.000Z',
+          operatorGuidance: 'Keep going.',
+          origin: 'operator',
+          disposition: null,
+        },
+      ],
+    },
+  });
+  const persisted = JSON.parse(await readFile(statePath, 'utf8')) as {
+    interactiveBlockedRecovery: { turns: Array<Record<string, unknown>> };
+  };
+  delete persisted.interactiveBlockedRecovery.turns[0].origin;
+  await writeFile(statePath, JSON.stringify(persisted, null, 2) + '\n', 'utf8');
+
+  const loadedState = await loadState(statePath);
+
+  assert.equal(loadedState.interactiveBlockedRecovery?.turns[0]?.origin, null);
 });

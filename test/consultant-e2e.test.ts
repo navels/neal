@@ -192,7 +192,7 @@ test('e2e: review_stuck recoverable injects the directive and resolves autonomou
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
     assert.equal(
-      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableVerdict().resolutionDirective,
     );
     assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
@@ -222,7 +222,7 @@ test('e2e: coder block is triaged by the generalized dispatch with sourcePhase c
     assert.equal(advisor.callCount(), 1);
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(
-      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableVerdict().resolutionDirective,
     );
     assert.equal(nextState.consultantAttemptCount, 1);
@@ -309,7 +309,7 @@ test('e2e: recoverable block auto-applies the consultant directive without yield
     // The consultant's directive is injected as the pending turn — the run
     // consumes it rather than waiting for the operator.
     assert.equal(
-      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableVerdict().resolutionDirective,
     );
     assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);

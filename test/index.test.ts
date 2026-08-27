@@ -1825,6 +1825,7 @@ test('neal resume --message rejects another message while recovery guidance is p
           number: 1,
           recordedAt: new Date().toISOString(),
           operatorGuidance: 'Handle this first.',
+          origin: 'operator',
           disposition: null,
         },
       ],

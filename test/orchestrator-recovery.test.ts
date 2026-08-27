@@ -16,8 +16,7 @@ import { getExecuteRunResultExitCode } from '../src/neal/commands/writer-exit-co
 import { runReviewPhase } from '../src/neal/orchestrator/phases/review.js';
 import { applyInteractiveBlockedRecoveryDisposition, enterInteractiveBlockedRecovery, hasPendingInteractiveBlockedRecoveryTurn, recordInteractiveBlockedRecoveryGuidance, runInteractiveBlockedRecoveryPhase, shouldNotifyInteractiveBlockedRecoveryEntry } from '../src/neal/orchestrator/phases/recovery.js';
 import { getCurrentExecutionScopeDescriptor } from '../src/neal/scopes.js';
-import { buildRecentBlockCandidate } from '../src/neal/adjudicator/consultant.js';
-import { getDefaultAgentConfig, loadState, saveState } from '../src/neal/state.js';
+import { getDefaultAgentConfig, loadState } from '../src/neal/state.js';
 import { getPlanReviewGuidanceView, getPublicLifecycleView } from '../src/neal/state-views.js';
 import type { OrchestrationState } from '../src/neal/types.js';
 import { createResumeFixture, runGit, runNealCliResultInCwd, createExecuteFinalizationFixture, readEventTypes, readEvents, REVIEW_STUCK_REASON, recoverableConsultantVerdict, nonRecoverableConsultantVerdict, installConsultantAdvisorOverride, createConsultantRecoveryFixture, writeConsultantKnobConfig } from './helpers/orchestrator-harness.js';
@@ -90,6 +89,7 @@ test('resume restores failed interactive blocked recovery state and rewrites art
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Keep the scope and avoid infrastructure edits.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -250,7 +250,7 @@ test('recoverable block auto-applies the consultant directive without yielding',
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
     assert.equal(
-      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableConsultantVerdict().resolutionDirective,
     );
     assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
@@ -526,7 +526,7 @@ test('eligible coder block is triaged by the generalized dispatch regardless of 
     assert.equal(advisor.callCount(), 1, 'an eligible coder block is adjudicated');
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(
-      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
       recoverableConsultantVerdict().resolutionDirective,
     );
     assert.equal(nextState.consultantAttemptCount, 1);
@@ -854,6 +854,7 @@ test('recordRecoveryGuidanceForResolvedRun rejects recording more guidance while
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this scope with a narrower plan and keep the last accepted commit.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -892,18 +893,21 @@ test('recordRecoveryGuidanceForResolvedRun records a terminal-only directive whe
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'First operator instruction.',
+          origin: 'operator',
           disposition: null,
         },
         {
           number: 2,
           recordedAt: '2026-04-16T00:02:00.000Z',
           operatorGuidance: 'Second operator instruction.',
+          origin: 'operator',
           disposition: null,
         },
         {
           number: 3,
           recordedAt: '2026-04-16T00:03:00.000Z',
           operatorGuidance: 'Third operator instruction.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1057,6 +1061,7 @@ test('interactive blocked recovery resumes through the next ordinary coder path'
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Apply the reviewer feedback and continue this scope.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1112,6 +1117,7 @@ test('interactive blocked recovery can route replacement through split-plan mach
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this scope with a narrower derived plan.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1168,6 +1174,7 @@ test('interactive blocked recovery blocks invalid replacement plans without rese
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this scope with a narrower derived plan.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1240,6 +1247,7 @@ test('interactive blocked recovery keeps an existing pending derived plan when r
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this derived plan with a narrower valid plan.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1331,6 +1339,7 @@ test('interactive blocked recovery valid replacement starts a fresh pending deri
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this derived plan with a fresh valid plan.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1394,6 +1403,7 @@ test('interactive blocked recovery records a blocked history result when replace
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Replace this scope with a narrower derived plan.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1451,6 +1461,7 @@ test('interactive blocked recovery dispositions reject plan-mode sessions', asyn
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Keep revising the plan.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1655,6 +1666,7 @@ test('interactive blocked recovery can remain paused after a handled turn', asyn
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Do not touch infrastructure, only local code.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1706,6 +1718,7 @@ test('neal resume reports when interactive blocked recovery is waiting for opera
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Do not touch infrastructure, only local code.',
+          origin: 'operator',
           disposition: {
             recordedAt: '2026-04-16T00:02:00.000Z',
             sessionHandle: 'coder-session-5b',
@@ -1762,6 +1775,7 @@ test('interactive blocked recovery can finalize into a terminal blocked run', as
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Try one more time with the same repository constraints.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1822,6 +1836,7 @@ test('terminal blocked recovery abandons an active pending derived-plan review a
           number: 1,
           recordedAt: '2026-04-16T00:01:00.000Z',
           operatorGuidance: 'Stop this derived plan and block the parent scope.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -1977,6 +1992,7 @@ async function createLaterScopeRevisionFixture(planText: string, overrides: Part
           number: 1,
           recordedAt: '2026-08-27T00:01:00.000Z',
           operatorGuidance: 'Keep going here; narrow scope 3 to the parser half.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -2238,8 +2254,8 @@ test('a consultant-injected turn is never offered or allowed a later-scope revis
     clearProviderCapabilitiesOverridesForTesting();
   }
   assert.equal(advisor.callCount(), 1);
-  assert.equal(consultantTurnState.interactiveBlockedRecovery?.turns.length, 0);
-  assert.equal(consultantTurnState.interactiveBlockedRecovery?.pendingDirective?.terminalOnly, false);
+  assert.equal(consultantTurnState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.equal(consultantTurnState.interactiveBlockedRecovery?.turns[0]?.origin, 'consultant');
   assert.equal(hasPendingInteractiveBlockedRecoveryTurn(consultantTurnState), true);
 
   const prompts: string[] = [];
@@ -2343,7 +2359,7 @@ test('a consultant-injected turn is never offered or allowed a later-scope revis
   }
 });
 
-test('a pre-existing consultant turn persisted as a turns[] entry is never offered or allowed a revision, while an operator turn with equal timestamps is', async () => {
+test('a turn persisted without an origin marker is never offered or allowed a revision, while a marked operator turn is', async () => {
   const fakeCoder = (structured: Record<string, unknown>, prompts: string[]) => ({
     createCoderAdapter() {
       return {
@@ -2352,7 +2368,7 @@ test('a pre-existing consultant turn persisted as a turns[] entry is never offer
         },
         async runStructuredPrompt<TStructured>(args: CoderStructuredPromptArgs) {
           prompts.push(args.prompt);
-          return { sessionHandle: 'coder-session-legacy', structured: structured as TStructured };
+          return { sessionHandle: 'coder-session-origin', structured: structured as TStructured };
         },
       };
     },
@@ -2366,37 +2382,30 @@ test('a pre-existing consultant turn persisted as a turns[] entry is never offer
     laterScopeNumber: 3,
     laterScopeBody: REVISED_SCOPE_3,
   };
+  const recoveryBase = {
+    enteredAt: '2026-08-01T00:00:00.000Z',
+    sourcePhase: 'reviewer_scope' as const,
+    blockedReason: REVIEW_STUCK_REASON,
+    maxTurns: 3,
+    lastHandledTurn: 0,
+    pendingDirective: null,
+  };
 
-  // A consultant directive recorded as an ordinary turn by an older version:
-  // the only trace is the anti-thrash record for this block with no advice.
-  // Timestamps are deliberately unequal and out of order.
-  const legacyBase = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
+  // A turn recorded before the origin marker existed: treated as not operator-authored.
+  const legacy = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
     interactiveBlockedRecovery: {
-      enteredAt: '2026-08-01T00:00:00.000Z',
-      sourcePhase: 'reviewer_scope',
-      blockedReason: REVIEW_STUCK_REASON,
-      maxTurns: 3,
-      lastHandledTurn: 0,
-      pendingDirective: null,
+      ...recoveryBase,
       turns: [
         {
           number: 1,
-          recordedAt: '2025-01-01T00:00:00.000Z',
-          operatorGuidance: recoverableConsultantVerdict().resolutionDirective,
+          recordedAt: '2026-08-01T00:00:01.000Z',
+          operatorGuidance: 'Keep going here; narrow scope 3 to the parser half.',
+          origin: null,
           disposition: null,
         },
       ],
     },
-    consultantAttemptCount: 1,
   });
-  const legacyCandidate = buildRecentBlockCandidate(legacyBase.state, REVIEW_STUCK_REASON, 'reviewer_scope');
-  const legacy = {
-    ...legacyBase,
-    state: await saveState(legacyBase.statePath, {
-      ...legacyBase.state,
-      recentBlocks: [{ ...legacyCandidate, count: 1, recordedAt: '2024-01-01T00:00:00.000Z' }],
-    }),
-  };
   const legacyPrompts: string[] = [];
   setProviderCapabilitiesOverrideForTesting('openai-codex', fakeCoder(revision, legacyPrompts));
   try {
@@ -2414,21 +2423,16 @@ test('a pre-existing consultant turn persisted as a turns[] entry is never offer
   );
   assert.equal(await readFile(legacy.state.planDoc, 'utf8'), TOP_LEVEL_PLAN);
 
-  // A genuine operator turn on the same kind of block, recorded with the exact
-  // same timestamp as enteredAt: eligible, because no consultant record exists.
+  // The same turn carrying the operator marker: eligible.
   const operator = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
     interactiveBlockedRecovery: {
-      enteredAt: '2026-08-01T00:00:00.000Z',
-      sourcePhase: 'reviewer_scope',
-      blockedReason: REVIEW_STUCK_REASON,
-      maxTurns: 3,
-      lastHandledTurn: 0,
-      pendingDirective: null,
+      ...recoveryBase,
       turns: [
         {
           number: 1,
-          recordedAt: '2026-08-01T00:00:00.000Z',
+          recordedAt: '2026-08-01T00:00:01.000Z',
           operatorGuidance: 'Keep going here; narrow scope 3 to the parser half.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -2471,7 +2475,7 @@ test('an operator message in a second same-scope recovery after the consultant b
     clearProviderCapabilitiesOverridesForTesting();
   }
   assert.equal(advisor.callCount(), 1);
-  assert.equal(firstRecovery.interactiveBlockedRecovery?.pendingDirective?.terminalOnly, false);
+  assert.equal(firstRecovery.interactiveBlockedRecovery?.turns.at(-1)?.origin, 'consultant');
 
   const prompts: string[] = [];
   const responses: Array<Record<string, unknown>> = [

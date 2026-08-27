@@ -157,6 +157,7 @@ test('support and progress artifacts preserve completed interactive blocked reco
             number: 1,
             recordedAt: '2026-04-16T00:01:00.000Z',
             operatorGuidance: 'Apply the reviewer feedback and continue this scope.',
+            origin: 'operator',
             disposition: {
               recordedAt: '2026-04-16T00:02:00.000Z',
               sessionHandle: 'coder-session-4b',
@@ -2207,6 +2208,7 @@ test('final completion review and retrospective surface interactive blocked reco
             number: 1,
             recordedAt: '2026-04-16T00:01:00.000Z',
             operatorGuidance: 'Broaden the scope to include the blocking test fix.',
+            origin: 'operator',
             disposition: {
               recordedAt: '2026-04-16T00:02:00.000Z',
               sessionHandle: 'coder-session-3',
