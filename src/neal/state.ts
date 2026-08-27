@@ -50,6 +50,8 @@ import {
 } from './state-invariants.js';
 
 const TOP_LEVEL_MODES = new Set<TopLevelMode>(['plan', 'execute']);
+const INTERACTIVE_BLOCKED_RECOVERY_TURN_ORIGINS = ['operator', 'consultant'] as const;
+
 const INTERACTIVE_BLOCKED_RECOVERY_SOURCE_PHASES = new Set<InteractiveBlockedRecoveryState['sourcePhase']>([
   'coder_plan',
   'reviewer_plan',
@@ -318,6 +320,17 @@ function readNullableString(record: StateRecord, key: string, fieldPath = key): 
     return value;
   }
   throwInvalidState(fieldPath, `expected string or null, received ${formatStateValue(value)}`);
+}
+
+function readOptionalString(record: StateRecord, key: string, fieldPath = key): string | undefined {
+  if (!hasOwn(record, key)) {
+    return undefined;
+  }
+  const value = record[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+  throwInvalidState(fieldPath, `expected string, received ${formatStateValue(value)}`);
 }
 
 function readOptionalBoolean(record: StateRecord, key: string, fieldPath = key): boolean | undefined {
@@ -829,6 +842,8 @@ function hydrateInteractiveBlockedRecoveryTurnDisposition(
     rationale: readString(disposition, 'rationale', `${fieldPath}.rationale`),
     blocker: readString(disposition, 'blocker', `${fieldPath}.blocker`),
     replacementPlan: readString(disposition, 'replacementPlan', `${fieldPath}.replacementPlan`),
+    laterScopeNumber: readOptionalSafeInteger(disposition, 'laterScopeNumber', `${fieldPath}.laterScopeNumber`) ?? 0,
+    laterScopeBody: readOptionalString(disposition, 'laterScopeBody', `${fieldPath}.laterScopeBody`) ?? '',
     resultingPhase: readOrchestrationPhase(disposition, 'resultingPhase', `${fieldPath}.resultingPhase`),
   };
 }
@@ -842,6 +857,7 @@ function hydrateInteractiveBlockedRecoveryTurn(
     number: readSafeInteger(turn, 'number', `${fieldPath}.number`),
     recordedAt: readString(turn, 'recordedAt', `${fieldPath}.recordedAt`),
     operatorGuidance: readString(turn, 'operatorGuidance', `${fieldPath}.operatorGuidance`),
+    origin: readOptionalNullableEnum(turn, 'origin', INTERACTIVE_BLOCKED_RECOVERY_TURN_ORIGINS, `${fieldPath}.origin`) ?? null,
     disposition: hydrateInteractiveBlockedRecoveryTurnDisposition(
       readRequired(turn, 'disposition', `${fieldPath}.disposition`),
       `${fieldPath}.disposition`,
@@ -861,6 +877,7 @@ function hydrateInteractiveBlockedRecoveryDirective(
     recordedAt: readString(directive, 'recordedAt', `${fieldPath}.recordedAt`),
     operatorGuidance: readString(directive, 'operatorGuidance', `${fieldPath}.operatorGuidance`),
     terminalOnly: readBoolean(directive, 'terminalOnly', `${fieldPath}.terminalOnly`),
+    origin: readOptionalNullableEnum(directive, 'origin', INTERACTIVE_BLOCKED_RECOVERY_TURN_ORIGINS, `${fieldPath}.origin`) ?? null,
   };
 }
 

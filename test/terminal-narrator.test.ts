@@ -463,6 +463,7 @@ test('terminal narrator distinguishes waiting and pending recovery guidance', as
           number: 1,
           recordedAt: '2026-05-17T00:01:00.000Z',
           operatorGuidance: 'Try a smaller change.',
+          origin: 'operator',
           disposition: null,
         },
       ],

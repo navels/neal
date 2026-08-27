@@ -111,6 +111,7 @@ function makeInteractiveBlockedRecovery(
         number: 1,
         recordedAt: '2026-05-06T01:01:00.000Z',
         operatorGuidance: 'Continue narrowly.',
+        origin: 'operator',
         disposition: {
           recordedAt: '2026-05-06T01:02:00.000Z',
           sessionHandle: 'coder-recovery-session',
@@ -119,6 +120,8 @@ function makeInteractiveBlockedRecovery(
           rationale: 'The requested path is clear.',
           blocker: '',
           replacementPlan: '',
+          laterScopeNumber: 0,
+          laterScopeBody: '',
           resultingPhase,
         },
       },

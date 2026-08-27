@@ -110,6 +110,7 @@ test('resume planner distinguishes pending and waiting operator guidance', async
           number: 1,
           recordedAt: '2026-05-16T12:01:00.000Z',
           operatorGuidance: 'Stay inside the current scope.',
+          origin: 'operator',
           disposition: null,
         },
       ],

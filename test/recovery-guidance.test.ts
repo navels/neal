@@ -66,6 +66,7 @@ async function createInteractiveRecoveryFixture(args: {
           number: 1,
           recordedAt: '2026-04-25T18:01:00.000Z',
           operatorGuidance: 'Keep the fix narrow.',
+          origin: 'operator',
           disposition: {
             recordedAt: '2026-04-25T18:02:00.000Z',
             sessionHandle: 'coder-recovery-session-1',
@@ -74,6 +75,8 @@ async function createInteractiveRecoveryFixture(args: {
             rationale: 'The path was clear.',
             blocker: '',
             replacementPlan: '',
+            laterScopeNumber: 0,
+            laterScopeBody: '',
             resultingPhase: 'coder_response',
           },
         },

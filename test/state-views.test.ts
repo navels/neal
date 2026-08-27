@@ -110,6 +110,7 @@ test('interactive recovery view distinguishes waiting guidance from pending guid
           number: 1,
           recordedAt: '2026-05-16T12:01:00.000Z',
           operatorGuidance: 'Try the narrow fix.',
+          origin: 'operator',
           disposition: null,
         },
       ],

@@ -306,6 +306,8 @@ export type CoderBlockedRecoveryDisposition = {
   rationale: string;
   blocker: string;
   replacementPlan: string;
+  laterScopeNumber: number;
+  laterScopeBody: string;
 };
 
 export type InteractiveBlockedRecoveryTurnDisposition = {
@@ -316,6 +318,8 @@ export type InteractiveBlockedRecoveryTurnDisposition = {
   rationale: string;
   blocker: string;
   replacementPlan: string;
+  laterScopeNumber: number;
+  laterScopeBody: string;
   resultingPhase: OrchestrationPhase;
 };
 
@@ -323,6 +327,10 @@ export type InteractiveBlockedRecoveryTurn = {
   number: number;
   recordedAt: string;
   operatorGuidance: string;
+  // Who authored the guidance. `null` means the turn was persisted before the
+  // marker existed, which is treated like a consultant turn wherever operator
+  // authorship matters.
+  origin: 'operator' | 'consultant' | null;
   disposition: InteractiveBlockedRecoveryTurnDisposition | null;
 };
 
@@ -330,6 +338,9 @@ export type InteractiveBlockedRecoveryDirective = {
   recordedAt: string;
   operatorGuidance: string;
   terminalOnly: boolean;
+  // Which path created the directive, so the turn it becomes on processing keeps
+  // accurate provenance. `null` on directives persisted before the marker.
+  origin: 'operator' | 'consultant' | null;
 };
 
 // Read-only advice produced by the consultant when it triages a block. A

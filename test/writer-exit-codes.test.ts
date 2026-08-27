@@ -80,6 +80,7 @@ test('child run exit codes map controlled incomplete lifecycle states to 2', () 
               number: 1,
               recordedAt: '2026-06-04T00:01:00.000Z',
               operatorGuidance: 'Continue with the bounded fix.',
+              origin: 'operator',
               disposition: null,
             },
           ],

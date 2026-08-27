@@ -1825,6 +1825,7 @@ test('neal resume --message rejects another message while recovery guidance is p
           number: 1,
           recordedAt: new Date().toISOString(),
           operatorGuidance: 'Handle this first.',
+          origin: 'operator',
           disposition: null,
         },
       ],
@@ -2790,6 +2791,8 @@ test('runResumeRunCommand records resume guidance and processes the pending reco
               rationale: 'The supplied guidance did not settle the reviewer concern.',
               blocker: 'Need one narrower answer.',
               replacementPlan: '',
+              laterScopeNumber: 0,
+              laterScopeBody: '',
             } as TStructured,
           };
         },

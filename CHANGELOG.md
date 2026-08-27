@@ -10,6 +10,15 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Added
+
+- Operator guidance during a block can revise a later scope. When a
+  `neal resume --message` directive calls for changing a scope after the current
+  one, the coder rewrites that scope and neal validates and writes it into the
+  plan, so the decision lands where the later scope runs against it instead of in
+  a side note. The coder never revises the current or an earlier scope, and a
+  consultant-injected directive can't trigger it.
+
 ## [0.6.0] - 2026-08-25
 
 ### Fixed

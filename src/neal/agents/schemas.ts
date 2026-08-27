@@ -10,6 +10,7 @@ import type {
   ReviewerMeaningfulProgressAction,
   ConsultantVerdict,
 } from '../types.js';
+import { reviseLaterScope } from '../plan-scope-revision.js';
 import { normalizeExecutionShapeDeclaration, validatePlanDocument } from '../plan-validation.js';
 import { repairReviewerSquashMessageDraft, validateReviewerSquashMessageDraft } from '../squash-message.js';
 
@@ -222,6 +223,8 @@ const coderBlockedRecoveryDispositionPayloadSchema = z.object({
   rationale: z.string(),
   blocker: z.string(),
   replacementPlan: z.string(),
+  laterScopeNumber: z.number(),
+  laterScopeBody: z.string(),
 });
 
 const coderPlanResponsePayloadSchema = z.object({
@@ -329,6 +332,7 @@ const finalCompletionReviewerParseSchema = finalCompletionReviewerPayloadSchema.
 // over representative nodes of every builder.
 type JsonStringSchema = { readonly type: 'string' };
 type JsonBooleanSchema = { readonly type: 'boolean' };
+type JsonNumberSchema = { readonly type: 'number' };
 type JsonArraySchema<TItems> = { readonly type: 'array'; readonly items: TItems };
 type JsonStringArraySchema = JsonArraySchema<JsonStringSchema>;
 type JsonEnumSchema<TValues extends readonly string[]> = {
@@ -431,8 +435,10 @@ type CoderBlockedRecoveryDispositionJsonSchema = JsonObjectSchema<
     readonly rationale: JsonStringSchema;
     readonly blocker: JsonStringSchema;
     readonly replacementPlan: JsonStringSchema;
+    readonly laterScopeNumber: JsonNumberSchema;
+    readonly laterScopeBody: JsonStringSchema;
   },
-  readonly ['action', 'summary', 'rationale', 'blocker', 'replacementPlan']
+  readonly ['action', 'summary', 'rationale', 'blocker', 'replacementPlan', 'laterScopeNumber', 'laterScopeBody']
 >;
 
 type CoderPlanResponseJsonSchema = JsonObjectSchema<
@@ -1307,7 +1313,50 @@ function validateManualGateResumeChecks(value: unknown): ManualGateResumeCheck[]
   });
 }
 
-export function validateCoderBlockedRecoveryDispositionPayload(rawPayload: unknown): CoderBlockedRecoveryDispositionPayload {
+// Per-round context for a later-scope revision. `planDocument` is the
+// top-level plan text read once at round start; the validator splices the
+// revision into it so a bad revision is re-prompted through the structured-JSON
+// repair loop instead of failing after the round.
+export type CoderBlockedRecoveryLaterScopeContext = {
+  allowLaterScopeRevision: boolean;
+  currentScopeNumber: number;
+  planDocument: string;
+};
+
+export function getCoderBlockedRecoveryLaterScopeErrors(
+  payload: Pick<CoderBlockedRecoveryDisposition, 'action' | 'laterScopeNumber' | 'laterScopeBody'>,
+  context: CoderBlockedRecoveryLaterScopeContext | null,
+): string[] {
+  const hasNumber = payload.laterScopeNumber !== 0;
+  const hasBody = payload.laterScopeBody.trim().length > 0;
+  if (!hasNumber && !hasBody) {
+    return [];
+  }
+  if (!Number.isInteger(payload.laterScopeNumber) || payload.laterScopeNumber < 0) {
+    return [`laterScopeNumber must be a non-negative integer, received ${String(payload.laterScopeNumber)}.`];
+  }
+  if (hasNumber !== hasBody) {
+    return ['laterScopeNumber and laterScopeBody must be set together: both for a later-scope revision, or 0 and an empty string.'];
+  }
+  if (context === null || !context.allowLaterScopeRevision) {
+    return ['A later-scope revision is not available for this round; return laterScopeNumber=0 and an empty laterScopeBody.'];
+  }
+  if (payload.action !== 'resume_current_scope' && payload.action !== 'stay_blocked') {
+    return [`A later-scope revision may accompany only action=resume_current_scope or action=stay_blocked, not action=${payload.action}.`];
+  }
+  const result = reviseLaterScope({
+    planDocument: context.planDocument,
+    currentScopeNumber: context.currentScopeNumber,
+    targetScopeNumber: payload.laterScopeNumber,
+    replacementBody: payload.laterScopeBody,
+  });
+  return result.ok ? [] : result.errors;
+}
+
+export function validateCoderBlockedRecoveryDispositionPayload(
+  rawPayload: unknown,
+  laterScopeContext: CoderBlockedRecoveryLaterScopeContext | null = null,
+): CoderBlockedRecoveryDispositionPayload {
   const payload: CoderBlockedRecoveryDispositionPayload = parsePayload(
     coderBlockedRecoveryDispositionPayloadSchema,
     rawPayload,
@@ -1327,6 +1376,11 @@ export function validateCoderBlockedRecoveryDispositionPayload(rawPayload: unkno
 
   if ((payload.action === 'stay_blocked' || payload.action === 'terminal_block') && !blocker) {
     throw new Error(`Coder blocked-recovery round returned action=${payload.action} without a blocker payload.`);
+  }
+
+  const laterScopeErrors = getCoderBlockedRecoveryLaterScopeErrors(payload, laterScopeContext);
+  if (laterScopeErrors.length > 0) {
+    throw new Error(`Coder blocked-recovery round returned an invalid later-scope revision: ${laterScopeErrors.join(' ')}`);
   }
 
   return payload;

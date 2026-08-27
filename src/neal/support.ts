@@ -52,7 +52,7 @@ function appendInteractiveBlockedRecoverySection(
 
   for (const turn of recovery.turns) {
     lines.push(
-      `- Recovery turn ${turn.number} at ${turn.recordedAt}: ${turn.operatorGuidance}`,
+      `- Recovery turn ${turn.number} at ${turn.recordedAt} (${turn.origin ?? 'unrecorded'} origin): ${turn.operatorGuidance}`,
     );
 
     if (turn.disposition) {
@@ -61,8 +61,15 @@ function appendInteractiveBlockedRecoverySection(
         `- Recovery turn ${turn.number} coder summary: ${turn.disposition.summary}`,
         `- Recovery turn ${turn.number} coder blocker: ${turn.disposition.blocker || 'n/a'}`,
         `- Recovery turn ${turn.number} coder rationale: ${turn.disposition.rationale}`,
-        `- Recovery turn ${turn.number} resulting step: ${formatPublicPhase(turn.disposition.resultingPhase)}`,
       );
+      if (turn.disposition.laterScopeNumber > 0) {
+        lines.push(
+          `- Recovery turn ${turn.number} revised later scope: ${turn.disposition.laterScopeNumber}`,
+          `- Recovery turn ${turn.number} revised scope text:`,
+          ...turn.disposition.laterScopeBody.split('\n').map((line) => `  ${line}`),
+        );
+      }
+      lines.push(`- Recovery turn ${turn.number} resulting step: ${formatPublicPhase(turn.disposition.resultingPhase)}`);
     } else {
       lines.push(`- Recovery turn ${turn.number} coder response: pending`);
     }
