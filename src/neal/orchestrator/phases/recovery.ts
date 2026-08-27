@@ -571,6 +571,11 @@ async function applyLaterScopeRevision(
   if (disposition.laterScopeNumber === 0 && disposition.laterScopeBody.trim() === '') {
     return;
   }
+  if (!isOperatorGuidedRecoveryTurn(state)) {
+    throw new Error(
+      'Interactive blocked recovery cannot apply the later-scope revision: only operator guidance may direct a later-scope revision, and the pending turn is not an operator message.',
+    );
+  }
   const planDocument = await readFile(state.planDoc, 'utf8');
   const errors = getCoderBlockedRecoveryLaterScopeErrors(disposition, {
     allowLaterScopeRevision: true,
@@ -597,8 +602,55 @@ async function applyLaterScopeRevision(
   });
 }
 
+// A recoverable consultant verdict is injected as a recovery turn through the
+// same path as an operator message, so the turn record itself carries no
+// origin. The origin is derived from what that path persists in the same entry
+// call: the consultant upserts a `recentBlocks` record for this block (so its
+// `recordedAt` is at or after the recovery's `enteredAt`), persists no
+// `consultantAdvice` (advice is written only when the run yields instead), and
+// injects the first turn recorded after that record. Every other turn is
+// operator guidance.
+function isConsultantInjectedRecoveryTurn(
+  state: OrchestrationState,
+  turn: InteractiveBlockedRecoveryState['turns'][number],
+): boolean {
+  const recovery = state.interactiveBlockedRecovery;
+  if (!recovery || recovery.consultantAdvice) {
+    return false;
+  }
+  if (!isConsultantEligibleBlock(recovery.blockedReason, recovery.sourcePhase)) {
+    return false;
+  }
+  const candidate = buildRecentBlockCandidate(state, recovery.blockedReason, recovery.sourcePhase);
+  const record = state.recentBlocks.find(
+    (entry) =>
+      entry.scopeNumber === candidate.scopeNumber &&
+      entry.derivedScopeIndex === candidate.derivedScopeIndex &&
+      entry.sourcePhase === candidate.sourcePhase &&
+      entry.normalizedKey === candidate.normalizedKey &&
+      entry.recordedAt >= recovery.enteredAt,
+  );
+  if (!record) {
+    return false;
+  }
+  const injectedTurn = recovery.turns.find((entry) => entry.recordedAt >= record.recordedAt);
+  return injectedTurn?.number === turn.number;
+}
+
+// Only an operator message may direct a later-scope revision: a terminal-only
+// directive cannot choose an action that carries one, and a consultant-injected
+// turn is not operator guidance.
+function isOperatorGuidedRecoveryTurn(state: OrchestrationState): boolean {
+  const recovery = state.interactiveBlockedRecovery;
+  if (!recovery || recovery.pendingDirective) {
+    return false;
+  }
+  const latestTurn = recovery.turns.at(-1);
+  return latestTurn !== undefined && !isConsultantInjectedRecoveryTurn(state, latestTurn);
+}
+
 async function getLaterScopeRevisionOffer(state: OrchestrationState, terminalOnly: boolean) {
-  if (terminalOnly) {
+  if (terminalOnly || !isOperatorGuidedRecoveryTurn(state)) {
     return null;
   }
   let planDocument: string;

@@ -2217,3 +2217,126 @@ Do the parser change in one pass.
   assert.equal(nextState.derivedScopeIndex, 1);
   assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.turns[0]?.disposition?.laterScopeNumber, 2);
 });
+
+test('a consultant-injected turn is never offered or allowed a later-scope revision, while the following operator turn is', async () => {
+  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ currentScopeNumber: 1, executionShape: 'multi_scope' });
+  await writeFile(state.planDoc, TOP_LEVEL_PLAN, 'utf8');
+  const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
+  const logger = await createRunLogger({
+    cwd,
+    stateDir: dirname(statePath),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+
+  let consultantTurnState: OrchestrationState;
+  try {
+    consultantTurnState = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+  assert.equal(advisor.callCount(), 1);
+  assert.equal(consultantTurnState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.equal(hasPendingInteractiveBlockedRecoveryTurn(consultantTurnState), true);
+
+  const prompts: string[] = [];
+  const responses: Array<Record<string, unknown>> = [
+    {
+      action: 'resume_current_scope',
+      summary: 'Apply the directive and narrow scope 3.',
+      rationale: 'The consultant directive is in scope; scope 3 was narrowed too.',
+      blocker: '',
+      replacementPlan: '',
+      laterScopeNumber: 3,
+      laterScopeBody: REVISED_SCOPE_3,
+    },
+    {
+      action: 'stay_blocked',
+      summary: 'The directive alone is not enough.',
+      rationale: 'An operator decision is still needed.',
+      blocker: 'Need an operator decision on scope 3.',
+      replacementPlan: '',
+      laterScopeNumber: 0,
+      laterScopeBody: '',
+    },
+    {
+      action: 'resume_current_scope',
+      summary: 'Continue; scope 3 is narrowed per the operator.',
+      rationale: 'The operator directed scope 3 to cover only the parser half.',
+      blocker: '',
+      replacementPlan: '',
+      laterScopeNumber: 3,
+      laterScopeBody: REVISED_SCOPE_3,
+    },
+  ];
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          throw new Error('text coder prompt is not used in blocked recovery');
+        },
+        async runStructuredPrompt<TStructured>(args: CoderStructuredPromptArgs) {
+          prompts.push(args.prompt);
+          const structured = responses.shift();
+          assert.ok(structured, 'unexpected extra coder round');
+          return { sessionHandle: `coder-session-${prompts.length}`, structured: structured as TStructured };
+        },
+      };
+    },
+  });
+
+  try {
+    // The consultant-injected turn: the offer is absent and a revision is rejected.
+    await assert.rejects(
+      () => runInteractiveBlockedRecoveryPhase(consultantTurnState, statePath, logger),
+      /A later-scope revision is not available for this round/,
+    );
+    assert.ok(!prompts[0]?.includes('To revise a later scope'));
+    assert.equal(await readFile(state.planDoc, 'utf8'), TOP_LEVEL_PLAN);
+
+    // A direct apply on the consultant turn is refused as well, before any write.
+    await assert.rejects(
+      () =>
+        applyInteractiveBlockedRecoveryDisposition(
+          consultantTurnState,
+          statePath,
+          {
+            action: 'resume_current_scope',
+            summary: 'Continue.',
+            rationale: 'Narrow scope 3.',
+            blocker: '',
+            replacementPlan: '',
+            laterScopeNumber: 3,
+            laterScopeBody: REVISED_SCOPE_3,
+          },
+          'coder-session-x',
+          logger,
+        ),
+      /only operator guidance may direct a later-scope revision/,
+    );
+    assert.equal(await readFile(state.planDoc, 'utf8'), TOP_LEVEL_PLAN);
+
+    // The coder consumes the consultant turn without a revision and stays blocked.
+    const stayBlockedState = await runInteractiveBlockedRecoveryPhase(consultantTurnState, statePath, logger);
+    assert.equal(stayBlockedState.phase, 'interactive_blocked_recovery');
+    assert.equal(stayBlockedState.interactiveBlockedRecovery?.lastHandledTurn, 1);
+
+    // An actual operator message on the next turn is offered the revision and it lands.
+    const operatorTurnState = await recordInteractiveBlockedRecoveryGuidance(
+      statePath,
+      'Keep going here; narrow scope 3 to the parser half.',
+      logger,
+    );
+    const resumedState = await runInteractiveBlockedRecoveryPhase(operatorTurnState, statePath, logger);
+    assert.ok(prompts[2]?.includes('To revise a later scope'));
+    assert.equal(
+      await readFile(state.planDoc, 'utf8'),
+      expectedRevisedPlan(TOP_LEVEL_PLAN, '### Scope 3:', REVISED_SCOPE_3, '## Boundaries'),
+    );
+    assert.equal(resumedState.phase, 'coder_response');
+    assert.equal(resumedState.interactiveBlockedRecoveryHistory[0]?.turns[1]?.disposition?.laterScopeNumber, 3);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
