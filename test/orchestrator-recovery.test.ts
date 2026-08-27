@@ -2450,3 +2450,101 @@ test('a pre-existing consultant turn persisted as a turns[] entry is never offer
   assert.equal(resumedState.phase, 'coder_response');
   assert.equal(resumedState.interactiveBlockedRecoveryHistory[0]?.turns[0]?.disposition?.laterScopeNumber, 3);
 });
+
+test('an operator message in a second same-scope recovery after the consultant budget is exhausted is offered and applies a revision', async () => {
+  const { cwd, statePath, state } = await createConsultantRecoveryFixture({ currentScopeNumber: 1, executionShape: 'multi_scope' });
+  await writeFile(state.planDoc, TOP_LEVEL_PLAN, 'utf8');
+  const advisor = installConsultantAdvisorOverride({ payload: recoverableConsultantVerdict() });
+  const logger = await createRunLogger({
+    cwd,
+    stateDir: dirname(statePath),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+
+  // First block: the consultant (default budget of 1) applies its directive.
+  let firstRecovery: OrchestrationState;
+  try {
+    firstRecovery = await enterInteractiveBlockedRecovery(state, statePath, REVIEW_STUCK_REASON, logger);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+  assert.equal(advisor.callCount(), 1);
+  assert.equal(firstRecovery.interactiveBlockedRecovery?.pendingDirective?.terminalOnly, false);
+
+  const prompts: string[] = [];
+  const responses: Array<Record<string, unknown>> = [
+    {
+      action: 'resume_current_scope',
+      summary: 'Applied the directive.',
+      rationale: 'The directive was in scope.',
+      blocker: '',
+      replacementPlan: '',
+      laterScopeNumber: 0,
+      laterScopeBody: '',
+    },
+    {
+      action: 'resume_current_scope',
+      summary: 'Continue; scope 3 is narrowed per the operator.',
+      rationale: 'The operator directed scope 3 to cover only the parser half.',
+      blocker: '',
+      replacementPlan: '',
+      laterScopeNumber: 3,
+      laterScopeBody: REVISED_SCOPE_3,
+    },
+  ];
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          throw new Error('text coder prompt is not used in blocked recovery');
+        },
+        async runStructuredPrompt<TStructured>(args: CoderStructuredPromptArgs) {
+          prompts.push(args.prompt);
+          const structured = responses.shift();
+          assert.ok(structured, 'unexpected extra coder round');
+          return { sessionHandle: `coder-session-${prompts.length}`, structured: structured as TStructured };
+        },
+      };
+    },
+  });
+
+  try {
+    const resumedOnce = await runInteractiveBlockedRecoveryPhase(firstRecovery, statePath, logger);
+    assert.equal(resumedOnce.phase, 'coder_response');
+    assert.equal(resumedOnce.interactiveBlockedRecoveryHistory.length, 1);
+    assert.equal(resumedOnce.recentBlocks.length, 1);
+    assert.equal(resumedOnce.consultantAttemptCount, 1);
+
+    // Second block in the same scope with the same normalized blocker: the
+    // budget is exhausted, so the run yields plainly for the operator.
+    const secondBlock = await enterInteractiveBlockedRecovery(
+      { ...resumedOnce, phase: 'reviewer_scope', blockedFromPhase: 'reviewer_scope', interactiveBlockedRecovery: null },
+      statePath,
+      REVIEW_STUCK_REASON,
+      logger,
+    );
+    assert.equal(advisor.callCount(), 1, 'the exhausted budget does not re-invoke the consultant');
+    assert.equal(secondBlock.interactiveBlockedRecovery?.turns.length, 0);
+    assert.equal(secondBlock.interactiveBlockedRecovery?.pendingDirective, null);
+    assert.equal(secondBlock.interactiveBlockedRecovery?.consultantAdvice, undefined);
+    assert.equal(shouldNotifyInteractiveBlockedRecoveryEntry(secondBlock), true);
+
+    const operatorTurn = await recordInteractiveBlockedRecoveryGuidance(
+      statePath,
+      'Keep going here; narrow scope 3 to the parser half.',
+      logger,
+    );
+    const resumedTwice = await runInteractiveBlockedRecoveryPhase(operatorTurn, statePath, logger);
+    assert.ok(prompts[1]?.includes('To revise a later scope'));
+    assert.equal(
+      await readFile(state.planDoc, 'utf8'),
+      expectedRevisedPlan(TOP_LEVEL_PLAN, '### Scope 3:', REVISED_SCOPE_3, '## Boundaries'),
+    );
+    assert.equal(resumedTwice.phase, 'coder_response');
+    assert.equal(resumedTwice.interactiveBlockedRecoveryHistory[1]?.turns[0]?.disposition?.laterScopeNumber, 3);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});

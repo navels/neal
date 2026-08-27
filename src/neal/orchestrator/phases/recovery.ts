@@ -628,14 +628,20 @@ async function applyLaterScopeRevision(
 // Structurally: operator guidance is always a `turns[]` entry recorded by
 // `neal resume --message`, while a consultant directive is a non-terminal
 // `pendingDirective` and an operator's turn-cap message is a terminal one; any
-// `pendingDirective` therefore disqualifies the round. States persisted before
-// the consultant used that slot carry its directive as an ordinary `turns[]`
-// entry with nothing on the turn to tell it apart. Those are recognised
-// conservatively by what the consultant path persists alongside: an anti-thrash
-// `recentBlocks` record for this exact block identity with no
-// `consultantAdvice` (advice is written only when the run yields to the
-// operator instead). No timestamps are compared, so clock skew cannot flip the
-// answer either way.
+// `pendingDirective` therefore disqualifies the round.
+//
+// States persisted before the consultant used that slot carry its directive as
+// an ordinary first `turns[]` entry with nothing on the turn to tell it apart.
+// Those are recognised conservatively by what that injection persisted in the
+// same entry: the consultant only injects at entry (so the pending turn is turn
+// 1 with nothing handled), it writes no `consultantAdvice` (advice is written
+// only when the run yields to the operator instead), and it upserts the
+// anti-thrash `recentBlocks` record for this exact block identity. A record
+// left over from an earlier recovery of the same block does not count: every
+// consultant invocation that produced a record also produced one resolved
+// recovery for that block, so the record's `count` exceeds the number of such
+// recoveries in `interactiveBlockedRecoveryHistory` only when the consultant
+// ran in the current recovery. No timestamps are compared.
 function isOperatorGuidedRecoveryTurn(state: OrchestrationState): boolean {
   const recovery = state.interactiveBlockedRecovery;
   if (!recovery || recovery.pendingDirective) {
@@ -645,21 +651,31 @@ function isOperatorGuidedRecoveryTurn(state: OrchestrationState): boolean {
   if (latestTurn === undefined || latestTurn.number <= recovery.lastHandledTurn) {
     return false;
   }
-  if (recovery.consultantAdvice) {
+  if (recovery.consultantAdvice || latestTurn.number !== 1) {
     return true;
   }
   if (!isConsultantEligibleBlock(recovery.blockedReason, recovery.sourcePhase)) {
     return true;
   }
   const candidate = buildRecentBlockCandidate(state, recovery.blockedReason, recovery.sourcePhase);
-  const consultantRecordedThisBlock = state.recentBlocks.some(
-    (record) =>
-      record.scopeNumber === candidate.scopeNumber &&
-      record.derivedScopeIndex === candidate.derivedScopeIndex &&
-      record.sourcePhase === candidate.sourcePhase &&
-      record.normalizedKey === candidate.normalizedKey,
+  const matchesCandidate = (record: { sourcePhase: string; normalizedKey: string }) =>
+    record.sourcePhase === candidate.sourcePhase && record.normalizedKey === candidate.normalizedKey;
+  const record = state.recentBlocks.find(
+    (entry) =>
+      entry.scopeNumber === candidate.scopeNumber &&
+      entry.derivedScopeIndex === candidate.derivedScopeIndex &&
+      matchesCandidate(entry),
   );
-  return !consultantRecordedThisBlock;
+  if (!record) {
+    return true;
+  }
+  const priorRecoveriesOfThisBlock = state.interactiveBlockedRecoveryHistory.filter((entry) =>
+    matchesCandidate({
+      sourcePhase: entry.sourcePhase,
+      normalizedKey: buildRecentBlockCandidate(state, entry.blockedReason, entry.sourcePhase).normalizedKey,
+    }),
+  ).length;
+  return record.count <= priorRecoveriesOfThisBlock;
 }
 
 async function getLaterScopeRevisionOffer(state: OrchestrationState, terminalOnly: boolean) {
