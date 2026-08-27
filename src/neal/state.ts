@@ -877,6 +877,7 @@ function hydrateInteractiveBlockedRecoveryDirective(
     recordedAt: readString(directive, 'recordedAt', `${fieldPath}.recordedAt`),
     operatorGuidance: readString(directive, 'operatorGuidance', `${fieldPath}.operatorGuidance`),
     terminalOnly: readBoolean(directive, 'terminalOnly', `${fieldPath}.terminalOnly`),
+    origin: readOptionalNullableEnum(directive, 'origin', INTERACTIVE_BLOCKED_RECOVERY_TURN_ORIGINS, `${fieldPath}.origin`) ?? null,
   };
 }
 

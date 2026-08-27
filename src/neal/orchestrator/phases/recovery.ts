@@ -372,6 +372,7 @@ async function recordInteractiveBlockedRecoveryTurn(
           recordedAt: new Date().toISOString(),
           operatorGuidance: trimmedGuidance,
           terminalOnly: true,
+          origin,
         },
       },
     });
@@ -455,7 +456,7 @@ function withRecordedInteractiveBlockedRecoveryDisposition(
             number: state.interactiveBlockedRecovery.turns.length + 1,
             recordedAt: state.interactiveBlockedRecovery.pendingDirective.recordedAt,
             operatorGuidance: state.interactiveBlockedRecovery.pendingDirective.operatorGuidance,
-            origin: 'operator' as const,
+            origin: state.interactiveBlockedRecovery.pendingDirective.origin,
             disposition: {
               recordedAt: new Date().toISOString(),
               sessionHandle,

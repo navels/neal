@@ -338,6 +338,9 @@ export type InteractiveBlockedRecoveryDirective = {
   recordedAt: string;
   operatorGuidance: string;
   terminalOnly: boolean;
+  // Which path created the directive, so the turn it becomes on processing keeps
+  // accurate provenance. `null` on directives persisted before the marker.
+  origin: 'operator' | 'consultant' | null;
 };
 
 // Read-only advice produced by the consultant when it triages a block. A
