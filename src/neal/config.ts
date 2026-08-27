@@ -24,6 +24,7 @@ export type NealConfigFile = {
     final_completion_continue_execution_max?: number | null;
     consultant_max_attempts?: number | null;
     notify_bin?: string | null;
+    review_level?: string | null;
   };
   agent?: {
     planner?: {
@@ -57,6 +58,10 @@ export type NealConfigFile = {
   };
 };
 
+export type ReviewLevel = 'strict' | 'moderate' | 'lenient';
+
+const REVIEW_LEVELS: readonly ReviewLevel[] = ['strict', 'moderate', 'lenient'];
+
 export type OpenAICompatibleSettings = {
   baseUrl: string | null;
   apiKeyEnv: string;
@@ -82,6 +87,7 @@ type NealResolvedConfig = {
     final_completion_continue_execution_max: number;
     consultant_max_attempts: number;
     notify_bin: string | null;
+    review_level: ReviewLevel;
   };
   agent: {
     planner: {
@@ -136,6 +142,7 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     final_completion_continue_execution_max: 3,
     consultant_max_attempts: 1,
     notify_bin: null,
+    review_level: 'moderate',
   },
   agent: {
     planner: {
@@ -232,6 +239,29 @@ function parseNumberValue(value: unknown): number | undefined {
 
 function parseStringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function isReviewLevel(value: string): value is ReviewLevel {
+  return (REVIEW_LEVELS as readonly string[]).includes(value);
+}
+
+function parseReviewLevelValue(value: unknown, fieldPath: string): ReviewLevel | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string' && !value.trim()) {
+    return undefined;
+  }
+
+  const level = typeof value === 'string' ? value.trim() : value;
+  if (typeof level !== 'string' || !isReviewLevel(level)) {
+    throw new Error(
+      `Invalid review level for ${fieldPath}: ${JSON.stringify(level)}. Valid values: ${REVIEW_LEVELS.join(', ')}`,
+    );
+  }
+
+  return level;
 }
 
 function parseConfigProviderValue(value: unknown, fieldPath: string): AgentProvider | undefined {
@@ -417,7 +447,13 @@ export function assertWriterProvidersConfigured(
   }
 
   assertAgentConfigSupportsWriterRun(agentConfig, { context: options.context });
+  getReviewLevel(cwd);
   return agentConfig;
+}
+
+export function getReviewLevel(cwd = process.cwd()): ReviewLevel {
+  const config = loadConfigFile(cwd);
+  return parseReviewLevelValue(config.neal?.review_level, 'neal.review_level') ?? DEFAULT_CONFIG.neal.review_level;
 }
 
 export function getInactivityTimeoutMs(cwd = process.cwd()) {

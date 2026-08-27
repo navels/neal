@@ -1,6 +1,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, realpath, readdir, stat, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -1948,6 +1949,224 @@ test('neal resume continues ordinary failed coder scopes without guidance', asyn
   assert.match(persisted, /interactive_blocked_recovery/);
   const eventTypes = await readRunEventTypes(failedState.runDir);
   assert.ok(eventTypes.includes('run.resumed'));
+});
+
+test('neal resume rejects an invalid review_level before any agent turn and leaves run state untouched', async () => {
+  const { cwd, loaded } = await createRepoRunFixture('neal-resume-invalid-review-level-');
+  const failedState = await saveState(loaded.statePath, {
+    ...loaded.state,
+    phase: 'coder_scope',
+    status: 'failed',
+  });
+  const runId = basename(failedState.runDir);
+  const stateBefore = await readFile(getRunStatePath(failedState.runDir), 'utf8');
+  await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: paranoid\n', 'utf8');
+  clearConfigCache(cwd);
+  let promptCalls = 0;
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          promptCalls += 1;
+          throw new Error('provider should not be called');
+        },
+        async runStructuredPrompt() {
+          promptCalls += 1;
+          throw new Error('provider should not be called');
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => withProcessCwd(cwd, () => captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId]))),
+      /Invalid review level for neal\.review_level: "paranoid"\. Valid values: strict, moderate, lenient/,
+    );
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+    clearConfigCache(cwd);
+  }
+
+  assert.equal(promptCalls, 0);
+  assert.equal(await readFile(getRunStatePath(failedState.runDir), 'utf8'), stateBefore);
+  const eventTypes = await readRunEventTypes(failedState.runDir);
+  assert.equal(eventTypes.includes('run.resumed'), false);
+});
+
+test('neal resume rejects an invalid review_level before running manual-gate checks', async () => {
+  const { cwd, loaded } = await createRepoRunFixture('neal-resume-manual-gate-invalid-review-level-');
+  const now = new Date().toISOString();
+  const checkMarker = join(cwd, 'gate-check-ran');
+  const manualGateState = await saveState(loaded.statePath, {
+    ...loaded.state,
+    phase: 'manual_gate',
+    status: 'running',
+    manualGate: {
+      id: 'approval',
+      title: 'Approval required',
+      reason: 'The user must approve deployment.',
+      instructionsPath: join(loaded.state.runDir, 'GATE-approval.md'),
+      resumeChecks: [
+        {
+          type: 'command',
+          name: 'approval file',
+          command: [process.execPath, '-e', `require("node:fs").writeFileSync(${JSON.stringify(checkMarker)}, "ran")`],
+        },
+      ],
+      resumePhase: 'coder_scope',
+      createdAt: now,
+      updatedAt: now,
+      lastCheckedAt: null,
+      lastFailure: null,
+    },
+  });
+  const runId = basename(manualGateState.runDir);
+  const stateBefore = await readFile(getRunStatePath(manualGateState.runDir), 'utf8');
+  const eventsBefore = await readRunEventTypes(manualGateState.runDir);
+  await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: paranoid\n', 'utf8');
+  clearConfigCache(cwd);
+  let promptCalls = 0;
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          promptCalls += 1;
+          throw new Error('provider should not be called');
+        },
+        async runStructuredPrompt() {
+          promptCalls += 1;
+          throw new Error('provider should not be called');
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => withProcessCwd(cwd, () => captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId]))),
+      /Invalid review level for neal\.review_level: "paranoid"\. Valid values: strict, moderate, lenient/,
+    );
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+    clearConfigCache(cwd);
+  }
+
+  assert.equal(promptCalls, 0);
+  assert.equal(existsSync(checkMarker), false);
+  assert.equal(await readFile(getRunStatePath(manualGateState.runDir), 'utf8'), stateBefore);
+  assert.deepEqual(await readRunEventTypes(manualGateState.runDir), eventsBefore);
+});
+
+test('neal resume --message rejects an invalid review_level before recording guidance', async () => {
+  const { cwd, loaded } = await createRepoRunFixture('neal-resume-message-invalid-review-level-');
+  const blockedState = await saveState(loaded.statePath, {
+    ...loaded.state,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: new Date().toISOString(),
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings did not converge',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      pendingDirective: null,
+      turns: [],
+    },
+  });
+  const runId = basename(blockedState.runDir);
+  const stateBefore = await readFile(getRunStatePath(blockedState.runDir), 'utf8');
+  const eventsBefore = await readRunEventTypes(blockedState.runDir);
+  await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: paranoid\n', 'utf8');
+  clearConfigCache(cwd);
+  let promptCalls = 0;
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          promptCalls += 1;
+          throw new Error('provider should not be called');
+        },
+        async runStructuredPrompt() {
+          promptCalls += 1;
+          throw new Error('provider should not be called');
+        },
+      };
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () => withProcessCwd(cwd, () => captureProcessOutput(() =>
+        runResumeRunCommand(['resume', '--run', runId, '--message', 'Try one narrow fix.']),
+      )),
+      /Invalid review level for neal\.review_level: "paranoid"\. Valid values: strict, moderate, lenient/,
+    );
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+    clearConfigCache(cwd);
+  }
+
+  assert.equal(promptCalls, 0);
+  assert.equal(await readFile(getRunStatePath(blockedState.runDir), 'utf8'), stateBefore);
+  assert.deepEqual(await readRunEventTypes(blockedState.runDir), eventsBefore);
+});
+
+test('neal resume on a done run reports already done even when review_level is invalid', async () => {
+  const { cwd, loaded } = await createRepoRunFixture('neal-resume-done-invalid-review-level-');
+  const doneState = await saveState(loaded.statePath, {
+    ...loaded.state,
+    phase: 'done',
+    status: 'done',
+  });
+  const runId = basename(doneState.runDir);
+  const before = await readFile(getRunStatePath(doneState.runDir), 'utf8');
+  await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: paranoid\n', 'utf8');
+  clearConfigCache(cwd);
+
+  try {
+    const { result, exitCode } = await captureProcessExitCode(() => withProcessCwd(cwd, () =>
+      captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId])),
+    ));
+
+    assert.equal(exitCode, 0);
+    assert.match(result.stdout, /already complete/);
+  } finally {
+    clearConfigCache(cwd);
+  }
+
+  assert.equal(await readFile(getRunStatePath(doneState.runDir), 'utf8'), before);
+});
+
+test('neal resume on a live same-run lock reports already running even when review_level is invalid', async () => {
+  const { cwd, loaded } = await createRepoRunFixture('neal-resume-running-invalid-review-level-');
+  const failedState = await saveState(loaded.statePath, {
+    ...loaded.state,
+    phase: 'coder_scope',
+    status: 'failed',
+  });
+  const runId = basename(failedState.runDir);
+  const before = await readFile(getRunStatePath(failedState.runDir), 'utf8');
+  await writeActiveRunLock(cwd, runId, failedState.planDoc);
+  await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: paranoid\n', 'utf8');
+  clearConfigCache(cwd);
+
+  try {
+    const { result, exitCode } = await captureProcessExitCode(() => withProcessCwd(cwd, () =>
+      captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId])),
+    ));
+
+    assert.equal(exitCode, 2);
+    assert.match(result.stdout, /already be running/);
+  } finally {
+    clearConfigCache(cwd);
+  }
+
+  assert.equal(await readFile(getRunStatePath(failedState.runDir), 'utf8'), before);
 });
 
 test('neal resume on a done run does not call provider execution or mutate state', async () => {

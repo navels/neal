@@ -197,6 +197,36 @@ test('neal check validates config and skips provider verification in non-interac
   });
 });
 
+test('neal check fails on an invalid review_level before provider verification', async () => {
+  await withIsolatedHome(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-check-review-level-'));
+    await writeFile(
+      join(cwd, 'neal.yml'),
+      [
+        'neal:',
+        '  review_level: paranoid',
+        'agent:',
+        '  coder:',
+        '    provider: anthropic-claude',
+        '  reviewer:',
+        '    provider: anthropic-claude',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    clearConfigCache(cwd);
+
+    await assert.rejects(
+      runNealCheckCli({
+        cwd,
+        stdin: createClosedInput(false),
+        stdout: new CaptureStream(),
+      }),
+      /Invalid review level for neal\.review_level: "paranoid"\. Valid values: strict, moderate, lenient/,
+    );
+  });
+});
+
 test('neal check does not print the compat pointer for a native writer provider', async () => {
   await withIsolatedHome(async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'neal-check-native-pointer-'));
