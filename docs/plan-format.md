@@ -74,6 +74,16 @@ declares and owns its own execution shape. Plans authored `multi_scope` or
 `multi_scope_unknown` are unaffected. Refinement may adjust their scope
 content as usual.
 
+### Revising a later scope mid-run
+
+Operator guidance during a block can revise a later scope. When a
+`neal resume --message` directive calls for changing a scope after the current
+one, the coder returns replacement text for that one scope, and neal splices it
+into the plan, checks it still parses, and writes it. neal reads the plan fresh
+from disk each turn, so the next scope runs against the revised text. The coder
+can only revise a scope after the one it's working on, never the current or an
+earlier scope, and a consultant-injected directive can't trigger it.
+
 ## Multi-scope format
 
 `executionShape: multi_scope` must include a literal `## Execution Queue`

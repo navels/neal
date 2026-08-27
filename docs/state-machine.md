@@ -79,6 +79,12 @@ Site A below). The consultant is read-only: it never grants authorization, expan
 scope, or waives verification gates. A recoverable verdict acts automatically. A
 non-recoverable verdict yields to the operator, carrying the verdict as advice.
 
+Each recovery turn records its `origin` — `operator` for a `neal resume --message`
+directive, `consultant` for a consultant injection — and the same marker rides the
+turn-cap `pendingDirective`. A later-scope revision is offered only on an
+operator-origin turn, so a consultant directive can direct the current scope but
+never rewrites a later scope on its own.
+
 Public resume eligibility is classified by `src/neal/resume-decision.ts` before
 any recovery mutation. That read-only decision layer combines loaded child-run
 state with lock, queue, and retrospective evidence, then returns the shared
