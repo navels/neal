@@ -366,7 +366,7 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       `- Recorded turns: ${progress.interactiveBlockedRecovery.turns}`,
       `- Handled turns: ${progress.interactiveBlockedRecovery.handledTurns}`,
       `- Remaining turns: ${progress.interactiveBlockedRecovery.remainingTurns}`,
-      `- Pending terminal directive: ${progress.interactiveBlockedRecovery.pendingDirective ?? 'none'}`,
+      `- Pending directive: ${progress.interactiveBlockedRecovery.pendingDirective ?? 'none'}`,
       `- Waiting for operator guidance: ${progress.waitingForOperatorGuidance ? 'yes' : 'no'}`,
       `- Pending operator guidance: ${progress.pendingOperatorGuidance ? 'yes' : 'no'}`,
     );

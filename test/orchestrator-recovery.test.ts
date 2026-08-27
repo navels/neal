@@ -16,7 +16,8 @@ import { getExecuteRunResultExitCode } from '../src/neal/commands/writer-exit-co
 import { runReviewPhase } from '../src/neal/orchestrator/phases/review.js';
 import { applyInteractiveBlockedRecoveryDisposition, enterInteractiveBlockedRecovery, hasPendingInteractiveBlockedRecoveryTurn, recordInteractiveBlockedRecoveryGuidance, runInteractiveBlockedRecoveryPhase, shouldNotifyInteractiveBlockedRecoveryEntry } from '../src/neal/orchestrator/phases/recovery.js';
 import { getCurrentExecutionScopeDescriptor } from '../src/neal/scopes.js';
-import { getDefaultAgentConfig, loadState } from '../src/neal/state.js';
+import { buildRecentBlockCandidate } from '../src/neal/adjudicator/consultant.js';
+import { getDefaultAgentConfig, loadState, saveState } from '../src/neal/state.js';
 import { getPlanReviewGuidanceView, getPublicLifecycleView } from '../src/neal/state-views.js';
 import type { OrchestrationState } from '../src/neal/types.js';
 import { createResumeFixture, runGit, runNealCliResultInCwd, createExecuteFinalizationFixture, readEventTypes, readEvents, REVIEW_STUCK_REASON, recoverableConsultantVerdict, nonRecoverableConsultantVerdict, installConsultantAdvisorOverride, createConsultantRecoveryFixture, writeConsultantKnobConfig } from './helpers/orchestrator-harness.js';
@@ -249,7 +250,7 @@ test('recoverable block auto-applies the consultant directive without yielding',
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(nextState.status, 'running');
     assert.equal(
-      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
       recoverableConsultantVerdict().resolutionDirective,
     );
     assert.equal(hasPendingInteractiveBlockedRecoveryTurn(nextState), true);
@@ -525,7 +526,7 @@ test('eligible coder block is triaged by the generalized dispatch regardless of 
     assert.equal(advisor.callCount(), 1, 'an eligible coder block is adjudicated');
     assert.equal(nextState.phase, 'interactive_blocked_recovery');
     assert.equal(
-      nextState.interactiveBlockedRecovery?.turns.at(-1)?.operatorGuidance,
+      nextState.interactiveBlockedRecovery?.pendingDirective?.operatorGuidance,
       recoverableConsultantVerdict().resolutionDirective,
     );
     assert.equal(nextState.consultantAttemptCount, 1);
@@ -2237,7 +2238,8 @@ test('a consultant-injected turn is never offered or allowed a later-scope revis
     clearProviderCapabilitiesOverridesForTesting();
   }
   assert.equal(advisor.callCount(), 1);
-  assert.equal(consultantTurnState.interactiveBlockedRecovery?.turns.length, 1);
+  assert.equal(consultantTurnState.interactiveBlockedRecovery?.turns.length, 0);
+  assert.equal(consultantTurnState.interactiveBlockedRecovery?.pendingDirective?.terminalOnly, false);
   assert.equal(hasPendingInteractiveBlockedRecoveryTurn(consultantTurnState), true);
 
   const prompts: string[] = [];
@@ -2341,13 +2343,7 @@ test('a consultant-injected turn is never offered or allowed a later-scope revis
   }
 });
 
-test('consultant-turn provenance survives skewed enteredAt/recordedAt clocks', async () => {
-  const recoveryBase = {
-    sourcePhase: 'reviewer_scope' as const,
-    blockedReason: REVIEW_STUCK_REASON,
-    maxTurns: 3,
-    pendingDirective: null,
-  };
+test('a pre-existing consultant turn persisted as a turns[] entry is never offered or allowed a revision, while an operator turn with equal timestamps is', async () => {
   const fakeCoder = (structured: Record<string, unknown>, prompts: string[]) => ({
     createCoderAdapter() {
       return {
@@ -2356,7 +2352,7 @@ test('consultant-turn provenance survives skewed enteredAt/recordedAt clocks', a
         },
         async runStructuredPrompt<TStructured>(args: CoderStructuredPromptArgs) {
           prompts.push(args.prompt);
-          return { sessionHandle: 'coder-session-skew', structured: structured as TStructured };
+          return { sessionHandle: 'coder-session-legacy', structured: structured as TStructured };
         },
       };
     },
@@ -2371,69 +2367,67 @@ test('consultant-turn provenance survives skewed enteredAt/recordedAt clocks', a
     laterScopeBody: REVISED_SCOPE_3,
   };
 
-  // Consultant turn stamped with enteredAt, both deliberately in the future and
-  // later than everything else on the record: still ineligible.
-  const consultant = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
+  // A consultant directive recorded as an ordinary turn by an older version:
+  // the only trace is the anti-thrash record for this block with no advice.
+  // Timestamps are deliberately unequal and out of order.
+  const legacyBase = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
     interactiveBlockedRecovery: {
-      ...recoveryBase,
-      enteredAt: '2099-12-31T23:59:59.999Z',
+      enteredAt: '2026-08-01T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: REVIEW_STUCK_REASON,
+      maxTurns: 3,
       lastHandledTurn: 0,
+      pendingDirective: null,
       turns: [
         {
           number: 1,
-          recordedAt: '2099-12-31T23:59:59.999Z',
+          recordedAt: '2025-01-01T00:00:00.000Z',
           operatorGuidance: recoverableConsultantVerdict().resolutionDirective,
           disposition: null,
         },
       ],
     },
+    consultantAttemptCount: 1,
   });
-  const consultantPrompts: string[] = [];
-  setProviderCapabilitiesOverrideForTesting('openai-codex', fakeCoder(revision, consultantPrompts));
+  const legacyCandidate = buildRecentBlockCandidate(legacyBase.state, REVIEW_STUCK_REASON, 'reviewer_scope');
+  const legacy = {
+    ...legacyBase,
+    state: await saveState(legacyBase.statePath, {
+      ...legacyBase.state,
+      recentBlocks: [{ ...legacyCandidate, count: 1, recordedAt: '2024-01-01T00:00:00.000Z' }],
+    }),
+  };
+  const legacyPrompts: string[] = [];
+  setProviderCapabilitiesOverrideForTesting('openai-codex', fakeCoder(revision, legacyPrompts));
   try {
     await assert.rejects(
-      () => runInteractiveBlockedRecoveryPhase(consultant.state, consultant.statePath, consultant.logger),
+      () => runInteractiveBlockedRecoveryPhase(legacy.state, legacy.statePath, legacy.logger),
       /A later-scope revision is not available for this round/,
     );
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
-  assert.ok(!consultantPrompts[0]?.includes('To revise a later scope'));
+  assert.ok(!legacyPrompts[0]?.includes('To revise a later scope'));
   await assert.rejects(
-    () =>
-      applyInteractiveBlockedRecoveryDisposition(consultant.state, consultant.statePath, revision, 'coder-session-x', consultant.logger),
+    () => applyInteractiveBlockedRecoveryDisposition(legacy.state, legacy.statePath, revision, 'coder-session-x', legacy.logger),
     /only operator guidance may direct a later-scope revision/,
   );
-  assert.equal(await readFile(consultant.state.planDoc, 'utf8'), TOP_LEVEL_PLAN);
+  assert.equal(await readFile(legacy.state.planDoc, 'utf8'), TOP_LEVEL_PLAN);
 
-  // Operator turn recorded with a clock that runs EARLIER than enteredAt and
-  // than the consultant turn before it: still eligible.
+  // A genuine operator turn on the same kind of block, recorded with the exact
+  // same timestamp as enteredAt: eligible, because no consultant record exists.
   const operator = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
     interactiveBlockedRecovery: {
-      ...recoveryBase,
-      enteredAt: '2099-12-31T23:59:59.999Z',
-      lastHandledTurn: 1,
+      enteredAt: '2026-08-01T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: REVIEW_STUCK_REASON,
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      pendingDirective: null,
       turns: [
         {
           number: 1,
-          recordedAt: '2099-12-31T23:59:59.999Z',
-          operatorGuidance: recoverableConsultantVerdict().resolutionDirective,
-          disposition: {
-            recordedAt: '2099-12-31T23:59:59.999Z',
-            sessionHandle: 'coder-session-1',
-            action: 'stay_blocked',
-            summary: 'Need the operator.',
-            rationale: 'Directive alone is not enough.',
-            blocker: 'Need an operator decision on scope 3.',
-            replacementPlan: '',
-            laterScopeNumber: 0,
-            laterScopeBody: '',
-            resultingPhase: 'interactive_blocked_recovery',
-          },
-        },
-        {
-          number: 2,
-          recordedAt: '2000-01-01T00:00:00.000Z',
+          recordedAt: '2026-08-01T00:00:00.000Z',
           operatorGuidance: 'Keep going here; narrow scope 3 to the parser half.',
           disposition: null,
         },
@@ -2454,5 +2448,5 @@ test('consultant-turn provenance survives skewed enteredAt/recordedAt clocks', a
     expectedRevisedPlan(TOP_LEVEL_PLAN, '### Scope 3:', REVISED_SCOPE_3, '## Boundaries'),
   );
   assert.equal(resumedState.phase, 'coder_response');
-  assert.equal(resumedState.interactiveBlockedRecoveryHistory[0]?.turns[1]?.disposition?.laterScopeNumber, 3);
+  assert.equal(resumedState.interactiveBlockedRecoveryHistory[0]?.turns[0]?.disposition?.laterScopeNumber, 3);
 });

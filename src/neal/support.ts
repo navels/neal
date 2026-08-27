@@ -30,7 +30,7 @@ function appendInteractiveBlockedRecoverySection(
 
   if (recovery.pendingDirective) {
     lines.push(
-      `- Pending terminal directive at ${recovery.pendingDirective.recordedAt}: ${recovery.pendingDirective.operatorGuidance}`,
+      `- Pending ${recovery.pendingDirective.terminalOnly ? 'terminal' : 'consultant'} directive at ${recovery.pendingDirective.recordedAt}: ${recovery.pendingDirective.operatorGuidance}`,
     );
   }
 

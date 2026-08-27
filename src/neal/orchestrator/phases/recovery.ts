@@ -197,9 +197,11 @@ async function buildConsultantAdvice(
 }
 
 // Applies a recoverable consultant verdict. Enters interactive recovery and
-// injects the consultant's in-scope directive as the pending turn, exactly like
-// a human-supplied `neal resume --message`, so the coder consumes it and the
-// run continues. Consumes one unit of the per-scope consultant budget
+// injects the consultant's in-scope directive as a non-terminal
+// `pendingDirective`, so the coder consumes it and the run continues. Operator
+// guidance is always a `turns[]` entry, so the slot itself records that the
+// pending guidance is autonomous rather than operator-authored; the directive
+// becomes a numbered turn once the coder's disposition is recorded. Consumes one unit of the per-scope consultant budget
 // (`consultantAttemptCount`) and persists the anti-thrash `recentBlocks`. The
 // caller has already emitted the `consultant.verdict` audit event for this
 // verdict.
@@ -235,8 +237,24 @@ async function applyRecoverableConsultantDirective(args: {
     sourcePhase: enteredState.interactiveBlockedRecovery?.sourcePhase,
     blockedReason: reason,
   });
-  const resolvedState = await recordInteractiveBlockedRecoveryGuidance(statePath, resolutionDirective, logger, {
-    recordedAt: nextRecovery.enteredAt,
+  const resolvedState = await saveState(statePath, {
+    ...enteredState,
+    interactiveBlockedRecovery: {
+      ...nextRecovery,
+      sourcePhase,
+      blockedReason: reason,
+      pendingDirective: {
+        recordedAt: new Date().toISOString(),
+        operatorGuidance: resolutionDirective,
+        terminalOnly: false,
+      },
+    },
+  });
+  await writeExecutionArtifacts(resolvedState);
+  await logger?.event('interactive_blocked_recovery.guidance_recorded', {
+    scopeNumber: resolvedState.currentScopeNumber,
+    recoveryTurn: nextRecovery.turns.length + 1,
+    sourcePhase,
   });
   await logger?.event('consultant.resolved', {
     scopeNumber: resolvedState.currentScopeNumber,
@@ -333,11 +351,6 @@ export async function recordInteractiveBlockedRecoveryGuidance(
   statePath: string,
   operatorGuidance: string,
   logger?: RunLogger,
-  options?: {
-    // Set only by the consultant-injection path, which stamps the injected
-    // turn with the recovery's own `enteredAt`. See isConsultantInjectedRecoveryTurn.
-    recordedAt?: string;
-  },
 ) {
   const trimmedGuidance = operatorGuidance.trim();
   if (!trimmedGuidance) {
@@ -388,7 +401,7 @@ export async function recordInteractiveBlockedRecoveryGuidance(
         ...turns,
         {
           number: turns.length + 1,
-          recordedAt: options?.recordedAt ?? new Date().toISOString(),
+          recordedAt: new Date().toISOString(),
           operatorGuidance: trimmedGuidance,
           disposition: null,
         },
@@ -580,7 +593,7 @@ async function applyLaterScopeRevision(
   }
   if (!isOperatorGuidedRecoveryTurn(state)) {
     throw new Error(
-      'Interactive blocked recovery cannot apply the later-scope revision: only operator guidance may direct a later-scope revision, and the pending turn is not an operator message.',
+      'Interactive blocked recovery cannot apply the later-scope revision: only operator guidance may direct a later-scope revision, and the pending guidance is not an operator message.',
     );
   }
   const planDocument = await readFile(state.planDoc, 'utf8');
@@ -609,32 +622,44 @@ async function applyLaterScopeRevision(
   });
 }
 
-// A recoverable consultant verdict is injected as a recovery turn through the
-// same path as an operator message, so the turn record carries no origin field.
-// The consultant-injection path stamps its turn with the recovery's own
-// `enteredAt` (the turn is recorded as part of entering recovery), while an
-// operator turn is recorded by a later `neal resume --message` with its own
-// timestamp. Provenance is therefore the identity `turn.recordedAt ===
-// recovery.enteredAt`: a structural "recorded during entry" marker, not an
-// ordering comparison, so skewed or non-monotonic clocks cannot flip it.
-function isConsultantInjectedRecoveryTurn(
-  state: OrchestrationState,
-  turn: InteractiveBlockedRecoveryState['turns'][number],
-): boolean {
-  const recovery = state.interactiveBlockedRecovery;
-  return recovery !== null && turn.recordedAt === recovery.enteredAt;
-}
-
-// Only an operator message may direct a later-scope revision: a terminal-only
-// directive cannot choose an action that carries one, and a consultant-injected
-// turn is not operator guidance.
+// Whether the pending guidance is an operator message. Only an operator message
+// may direct a later-scope revision.
+//
+// Structurally: operator guidance is always a `turns[]` entry recorded by
+// `neal resume --message`, while a consultant directive is a non-terminal
+// `pendingDirective` and an operator's turn-cap message is a terminal one; any
+// `pendingDirective` therefore disqualifies the round. States persisted before
+// the consultant used that slot carry its directive as an ordinary `turns[]`
+// entry with nothing on the turn to tell it apart. Those are recognised
+// conservatively by what the consultant path persists alongside: an anti-thrash
+// `recentBlocks` record for this exact block identity with no
+// `consultantAdvice` (advice is written only when the run yields to the
+// operator instead). No timestamps are compared, so clock skew cannot flip the
+// answer either way.
 function isOperatorGuidedRecoveryTurn(state: OrchestrationState): boolean {
   const recovery = state.interactiveBlockedRecovery;
   if (!recovery || recovery.pendingDirective) {
     return false;
   }
   const latestTurn = recovery.turns.at(-1);
-  return latestTurn !== undefined && !isConsultantInjectedRecoveryTurn(state, latestTurn);
+  if (latestTurn === undefined || latestTurn.number <= recovery.lastHandledTurn) {
+    return false;
+  }
+  if (recovery.consultantAdvice) {
+    return true;
+  }
+  if (!isConsultantEligibleBlock(recovery.blockedReason, recovery.sourcePhase)) {
+    return true;
+  }
+  const candidate = buildRecentBlockCandidate(state, recovery.blockedReason, recovery.sourcePhase);
+  const consultantRecordedThisBlock = state.recentBlocks.some(
+    (record) =>
+      record.scopeNumber === candidate.scopeNumber &&
+      record.derivedScopeIndex === candidate.derivedScopeIndex &&
+      record.sourcePhase === candidate.sourcePhase &&
+      record.normalizedKey === candidate.normalizedKey,
+  );
+  return !consultantRecordedThisBlock;
 }
 
 async function getLaterScopeRevisionOffer(state: OrchestrationState, terminalOnly: boolean) {
@@ -674,13 +699,13 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   }
 
   const latestTurn = state.interactiveBlockedRecovery.turns.at(-1);
-  const terminalDirective = state.interactiveBlockedRecovery.pendingDirective;
-  if (!latestTurn && !terminalDirective) {
+  const pendingDirective = state.interactiveBlockedRecovery.pendingDirective;
+  if (!latestTurn && !pendingDirective) {
     throw new Error('Interactive blocked recovery requires recorded operator guidance before a coder response can be applied.');
   }
 
   if (
-    terminalDirective &&
+    pendingDirective?.terminalOnly &&
     disposition.action !== 'replace_current_scope' &&
     disposition.action !== 'terminal_block'
   ) {
