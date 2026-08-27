@@ -2340,3 +2340,119 @@ test('a consultant-injected turn is never offered or allowed a later-scope revis
     clearProviderCapabilitiesOverridesForTesting();
   }
 });
+
+test('consultant-turn provenance survives skewed enteredAt/recordedAt clocks', async () => {
+  const recoveryBase = {
+    sourcePhase: 'reviewer_scope' as const,
+    blockedReason: REVIEW_STUCK_REASON,
+    maxTurns: 3,
+    pendingDirective: null,
+  };
+  const fakeCoder = (structured: Record<string, unknown>, prompts: string[]) => ({
+    createCoderAdapter() {
+      return {
+        async runPrompt() {
+          throw new Error('text coder prompt is not used in blocked recovery');
+        },
+        async runStructuredPrompt<TStructured>(args: CoderStructuredPromptArgs) {
+          prompts.push(args.prompt);
+          return { sessionHandle: 'coder-session-skew', structured: structured as TStructured };
+        },
+      };
+    },
+  });
+  const revision = {
+    action: 'resume_current_scope' as const,
+    summary: 'Continue; scope 3 narrowed.',
+    rationale: 'Narrow scope 3.',
+    blocker: '',
+    replacementPlan: '',
+    laterScopeNumber: 3,
+    laterScopeBody: REVISED_SCOPE_3,
+  };
+
+  // Consultant turn stamped with enteredAt, both deliberately in the future and
+  // later than everything else on the record: still ineligible.
+  const consultant = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
+    interactiveBlockedRecovery: {
+      ...recoveryBase,
+      enteredAt: '2099-12-31T23:59:59.999Z',
+      lastHandledTurn: 0,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2099-12-31T23:59:59.999Z',
+          operatorGuidance: recoverableConsultantVerdict().resolutionDirective,
+          disposition: null,
+        },
+      ],
+    },
+  });
+  const consultantPrompts: string[] = [];
+  setProviderCapabilitiesOverrideForTesting('openai-codex', fakeCoder(revision, consultantPrompts));
+  try {
+    await assert.rejects(
+      () => runInteractiveBlockedRecoveryPhase(consultant.state, consultant.statePath, consultant.logger),
+      /A later-scope revision is not available for this round/,
+    );
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+  assert.ok(!consultantPrompts[0]?.includes('To revise a later scope'));
+  await assert.rejects(
+    () =>
+      applyInteractiveBlockedRecoveryDisposition(consultant.state, consultant.statePath, revision, 'coder-session-x', consultant.logger),
+    /only operator guidance may direct a later-scope revision/,
+  );
+  assert.equal(await readFile(consultant.state.planDoc, 'utf8'), TOP_LEVEL_PLAN);
+
+  // Operator turn recorded with a clock that runs EARLIER than enteredAt and
+  // than the consultant turn before it: still eligible.
+  const operator = await createLaterScopeRevisionFixture(TOP_LEVEL_PLAN, {
+    interactiveBlockedRecovery: {
+      ...recoveryBase,
+      enteredAt: '2099-12-31T23:59:59.999Z',
+      lastHandledTurn: 1,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2099-12-31T23:59:59.999Z',
+          operatorGuidance: recoverableConsultantVerdict().resolutionDirective,
+          disposition: {
+            recordedAt: '2099-12-31T23:59:59.999Z',
+            sessionHandle: 'coder-session-1',
+            action: 'stay_blocked',
+            summary: 'Need the operator.',
+            rationale: 'Directive alone is not enough.',
+            blocker: 'Need an operator decision on scope 3.',
+            replacementPlan: '',
+            laterScopeNumber: 0,
+            laterScopeBody: '',
+            resultingPhase: 'interactive_blocked_recovery',
+          },
+        },
+        {
+          number: 2,
+          recordedAt: '2000-01-01T00:00:00.000Z',
+          operatorGuidance: 'Keep going here; narrow scope 3 to the parser half.',
+          disposition: null,
+        },
+      ],
+    },
+  });
+  const operatorPrompts: string[] = [];
+  setProviderCapabilitiesOverrideForTesting('openai-codex', fakeCoder(revision, operatorPrompts));
+  let resumedState: OrchestrationState;
+  try {
+    resumedState = await runInteractiveBlockedRecoveryPhase(operator.state, operator.statePath, operator.logger);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+  assert.ok(operatorPrompts[0]?.includes('To revise a later scope'));
+  assert.equal(
+    await readFile(operator.state.planDoc, 'utf8'),
+    expectedRevisedPlan(TOP_LEVEL_PLAN, '### Scope 3:', REVISED_SCOPE_3, '## Boundaries'),
+  );
+  assert.equal(resumedState.phase, 'coder_response');
+  assert.equal(resumedState.interactiveBlockedRecoveryHistory[0]?.turns[1]?.disposition?.laterScopeNumber, 3);
+});

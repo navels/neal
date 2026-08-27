@@ -235,7 +235,9 @@ async function applyRecoverableConsultantDirective(args: {
     sourcePhase: enteredState.interactiveBlockedRecovery?.sourcePhase,
     blockedReason: reason,
   });
-  const resolvedState = await recordInteractiveBlockedRecoveryGuidance(statePath, resolutionDirective, logger);
+  const resolvedState = await recordInteractiveBlockedRecoveryGuidance(statePath, resolutionDirective, logger, {
+    recordedAt: nextRecovery.enteredAt,
+  });
   await logger?.event('consultant.resolved', {
     scopeNumber: resolvedState.currentScopeNumber,
     sourcePhase,
@@ -331,6 +333,11 @@ export async function recordInteractiveBlockedRecoveryGuidance(
   statePath: string,
   operatorGuidance: string,
   logger?: RunLogger,
+  options?: {
+    // Set only by the consultant-injection path, which stamps the injected
+    // turn with the recovery's own `enteredAt`. See isConsultantInjectedRecoveryTurn.
+    recordedAt?: string;
+  },
 ) {
   const trimmedGuidance = operatorGuidance.trim();
   if (!trimmedGuidance) {
@@ -381,7 +388,7 @@ export async function recordInteractiveBlockedRecoveryGuidance(
         ...turns,
         {
           number: turns.length + 1,
-          recordedAt: new Date().toISOString(),
+          recordedAt: options?.recordedAt ?? new Date().toISOString(),
           operatorGuidance: trimmedGuidance,
           disposition: null,
         },
@@ -603,38 +610,19 @@ async function applyLaterScopeRevision(
 }
 
 // A recoverable consultant verdict is injected as a recovery turn through the
-// same path as an operator message, so the turn record itself carries no
-// origin. The origin is derived from what that path persists in the same entry
-// call: the consultant upserts a `recentBlocks` record for this block (so its
-// `recordedAt` is at or after the recovery's `enteredAt`), persists no
-// `consultantAdvice` (advice is written only when the run yields instead), and
-// injects the first turn recorded after that record. Every other turn is
-// operator guidance.
+// same path as an operator message, so the turn record carries no origin field.
+// The consultant-injection path stamps its turn with the recovery's own
+// `enteredAt` (the turn is recorded as part of entering recovery), while an
+// operator turn is recorded by a later `neal resume --message` with its own
+// timestamp. Provenance is therefore the identity `turn.recordedAt ===
+// recovery.enteredAt`: a structural "recorded during entry" marker, not an
+// ordering comparison, so skewed or non-monotonic clocks cannot flip it.
 function isConsultantInjectedRecoveryTurn(
   state: OrchestrationState,
   turn: InteractiveBlockedRecoveryState['turns'][number],
 ): boolean {
   const recovery = state.interactiveBlockedRecovery;
-  if (!recovery || recovery.consultantAdvice) {
-    return false;
-  }
-  if (!isConsultantEligibleBlock(recovery.blockedReason, recovery.sourcePhase)) {
-    return false;
-  }
-  const candidate = buildRecentBlockCandidate(state, recovery.blockedReason, recovery.sourcePhase);
-  const record = state.recentBlocks.find(
-    (entry) =>
-      entry.scopeNumber === candidate.scopeNumber &&
-      entry.derivedScopeIndex === candidate.derivedScopeIndex &&
-      entry.sourcePhase === candidate.sourcePhase &&
-      entry.normalizedKey === candidate.normalizedKey &&
-      entry.recordedAt >= recovery.enteredAt,
-  );
-  if (!record) {
-    return false;
-  }
-  const injectedTurn = recovery.turns.find((entry) => entry.recordedAt >= record.recordedAt);
-  return injectedTurn?.number === turn.number;
+  return recovery !== null && turn.recordedAt === recovery.enteredAt;
 }
 
 // Only an operator message may direct a later-scope revision: a terminal-only
