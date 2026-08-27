@@ -724,3 +724,51 @@ test('state hydration accepts provider IDs registered through the registry', asy
     clearProviderDefinitionRegistrationsForTesting();
   }
 });
+
+test('state hydration defaults a recovery disposition without later-scope fields to no revision', async () => {
+  const { state, statePath } = await createMinimalStateFixture('neal-state-legacy-later-scope-');
+  await saveState(statePath, {
+    ...state,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'reviewer_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-08-27T00:00:00.000Z',
+      sourcePhase: 'reviewer_scope',
+      blockedReason: 'Review findings stopped converging.',
+      maxTurns: 3,
+      lastHandledTurn: 1,
+      pendingDirective: null,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-08-27T00:01:00.000Z',
+          operatorGuidance: 'Keep going.',
+          disposition: {
+            recordedAt: '2026-08-27T00:02:00.000Z',
+            sessionHandle: 'coder-session-1',
+            action: 'stay_blocked',
+            summary: 'Still blocked.',
+            rationale: 'Need more.',
+            blocker: 'Need a decision.',
+            replacementPlan: '',
+            laterScopeNumber: 0,
+            laterScopeBody: '',
+            resultingPhase: 'interactive_blocked_recovery',
+          },
+        },
+      ],
+    },
+  });
+  const persisted = JSON.parse(await readFile(statePath, 'utf8')) as {
+    interactiveBlockedRecovery: { turns: Array<{ disposition: Record<string, unknown> }> };
+  };
+  delete persisted.interactiveBlockedRecovery.turns[0].disposition.laterScopeNumber;
+  delete persisted.interactiveBlockedRecovery.turns[0].disposition.laterScopeBody;
+  await writeFile(statePath, JSON.stringify(persisted, null, 2) + '\n', 'utf8');
+
+  const loadedState = await loadState(statePath);
+
+  assert.equal(loadedState.interactiveBlockedRecovery?.turns[0]?.disposition?.laterScopeNumber, 0);
+  assert.equal(loadedState.interactiveBlockedRecovery?.turns[0]?.disposition?.laterScopeBody, '');
+});

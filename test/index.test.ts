@@ -2790,6 +2790,8 @@ test('runResumeRunCommand records resume guidance and processes the pending reco
               rationale: 'The supplied guidance did not settle the reviewer concern.',
               blocker: 'Need one narrower answer.',
               replacementPlan: '',
+              laterScopeNumber: 0,
+              laterScopeBody: '',
             } as TStructured,
           };
         },

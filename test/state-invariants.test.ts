@@ -119,6 +119,8 @@ function makeInteractiveBlockedRecovery(
           rationale: 'The requested path is clear.',
           blocker: '',
           replacementPlan: '',
+          laterScopeNumber: 0,
+          laterScopeBody: '',
           resultingPhase,
         },
       },

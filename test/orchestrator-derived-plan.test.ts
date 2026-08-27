@@ -210,6 +210,8 @@ test('recovered blocked derived-plan review keeps derived-plan identity through 
         rationale: 'The blocking finding can be handled in the same derived plan.',
         blocker: '',
         replacementPlan: '',
+        laterScopeNumber: 0,
+        laterScopeBody: '',
       },
       'coder-derived-plan-recovery',
       logger,

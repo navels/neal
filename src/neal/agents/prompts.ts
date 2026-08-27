@@ -89,8 +89,16 @@ export function buildBlockedRecoveryCoderPrompt(args: {
   turnsTaken: number;
   terminalOnly?: boolean;
   allowReplacement?: boolean;
+  // Offered only when the top-level plan is a canonical multi_scope document
+  // with a scope after the current one; the recovery phase decides.
+  laterScopeRevision?: {
+    topLevelPlanDoc: string;
+    currentScopeNumber: number;
+    scopeCount: number;
+  } | null;
 }) {
   const allowReplacement = args.allowReplacement ?? true;
+  const laterScopeRevision = args.terminalOnly ? null : args.laterScopeRevision ?? null;
   const actionLines = [
     '- `resume_current_scope`',
     ...(allowReplacement ? ['- `replace_current_scope`'] : []),
@@ -130,6 +138,14 @@ export function buildBlockedRecoveryCoderPrompt(args: {
     allowReplacement
       ? 'Always include a `replacementPlan` string. Use an empty string unless action=`replace_current_scope`.'
       : 'Always include an empty `replacementPlan` string.',
+    ...(laterScopeRevision
+      ? [
+          'Always include an integer `laterScopeNumber` and a `laterScopeBody` string. Use `0` and an empty string unless the operator guidance directs a change to a later top-level scope.',
+          `The operator guidance may direct a change to one later scope of the top-level plan at ${laterScopeRevision.topLevelPlanDoc}. The current top-level scope is ${laterScopeRevision.currentScopeNumber}; eligible target scopes are ${laterScopeRevision.currentScopeNumber + 1} through ${laterScopeRevision.scopeCount}.`,
+          'To revise a later scope, set `laterScopeNumber` to the target scope number and `laterScopeBody` to the complete replacement text of that one `### Scope N:` entry. The body must start with the line `### Scope N:` for the same N (the title after the colon may change), must contain no other `### ` or `## ` heading, and must keep the `- Goal:`, `- Verification:`, and `- Success Condition:` bullets.',
+          'A later-scope revision may accompany action=`resume_current_scope` or action=`stay_blocked` only. Set both fields or neither. Do not revise the current scope, an earlier scope, or a derived plan this way, and do not edit the plan file yourself: Neal validates the revised plan and writes it. Put the reasoning for the revision in `rationale`.',
+        ]
+      : ['Always include `laterScopeNumber` as `0` and `laterScopeBody` as an empty string.']),
     ...(allowReplacement
       ? [
           'When action=`replace_current_scope`, `replacementPlan` must use the same Neal-executable contract as a top-level plan.',

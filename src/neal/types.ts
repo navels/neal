@@ -306,6 +306,8 @@ export type CoderBlockedRecoveryDisposition = {
   rationale: string;
   blocker: string;
   replacementPlan: string;
+  laterScopeNumber: number;
+  laterScopeBody: string;
 };
 
 export type InteractiveBlockedRecoveryTurnDisposition = {
@@ -316,6 +318,8 @@ export type InteractiveBlockedRecoveryTurnDisposition = {
   rationale: string;
   blocker: string;
   replacementPlan: string;
+  laterScopeNumber: number;
+  laterScopeBody: string;
   resultingPhase: OrchestrationPhase;
 };
 

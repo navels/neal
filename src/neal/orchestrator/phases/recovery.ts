@@ -1,3 +1,5 @@
+import { readFile, writeFile } from 'node:fs/promises';
+
 import {
   CoderRoundError,
   runBlockedRecoveryCoderRound,
@@ -12,10 +14,12 @@ import {
 import { getInteractiveBlockedRecoveryMaxTurns, getConsultantMaxAttempts } from '../../config.js';
 import { EXECUTE_FINALIZATION_PHASE } from '../../execute-finalization.js';
 import type { RunLogger } from '../../logger.js';
+import { getLaterScopeRevisionEligibility, reviseLaterScope } from '../../plan-scope-revision.js';
 import { hasPendingOperatorGuidance } from '../../run-status.js';
 import { getExecutionPlanPath } from '../../scopes.js';
 import { loadState, saveState } from '../../state.js';
 import { getInteractiveRecoveryView, isActivePendingDerivedPlanReview } from '../../state-views.js';
+import { getCoderBlockedRecoveryLaterScopeErrors } from '../../agents/schemas.js';
 import type {
   CoderBlockedRecoveryDisposition,
   InteractiveBlockedRecoveryConsultantAdvice,
@@ -447,6 +451,8 @@ function withRecordedInteractiveBlockedRecoveryDisposition(
               rationale: disposition.rationale,
               blocker: disposition.blocker.trim(),
               replacementPlan: disposition.replacementPlan.trim(),
+              laterScopeNumber: disposition.laterScopeNumber,
+              laterScopeBody: disposition.laterScopeBody,
               resultingPhase,
             },
           },
@@ -476,6 +482,8 @@ function withRecordedInteractiveBlockedRecoveryDisposition(
                 rationale: disposition.rationale,
                 blocker: disposition.blocker.trim(),
                 replacementPlan: disposition.replacementPlan.trim(),
+                laterScopeNumber: disposition.laterScopeNumber,
+                laterScopeBody: disposition.laterScopeBody,
                 resultingPhase,
               },
             }
@@ -551,6 +559,66 @@ function getInteractiveBlockedRecoveryResumePhase(
   }
 }
 
+// Reads the top-level plan (always `state.planDoc`, even while a derived plan
+// is executing) at the time the disposition is applied, splices the revised
+// scope entry in, and writes the file. The plan is read fresh from disk on
+// every later turn, so nothing in state needs to change.
+async function applyLaterScopeRevision(
+  state: OrchestrationState,
+  disposition: CoderBlockedRecoveryDisposition,
+  logger?: RunLogger,
+) {
+  if (disposition.laterScopeNumber === 0 && disposition.laterScopeBody.trim() === '') {
+    return;
+  }
+  const planDocument = await readFile(state.planDoc, 'utf8');
+  const errors = getCoderBlockedRecoveryLaterScopeErrors(disposition, {
+    allowLaterScopeRevision: true,
+    currentScopeNumber: state.currentScopeNumber,
+    planDocument,
+  });
+  if (errors.length > 0) {
+    throw new Error(`Interactive blocked recovery cannot apply the later-scope revision: ${errors.join(' ')}`);
+  }
+  const result = reviseLaterScope({
+    planDocument,
+    currentScopeNumber: state.currentScopeNumber,
+    targetScopeNumber: disposition.laterScopeNumber,
+    replacementBody: disposition.laterScopeBody,
+  });
+  if (!result.ok) {
+    throw new Error(`Interactive blocked recovery cannot apply the later-scope revision: ${result.errors.join(' ')}`);
+  }
+  await writeFile(state.planDoc, result.document, 'utf8');
+  await logger?.event('interactive_blocked_recovery.later_scope_revised', {
+    scopeNumber: state.currentScopeNumber,
+    laterScopeNumber: disposition.laterScopeNumber,
+    planDoc: state.planDoc,
+  });
+}
+
+async function getLaterScopeRevisionOffer(state: OrchestrationState, terminalOnly: boolean) {
+  if (terminalOnly) {
+    return null;
+  }
+  let planDocument: string;
+  try {
+    planDocument = await readFile(state.planDoc, 'utf8');
+  } catch {
+    return null;
+  }
+  const eligibility = getLaterScopeRevisionEligibility(planDocument, state.currentScopeNumber);
+  if (!eligibility.eligible) {
+    return null;
+  }
+  return {
+    topLevelPlanDoc: state.planDoc,
+    planDocument,
+    currentScopeNumber: state.currentScopeNumber,
+    scopeCount: eligibility.scopeCount,
+  };
+}
+
 export async function applyInteractiveBlockedRecoveryDisposition(
   state: OrchestrationState,
   statePath: string,
@@ -589,6 +657,8 @@ export async function applyInteractiveBlockedRecoveryDisposition(
     action: disposition.action,
     sessionHandle,
   });
+
+  await applyLaterScopeRevision(state, disposition, logger);
 
   if (disposition.action === 'replace_current_scope') {
     const persistedState = await persistSplitPlanRecovery(
@@ -723,12 +793,15 @@ export async function runInteractiveBlockedRecoveryPhase(
     throw new Error('Interactive blocked recovery has no pending operator guidance to process.');
   }
 
+  const terminalOnly = Boolean(pendingDirective?.terminalOnly);
   await logger?.event('phase.start', {
     phase: 'interactive_blocked_recovery',
     recoveryTurn: pendingDirective ? state.interactiveBlockedRecovery.turns.length : latestTurn?.number,
     sourcePhase: state.interactiveBlockedRecovery.sourcePhase,
-    terminalOnly: Boolean(pendingDirective?.terminalOnly),
+    terminalOnly,
   });
+
+  const laterScopeRevision = await getLaterScopeRevisionOffer(state, terminalOnly);
 
   let codex;
   try {
@@ -742,8 +815,9 @@ export async function runInteractiveBlockedRecoveryPhase(
       operatorGuidance: pendingDirective?.operatorGuidance ?? latestTurn?.operatorGuidance ?? state.interactiveBlockedRecovery.blockedReason,
       maxTurns: state.interactiveBlockedRecovery.maxTurns,
       turnsTaken: pendingDirective ? state.interactiveBlockedRecovery.turns.length : latestTurn?.number ?? 0,
-      terminalOnly: Boolean(pendingDirective?.terminalOnly),
+      terminalOnly,
       allowReplacement: true,
+      laterScopeRevision,
       sessionHandle: state.coderSessionHandle,
       logger,
     });

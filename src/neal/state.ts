@@ -320,6 +320,17 @@ function readNullableString(record: StateRecord, key: string, fieldPath = key): 
   throwInvalidState(fieldPath, `expected string or null, received ${formatStateValue(value)}`);
 }
 
+function readOptionalString(record: StateRecord, key: string, fieldPath = key): string | undefined {
+  if (!hasOwn(record, key)) {
+    return undefined;
+  }
+  const value = record[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+  throwInvalidState(fieldPath, `expected string, received ${formatStateValue(value)}`);
+}
+
 function readOptionalBoolean(record: StateRecord, key: string, fieldPath = key): boolean | undefined {
   if (!hasOwn(record, key)) {
     return undefined;
@@ -829,6 +840,8 @@ function hydrateInteractiveBlockedRecoveryTurnDisposition(
     rationale: readString(disposition, 'rationale', `${fieldPath}.rationale`),
     blocker: readString(disposition, 'blocker', `${fieldPath}.blocker`),
     replacementPlan: readString(disposition, 'replacementPlan', `${fieldPath}.replacementPlan`),
+    laterScopeNumber: readOptionalSafeInteger(disposition, 'laterScopeNumber', `${fieldPath}.laterScopeNumber`) ?? 0,
+    laterScopeBody: readOptionalString(disposition, 'laterScopeBody', `${fieldPath}.laterScopeBody`) ?? '',
     resultingPhase: readOrchestrationPhase(disposition, 'resultingPhase', `${fieldPath}.resultingPhase`),
   };
 }

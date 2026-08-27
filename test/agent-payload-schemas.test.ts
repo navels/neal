@@ -203,6 +203,8 @@ function validCoderBlockedRecoveryPayload() {
     rationale: 'The referenced file exists under a different name.',
     blocker: '',
     replacementPlan: '',
+    laterScopeNumber: 0,
+    laterScopeBody: '',
   };
 }
 
@@ -710,6 +712,12 @@ const EXPECTED_CODER_BLOCKED_RECOVERY_DISPOSITION_JSON = `{
     },
     "replacementPlan": {
       "type": "string"
+    },
+    "laterScopeNumber": {
+      "type": "number"
+    },
+    "laterScopeBody": {
+      "type": "string"
     }
   },
   "required": [
@@ -717,7 +725,9 @@ const EXPECTED_CODER_BLOCKED_RECOVERY_DISPOSITION_JSON = `{
     "summary",
     "rationale",
     "blocker",
-    "replacementPlan"
+    "replacementPlan",
+    "laterScopeNumber",
+    "laterScopeBody"
   ],
   "additionalProperties": false
 }`;
@@ -2081,6 +2091,109 @@ test('validateCoderScopePayload rejects an invalid resume-check timeoutMs', () =
 
 // --- validateCoderBlockedRecoveryDispositionPayload ---------------------------
 
+const LATER_SCOPE_PLAN = `# Plan
+
+## Execution Shape
+
+executionShape: multi_scope
+
+## Execution Queue
+
+### Scope 1: First
+- Goal: One.
+- Verification: \`pnpm typecheck\`
+- Success Condition: One done.
+
+### Scope 2: Second
+- Goal: Two.
+- Verification: \`pnpm test\`
+- Success Condition: Two done.
+`;
+
+const LATER_SCOPE_BODY = '### Scope 2: Second, narrowed\n- Goal: Half of two.\n- Verification: `pnpm test`\n- Success Condition: Half done.';
+
+const LATER_SCOPE_CONTEXT = { allowLaterScopeRevision: true, currentScopeNumber: 1, planDocument: LATER_SCOPE_PLAN };
+
+test('validateCoderBlockedRecoveryDispositionPayload rejects a later-scope revision without per-round context', () => {
+  const payload = { ...validCoderBlockedRecoveryPayload(), laterScopeNumber: 2, laterScopeBody: LATER_SCOPE_BODY };
+  assert.throws(
+    () => validateCoderBlockedRecoveryDispositionPayload(payload),
+    /A later-scope revision is not available for this round/,
+  );
+});
+
+test('validateCoderBlockedRecoveryDispositionPayload rejects a later-scope revision when the round did not offer it', () => {
+  const payload = { ...validCoderBlockedRecoveryPayload(), laterScopeNumber: 2, laterScopeBody: LATER_SCOPE_BODY };
+  assert.throws(
+    () =>
+      validateCoderBlockedRecoveryDispositionPayload(payload, { ...LATER_SCOPE_CONTEXT, allowLaterScopeRevision: false }),
+    /A later-scope revision is not available for this round/,
+  );
+});
+
+test('validateCoderBlockedRecoveryDispositionPayload requires laterScopeNumber and laterScopeBody together', () => {
+  assert.throws(
+    () =>
+      validateCoderBlockedRecoveryDispositionPayload(
+        { ...validCoderBlockedRecoveryPayload(), laterScopeNumber: 2 },
+        LATER_SCOPE_CONTEXT,
+      ),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      validateCoderBlockedRecoveryDispositionPayload(
+        { ...validCoderBlockedRecoveryPayload(), laterScopeBody: LATER_SCOPE_BODY },
+        LATER_SCOPE_CONTEXT,
+      ),
+    /must be set together/,
+  );
+});
+
+test('validateCoderBlockedRecoveryDispositionPayload rejects a later-scope revision with replace_current_scope or terminal_block', () => {
+  for (const action of ['replace_current_scope', 'terminal_block']) {
+    const payload = {
+      ...validCoderBlockedRecoveryPayload(),
+      action,
+      blocker: 'Blocked.',
+      replacementPlan: action === 'replace_current_scope' ? '# Replacement' : '',
+      laterScopeNumber: 2,
+      laterScopeBody: LATER_SCOPE_BODY,
+    };
+    assert.throws(
+      () => validateCoderBlockedRecoveryDispositionPayload(payload, LATER_SCOPE_CONTEXT),
+      new RegExp(`may accompany only action=resume_current_scope or action=stay_blocked, not action=${action}`),
+    );
+  }
+});
+
+test('validateCoderBlockedRecoveryDispositionPayload runs the splice helper on a later-scope revision', () => {
+  const badBody = { ...validCoderBlockedRecoveryPayload(), laterScopeNumber: 2, laterScopeBody: '### Scope 2: No bullets' };
+  assert.throws(
+    () => validateCoderBlockedRecoveryDispositionPayload(badBody, LATER_SCOPE_CONTEXT),
+    /Revised plan does not validate/,
+  );
+  const wrongTarget = { ...validCoderBlockedRecoveryPayload(), laterScopeNumber: 1, laterScopeBody: '### Scope 1: Current' };
+  assert.throws(
+    () => validateCoderBlockedRecoveryDispositionPayload(wrongTarget, LATER_SCOPE_CONTEXT),
+    /must be a later scope than the current scope 1/,
+  );
+});
+
+test('validateCoderBlockedRecoveryDispositionPayload accepts a valid later-scope revision with resume_current_scope and stay_blocked', () => {
+  for (const action of ['resume_current_scope', 'stay_blocked']) {
+    const payload = {
+      ...validCoderBlockedRecoveryPayload(),
+      action,
+      blocker: action === 'stay_blocked' ? 'Still need a decision.' : '',
+      laterScopeNumber: 2,
+      laterScopeBody: LATER_SCOPE_BODY,
+    };
+    assert.deepStrictEqual(validateCoderBlockedRecoveryDispositionPayload(payload, LATER_SCOPE_CONTEXT), payload);
+  }
+});
+
+
 test('validateCoderBlockedRecoveryDispositionPayload rejects non-object payloads', () => {
   assert.throws(
     () => validateCoderBlockedRecoveryDispositionPayload(7),
@@ -2100,6 +2213,8 @@ test('validateCoderBlockedRecoveryDispositionPayload accepts unknown properties 
     rationale: 'The referenced file exists under a different name.',
     blocker: '',
     replacementPlan: '',
+    laterScopeNumber: 0,
+    laterScopeBody: '',
   });
 });
 
@@ -2177,6 +2292,8 @@ test('validateCoderBlockedRecoveryDispositionPayload accepts replace_current_sco
     ...validCoderBlockedRecoveryPayload(),
     action: 'replace_current_scope',
     replacementPlan: '  # Replacement plan  ',
+    laterScopeNumber: 0,
+    laterScopeBody: '',
   };
   assert.deepStrictEqual(validateCoderBlockedRecoveryDispositionPayload(payload), {
     action: 'replace_current_scope',
@@ -2184,6 +2301,8 @@ test('validateCoderBlockedRecoveryDispositionPayload accepts replace_current_sco
     rationale: 'The referenced file exists under a different name.',
     blocker: '',
     replacementPlan: '  # Replacement plan  ',
+    laterScopeNumber: 0,
+    laterScopeBody: '',
   });
 });
 
@@ -2195,6 +2314,8 @@ test('validateCoderBlockedRecoveryDispositionPayload accepts stay_blocked with a
     rationale: 'The referenced file exists under a different name.',
     blocker: 'Still waiting on access.',
     replacementPlan: '',
+    laterScopeNumber: 0,
+    laterScopeBody: '',
   });
 });
 

@@ -74,6 +74,8 @@ async function createInteractiveRecoveryFixture(args: {
             rationale: 'The path was clear.',
             blocker: '',
             replacementPlan: '',
+            laterScopeNumber: 0,
+            laterScopeBody: '',
             resultingPhase: 'coder_response',
           },
         },

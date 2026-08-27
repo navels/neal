@@ -353,6 +353,7 @@ const coderResponseSpec: BuilderMatrixSpec = {
 const blockedRecoverySpec: BuilderMatrixSpec = {
   exportName: 'buildBlockedRecoveryCoderPrompt',
   axes: [
+    { name: 'allowLaterScopeRevision', values: ['true', 'false'] },
     { name: 'allowReplacement', values: ['true', 'false'] },
     { name: 'terminalOnly', values: ['true', 'false'] },
   ],
@@ -367,6 +368,10 @@ const blockedRecoverySpec: BuilderMatrixSpec = {
       turnsTaken: 1,
       terminalOnly: c.terminalOnly === 'true',
       allowReplacement: c.allowReplacement === 'true',
+      laterScopeRevision:
+        c.allowLaterScopeRevision === 'true'
+          ? { topLevelPlanDoc: PLAN_DOC, currentScopeNumber: 1, scopeCount: 3 }
+          : null,
     }),
 };
 
@@ -552,10 +557,14 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
     'buildPlanReviewerPrompt#accessMode=tool-access#authoredOneShot=true#mode=plan',
   ],
   scope_coder: [
-    'buildBlockedRecoveryCoderPrompt#allowReplacement=false#terminalOnly=false',
-    'buildBlockedRecoveryCoderPrompt#allowReplacement=false#terminalOnly=true',
-    'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=false',
-    'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=true',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=false#terminalOnly=false',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=false#terminalOnly=true',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=true',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=false#terminalOnly=false',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=false#terminalOnly=true',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=false',
+    'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=true',
     'buildCoderResponsePrompt#mode=blocking',
     'buildCoderResponsePrompt#mode=optional',
     'buildScopePrompt',
@@ -589,7 +598,7 @@ const EXPECTED_MODULE_SHAS: Record<(typeof MATRIX_BUILDER_MODULES)[number], stri
   'src/neal/prompts/planning.ts': '0d0e88130af09545f7bfb5d74bf03d333954152baabd37a7926279e361167cde',
   'src/neal/prompts/execute.ts': '9676b2ac04e64317788a4769958cd3eb09d26931242f7204a30624ba8fec35ad',
   'src/neal/prompts/specialized.ts': 'c5e4ceeff6bbce7fbcfa6e97b591724528e09b5315f1dcb4dab7eedc4195362c',
-  'src/neal/agents/prompts.ts': '0a79e65192d73862a9c55b8e762775a1ac4fff184ec58dd376f5e96ab1c2e981',
+  'src/neal/agents/prompts.ts': 'c9b8b6bd135206ec8c7055aa887d65003490b8fdef95c3a662797018d01a667e',
   'src/neal/context/reviewer-context.ts': '7168f61b26ff2c9fb9fa67ce7c608f452722fcfc5187f8c346910264a4c00674',
   'src/neal/context/inline-review-context.ts': 'e6b355023bc3736d0958a4fe253eab9e0ab6df321b21190c67e766623de6a029',
 };
@@ -646,7 +655,8 @@ function assertSentinelPresence(cellKey: string, render: string, sentinel: strin
 // Each entry names a real matrix cell that renders the axis at the "with" value
 // (whose authored sentinel must appear) and its sibling at the opposite value
 // (whose render must not contain that sentinel). Covers every authored axis:
-// authoredOneShot, previousHead, terminalOnly, allowReplacement, both response
+// authoredOneShot, previousHead, terminalOnly, allowReplacement,
+// allowLaterScopeRevision, both response
 // modes, plan/derived-plan modes, and every reviewer access submode of both
 // range-diff reviewers.
 type AxisConformanceCase = { withKey: string; withoutKey: string; sentinel: string };
@@ -681,21 +691,32 @@ const AXIS_CONFORMANCE: AxisConformanceCase[] = [
     withoutKey: 'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=absent',
     sentinel: 'Previous reviewer head was',
   },
-  // terminalOnly / allowReplacement
+  // terminalOnly / allowReplacement / allowLaterScopeRevision
   {
-    withKey: 'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=true',
-    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=false',
+    withKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=true',
+    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
     sentinel: 'The recovery turn cap has been reached.',
   },
   {
-    withKey: 'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=false',
-    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowReplacement=false#terminalOnly=false',
+    withKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
+    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=false#terminalOnly=false',
     sentinel: '- `replace_current_scope`',
   },
   {
-    withKey: 'buildBlockedRecoveryCoderPrompt#allowReplacement=false#terminalOnly=false',
-    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=false',
+    withKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=false#terminalOnly=false',
+    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
     sentinel: '`replace_current_scope` is not available for this run',
+  },
+  {
+    withKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=false',
+    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
+    sentinel: 'To revise a later scope, set `laterScopeNumber`',
+  },
+  // A terminal-only round never offers the revision, whatever the flag says.
+  {
+    withKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=false',
+    withoutKey: 'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=true',
+    sentinel: 'To revise a later scope, set `laterScopeNumber`',
   },
   // response modes
   {
@@ -950,8 +971,9 @@ function registerTests(): void {
       'buildPlanningPrompt#authoredOneShot=true#planDocument=absent',
       'buildPlanReviewerPrompt#accessMode=read-only#authoredOneShot=true#mode=derived-plan',
       'buildScopePrompt',
-      'buildBlockedRecoveryCoderPrompt#allowReplacement=false#terminalOnly=true',
-      'buildBlockedRecoveryCoderPrompt#allowReplacement=true#terminalOnly=false',
+      'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=false#terminalOnly=true',
+      'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
+      'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=false',
       'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present',
       'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present',
       // New authored axes (R2-F1): planDocument, planReviewGuidance, aggregate-range.

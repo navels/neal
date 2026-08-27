@@ -67,6 +67,7 @@ import {
   parseFinalCompletionSummaryPayload,
   stripExecuteScopeProgressPayload,
   type CoderBlockedRecoveryDispositionPayload,
+  type CoderBlockedRecoveryLaterScopeContext,
   type CoderPlanPayload,
   type CoderPlanResponsePayload,
   type CoderScopePayload,
@@ -913,11 +914,28 @@ export async function runBlockedRecoveryCoderRound(args: {
   turnsTaken: number;
   terminalOnly?: boolean;
   allowReplacement?: boolean;
+  // Present only when the recovery phase found the top-level plan eligible for
+  // a later-scope revision; `planDocument` is its text read at round start.
+  laterScopeRevision?: {
+    topLevelPlanDoc: string;
+    planDocument: string;
+    currentScopeNumber: number;
+    scopeCount: number;
+  } | null;
   sessionHandle?: string | null;
   logger?: RunLogger;
 }): Promise<{ sessionHandle: string | null; payload: CoderBlockedRecoveryDispositionPayload }> {
   const progressText = await safeReadText(args.progressMarkdownPath);
   const schema = buildCoderBlockedRecoveryDispositionSchema();
+  const laterScopeRevision = args.terminalOnly ? null : args.laterScopeRevision ?? null;
+  const laterScopeContext: CoderBlockedRecoveryLaterScopeContext | null = laterScopeRevision
+    ? {
+        allowLaterScopeRevision: true,
+        currentScopeNumber: laterScopeRevision.currentScopeNumber,
+        planDocument: laterScopeRevision.planDocument,
+      }
+    : null;
+  const validator = (rawPayload: unknown) => validateCoderBlockedRecoveryDispositionPayload(rawPayload, laterScopeContext);
 
   const { sessionHandle, structured } = await runCoderStructuredPrompt<CoderBlockedRecoveryDispositionPayload>({
     coder: args.coder,
@@ -932,13 +950,20 @@ export async function runBlockedRecoveryCoderRound(args: {
       turnsTaken: args.turnsTaken,
       terminalOnly: args.terminalOnly,
       allowReplacement: args.allowReplacement,
+      laterScopeRevision: laterScopeRevision
+        ? {
+            topLevelPlanDoc: laterScopeRevision.topLevelPlanDoc,
+            currentScopeNumber: laterScopeRevision.currentScopeNumber,
+            scopeCount: laterScopeRevision.scopeCount,
+          }
+        : null,
     }),
     schema,
     label: 'Coder blocked-recovery round',
     structuredJsonProtocol: buildStructuredJsonProtocolSpec({
       schemaLabel: 'coder_blocked_recovery_disposition_payload',
       schema,
-      validator: validateCoderBlockedRecoveryDispositionPayload,
+      validator,
     }),
     resumeHandle: args.sessionHandle,
     logger: args.logger,
@@ -946,7 +971,7 @@ export async function runBlockedRecoveryCoderRound(args: {
 
   return {
     sessionHandle,
-    payload: validateCoderBlockedRecoveryDispositionPayload(structured),
+    payload: validator(structured),
   };
 }
 
