@@ -350,6 +350,36 @@ test('neal review writes accepted findings artifacts without writer-run mutation
   assert.match(stderr.text(), /review: analyzing 1 commit/);
 });
 
+test('neal review ignores a stray file in the runs directory', async () => {
+  const repo = await createRepo('neal-review-stray-runs-entry-');
+  await repo.commitFile('feature.txt', 'feature\n', 'add feature');
+  await mkdir(join(repo.cwd, '.neal', 'runs', 'writer-run'), { recursive: true });
+  await writeFile(join(repo.cwd, '.neal', 'runs', 'writer-run', 'RUN_STATE.json'), '{"sentinel":"run-state"}\n', 'utf8');
+  // macOS drops .DS_Store into any directory opened in Finder; the runs root is
+  // not exclusively run directories.
+  await writeFile(join(repo.cwd, '.neal', 'runs', '.DS_Store'), 'finder metadata\n', 'utf8');
+
+  const provider = new QueueReviewProvider(
+    [sampleDraft()],
+    [acceptedFinal(['# Review Findings', '', '## Summary', '', 'No findings.'].join('\n'))],
+  );
+  const stdout = new CaptureWritable();
+  const stderr = new CaptureWritable();
+
+  const result = await runNealReviewCli({
+    cwd: repo.cwd,
+    parsed: parseReviewArgs(['review', 'Review this feature commit', '--since', repo.baseCommit]),
+    stdout,
+    stderr,
+    provider,
+    reviewId: 'review-stray-runs-entry',
+    now: new Date('2026-05-17T12:00:00.000Z'),
+  });
+
+  assert.equal(result.outcome, 'accepted');
+  assert.equal(await readFile(join(repo.cwd, '.neal', 'runs', '.DS_Store'), 'utf8'), 'finder metadata\n');
+});
+
 test('neal review records resumable Agent SDK session handles and prints a resume hint', async () => {
   const repo = await createRepo('neal-review-resume-');
   await repo.commitFile('feature.txt', 'feature\n', 'add feature');

@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, normalize, resolve } from 'node:path';
 
@@ -450,9 +451,9 @@ async function readOptionalText(path: string) {
 
 async function readRunStates(cwd: string) {
   const runsDir = getRunsDir(cwd);
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = await readdir(runsDir);
+    entries = await readdir(runsDir, { withFileTypes: true });
   } catch (error) {
     if (isMissingFileError(error)) {
       return {};
@@ -461,7 +462,14 @@ async function readRunStates(cwd: string) {
   }
 
   const states: Record<string, string> = {};
-  for (const entry of entries.sort()) {
+  // Only directories are runs. The runs root also collects stray files such as
+  // macOS `.DS_Store`, and joining a run-state path onto one of those reads
+  // through a non-directory.
+  const runDirNames = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  for (const entry of runDirNames) {
     const statePath = getRunStatePath(join(runsDir, entry));
     const content = await readOptionalText(statePath);
     if (content !== null) {
@@ -484,6 +492,13 @@ function assertSameStringMap(before: Record<string, string>, after: Record<strin
   }
 }
 
+// A run-state path can be unreadable because nothing is there (`ENOENT`) or
+// because a path segment is not a directory (`ENOTDIR`, e.g. a stray file in the
+// runs root). Both mean "no run state here", never a review failure.
 function isMissingFileError(error: unknown) {
-  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ENOENT';
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
