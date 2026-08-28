@@ -19,6 +19,13 @@ dependency-update policy.
   a side note. The coder never revises the current or an earlier scope, and a
   consultant-injected directive can't trigger it.
 
+### Fixed
+
+- A blocked run that exhausted the recovery turn cap and was then given a
+  terminal directive resolving to `terminal_block` no longer fails to save. The
+  terminal directive records one resolution turn past the cap, and the state
+  invariant now allows that single extra turn (#37).
+
 ## [0.6.0] - 2026-08-25
 
 ### Fixed
