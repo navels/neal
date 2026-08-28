@@ -441,3 +441,19 @@ test('final-completion prompt for a native read-only structured advisor omits th
   assert.match(prompt, /treat the missing aggregate range as a completion-review evidence gap/);
   assert.doesNotMatch(prompt, /## Inlined review context from Neal/);
 });
+
+test('final-completion round resolves neal.review_level from the repository config and passes it to the built prompt', async () => {
+  const { state, baseCommit, headCommit } = await createFinalCompletionCaptureFixture('anthropic-claude');
+  await writeFile(join(state.cwd, 'neal.yml'), 'neal:\n  notify_bin: /usr/bin/true\n  review_level: lenient\n', 'utf8');
+  clearConfigCache(state.cwd);
+  const captured = installCapturingFinalCompletionAdvisor('anthropic-claude');
+  const packet = createCapturePacket({ baseCommit, headCommit, unavailableReason: null });
+
+  await runFinalCompletionReviewerAdjudication({ state, packet });
+
+  assert.equal(captured.length, 1);
+  const prompt = captured[0]!.prompt;
+  assert.match(prompt, /Review level: lenient\./);
+  assert.doesNotMatch(prompt, /Review level: moderate\./);
+  assert.match(prompt, /A finding category that the review level or the User Guidance section has demoted or ignored is not missing work/);
+});

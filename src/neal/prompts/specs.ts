@@ -202,6 +202,13 @@ const SCOPE_REVIEWER_CONTEXT = context('ScopeReviewerPromptContext', [
     false,
     "Two-way reviewer doctrine access mode derived from the reviewer provider's structured-advisor tool access: 'tool-access' (inspect and execute) or 'read-only' (read tools only; no command execution, test runs, or scratch work). Defaults to 'tool-access' when absent.",
   ),
+
+  field(
+    'reviewLevel',
+    'orchestrator_state',
+    false,
+    "Reviewer strictness ('strict', 'moderate', or 'lenient') from the `neal.review_level` config key, resolved by rounds.ts via getReviewLevel(cwd). Defaults to 'moderate' when absent.",
+  ),
 ]);
 
 const COMPLETION_CODER_CONTEXT = context('CompletionCoderPromptContext', [
@@ -221,6 +228,13 @@ const COMPLETION_REVIEWER_CONTEXT = context('CompletionReviewerPromptContext', [
     'orchestrator_state',
     false,
     "Two-way reviewer doctrine access mode derived from the reviewer provider's structured-advisor tool access: 'tool-access' (inspect and execute) or 'read-only' (read tools only; no command execution, test runs, or scratch work). Defaults to 'tool-access' when absent.",
+  ),
+
+  field(
+    'reviewLevel',
+    'orchestrator_state',
+    false,
+    "Reviewer strictness ('strict', 'moderate', or 'lenient') from the `neal.review_level` config key, resolved by rounds.ts via getReviewLevel(cwd). Defaults to 'moderate' when absent.",
   ),
 ]);
 
@@ -563,7 +577,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_reviewer',
-    version: 4,
+    version: 5,
     changelog: [
       {
         version: 1,
@@ -580,6 +594,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 4,
         renderSha: 'da87b19f2401ffdca21e3cefec1037c6470b3e74810b6152d07c55fa4924047f',
+      },
+      {
+        version: 5,
+        renderSha: 'e8dcb976d0ea22e9026e09a87d7dde93c8513334f62ad89472ebefe91771754b',
       },
     ],
     role: 'reviewer',
@@ -647,6 +665,12 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
               'orchestrator_state',
               false,
               "Optional explicit doctrine access mode ('tool-access' or 'read-only'); defaults to 'tool-access' when absent.",
+            ),
+            field(
+              'reviewLevel',
+              'orchestrator_state',
+              false,
+              "Optional reviewer strictness ('strict', 'moderate', or 'lenient') from `neal.review_level`, resolved by rounds.ts via getReviewLevel(cwd); defaults to 'moderate' when absent.",
             ),
           ]),
         },
@@ -747,7 +771,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'completion_reviewer',
-    version: 4,
+    version: 5,
     changelog: [
       {
         version: 1,
@@ -764,6 +788,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 4,
         renderSha: 'c47009016178fc29c34440e06636ba7b21c6beb59202dd3fe63e365cb32a75cf',
+      },
+      {
+        version: 5,
+        renderSha: '7930cec95560ad880bba94a7ae48e68c621805787261e295c4c405d09235c87b',
       },
     ],
     role: 'reviewer',
@@ -815,6 +843,12 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
               'orchestrator_state',
               false,
               "Optional explicit doctrine access mode ('tool-access' or 'read-only'); defaults to 'tool-access' when absent.",
+            ),
+            field(
+              'reviewLevel',
+              'orchestrator_state',
+              false,
+              "Optional reviewer strictness ('strict', 'moderate', or 'lenient') from `neal.review_level`, resolved by rounds.ts via getReviewLevel(cwd); defaults to 'moderate' when absent.",
             ),
           ]),
         },

@@ -453,6 +453,54 @@ agent:
     effort: xhigh
 ```
 
+### Review level
+
+`neal.review_level` sets how strict the scope reviewer and the final-completion
+reviewer are about what rises to a blocking finding. It takes one of three
+values and defaults to `moderate`:
+
+- `strict`: assume adversarial trust boundaries. Block on any failure reachable
+  under the worst case, including hardening gaps and missing defenses against
+  local or adversarial actors.
+- `moderate`: ordinary trust boundaries. Internal run artifacts aren't security
+  boundaries. Block on correctness bugs and failures reachable under normal use;
+  don't require defenses against an actor who could already subvert the system.
+- `lenient`: correctness and real, reachable bugs only. Minimal robustness,
+  style, or hardening demands.
+
+```yaml
+neal:
+  review_level: moderate
+```
+
+Set it in the repo's `neal.yml` or in `~/.neal/config.yml`; the repo value wins.
+A blank or null value means unset and falls back to `moderate`. Any other
+nonblank value (a typo, say) is rejected before any agent work: `neal check`
+fails, every fresh writer command fails at config load, and a `neal resume`
+that has selected a run and is about to resume writer work (plain, manual
+gate, or `--message`) fails before it takes the writer lock, rewrites run
+state, or starts an agent turn. Resume outcomes that never execute writer work
+(already done, already running, waiting for operator guidance) are decided
+first and don't validate the level.
+
+Under every level a blocking finding has to describe a failure that's actually
+reachable under the assumed trust boundaries, and the reviewer still treats the
+change as hostile input and tries to falsify it before crediting it. A level
+narrows what counts as blocking; it never means trust the coder or skip
+inspection. The plan reviewer, the consultant, and `neal review` don't use the
+level.
+
+`~/.neal/guidance/reviewer.md` refines the level rather than replacing it. It
+can widen or narrow the assumed trust boundaries ("we do defend the run
+directory against local processes" makes a local-process attack on the run
+directory blockable even at `moderate`) and it can demote or promote finding
+categories ("ignore performance, correctness only" makes a performance
+regression non-blocking at any level). It can't turn off the reachability
+filter, the adversarial stance, or blocking on reachable correctness failures,
+including correctness regressions. Guidance that conflicts with that floor is
+ignored on that point. See [Custom guidance](#custom-guidance) for where the
+file lives.
+
 ### Custom guidance
 
 neal supports additive guidance files for local preferences alongside the built-in protocol prompts:
@@ -462,6 +510,11 @@ neal supports additive guidance files for local preferences alongside the built-
 - `~/.neal/guidance/planner.md`
 
 Set `NEAL_GUIDANCE_DIR=/path/to/guidance` to load those same `coder.md`, `reviewer.md`, and `planner.md` files from another directory. neal records applied guidance roles, selected paths, and byte counts in run artifacts. Guidance contents stay out of terminal output.
+
+For the two code reviewers, `reviewer.md` layers on top of `neal.review_level`
+(see [Review level](#review-level)): it can adjust trust boundaries and finding
+categories, but it can't switch off the reachability filter or blocking on
+reachable correctness failures.
 
 ## Artifacts and storage
 

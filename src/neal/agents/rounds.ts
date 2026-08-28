@@ -6,6 +6,7 @@ import {
   getApiRetryLimit,
   getInactivityTimeoutMs,
 } from '../config.js';
+import { getReviewLevel } from '../config.js';
 import type { RunLogger } from '../logger.js';
 import { runWithAgentTurnLiveness } from '../providers/liveness.js';
 import { normalizeExecutionShapeDeclaration } from '../plan-validation.js';
@@ -339,7 +340,13 @@ export async function runReviewerRound(args: {
     cwd: args.cwd,
     // The doctrine access mode comes from the reviewer provider's declared
     // structured-advisor tool access, not from inline-context presence alone.
-    prompt: buildReviewerPrompt({ ...args, accessMode: getReviewerDoctrineAccessMode(args.reviewer) }),
+    // The review level comes from current config (`neal.review_level`), not
+    // persisted run state; the builder itself never reads config.
+    prompt: buildReviewerPrompt({
+      ...args,
+      accessMode: getReviewerDoctrineAccessMode(args.reviewer),
+      reviewLevel: getReviewLevel(args.cwd),
+    }),
     schema,
     structuredJsonProtocol: buildStructuredJsonProtocolSpec({
       schemaLabel: 'reviewer_payload',
@@ -555,7 +562,13 @@ export async function runReviewerFinalCompletionRound(args: {
     cwd: args.cwd,
     // The doctrine access mode comes from the reviewer provider's declared
     // structured-advisor tool access, not from inline-context presence alone.
-    prompt: buildFinalCompletionReviewerPrompt({ ...args, accessMode: getReviewerDoctrineAccessMode(args.reviewer) }),
+    // The review level comes from current config (`neal.review_level`), not
+    // persisted run state; the builder itself never reads config.
+    prompt: buildFinalCompletionReviewerPrompt({
+      ...args,
+      accessMode: getReviewerDoctrineAccessMode(args.reviewer),
+      reviewLevel: getReviewLevel(args.cwd),
+    }),
     schema,
     structuredJsonProtocol: buildStructuredJsonProtocolSpec({
       schemaLabel: 'final_completion_reviewer_payload',

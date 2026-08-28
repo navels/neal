@@ -3260,3 +3260,226 @@ test('scope reviewer prompt renders earlier-scope per-file diffs when supplied a
     assert.match(prompt, /Weakening or removing a test, assertion, or check that an earlier scope introduced is a blocking finding/);
   }
 });
+
+// --- Review-level calibration ---
+// The configured `neal.review_level` reaches both code reviewers as a builder
+// argument. Every level renders its own trust-boundary line; the reachability
+// filter, the guidance merge rule, and the adversarial stance render under all
+// of them.
+
+const REVIEW_LEVELS = ['strict', 'moderate', 'lenient'] as const;
+
+const REVIEW_LEVEL_SCOPE_ARGS = {
+  planDoc: '/tmp/PLAN.md',
+  baseCommit: 'base123',
+  headCommit: 'head456',
+  commits: ['head456 add gate logic'],
+  previousHeadCommit: null,
+  diffStat: ' src/neal/orchestrator.ts | 10 +++++-----',
+  changedFiles: ['src/neal/orchestrator.ts'],
+  round: 1,
+  reviewMarkdownPath: '/tmp/REVIEW.md',
+  parentScopeLabel: '1',
+  progressJustification: {
+    milestoneTargeted: 'Review-level calibration',
+    newEvidence: 'The level reaches the prompt.',
+    whyNotRedundant: 'No prior scope rendered the level.',
+    nextStepUnlocked: 'Reviewers calibrate to the configured level.',
+  },
+  recentHistorySummary: 'No accepted scopes have been recorded yet for parent objective 1.',
+  scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/reviewer-scope-1-round-1',
+};
+
+async function createReviewLevelCompletionArgs() {
+  const { state } = await createState({
+    currentScopeNumber: 2,
+    executionShape: 'multi_scope',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_SCOPE_DONE',
+        result: 'accepted',
+        baseCommit: 'base-1',
+        finalCommit: 'final-1',
+        commitSubject: 'implement scope 1',
+        changedFiles: ['src/a.ts'],
+        reviewRounds: 1,
+        findings: 0,
+        archivedReviewPath: '/tmp/review-1.md',
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  const packet = await buildFinalCompletionPacket({
+    state,
+    terminalScope: {
+      finalCommit: 'final-2',
+      commitSubject: 'finish scope 2',
+      changedFiles: ['src/b.ts'],
+      archivedReviewPath: '/tmp/review-2.md',
+      marker: 'AUTONOMY_DONE',
+    },
+  });
+  return {
+    planDoc: '/tmp/PLAN.md',
+    packet,
+    summary: {
+      planGoalSatisfied: true,
+      whatChangedOverall: 'Implemented the review-level calibration.',
+      verificationSummary: 'Ran review tests and typecheck.',
+      remainingKnownGaps: [],
+    },
+    scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+  };
+}
+
+const LEVEL_SENTINELS = {
+  strict: /Review level: strict\. Assume adversarial trust boundaries/,
+  moderate: /Review level: moderate\. Assume ordinary trust boundaries: internal run artifacts and other files this system writes for itself are not security boundaries/,
+  lenient: /Review level: lenient\. Assume ordinary trust boundaries and block only on correctness failures and real, reachable bugs/,
+} as const;
+
+function assertLevelInvariantDoctrine(prompt: string, demotedOutcome: RegExp) {
+  assert.match(prompt, /as hostile input\. Try to falsify/);
+  assert.match(prompt, /Reachability filter: a blocking finding must describe a failure that is reachable under the assumed trust boundaries/);
+  assert.match(prompt, /it never changes the inspection stance\. At every level, still treat the subject as hostile input, try to falsify before crediting/);
+  assert.match(prompt, /How the User Guidance section combines with the review level: the level supplies the baseline trust boundaries/);
+  assert.match(prompt, /Guidance may widen or narrow the trust boundaries for this project/);
+  assert.match(prompt, /demote a finding category such as robustness, hardening, performance, or style to non-blocking or ignore it entirely, or promote a category to blocking/);
+  assert.match(prompt, /Fixed floor at every level and under any guidance: the reachability filter, the adversarial inspection stance, and blocking on reachable correctness failures \(including correctness regressions/);
+  assert.match(prompt, /Robustness, hardening, performance, and style are not part of that floor and may be demoted/);
+  assert.match(prompt, /guidance saying the run directory is defended against local processes makes a local-process attack on the run directory reachable, so a finding about it blocks/);
+  assert.match(prompt, demotedOutcome);
+}
+
+test('scope reviewer prompt renders each review level with the reachability filter, merge rule, and adversarial stance intact', () => {
+  for (const level of REVIEW_LEVELS) {
+    const prompt = buildReviewerPrompt({ ...REVIEW_LEVEL_SCOPE_ARGS, reviewLevel: level });
+    assert.match(prompt, LEVEL_SENTINELS[level], `scope reviewer must render the ${level} calibration line`);
+    for (const other of REVIEW_LEVELS) {
+      if (other !== level) {
+        assert.doesNotMatch(prompt, LEVEL_SENTINELS[other], `scope reviewer at ${level} must not render the ${other} line`);
+      }
+    }
+    assertLevelInvariantDoctrine(
+      prompt,
+      /guidance saying "ignore performance, correctness only" makes a performance regression non_blocking, while a reachable correctness failure still blocks/,
+    );
+    assert.match(prompt, /In this review a demoted category means non_blocking severity/);
+
+    // The calibration renders right after the adversarial doctrine and before
+    // the finding-quality rules.
+    const adversarialIndex = prompt.indexOf('Treat the scope diff as hostile input.');
+    const calibrationIndex = prompt.indexOf('Review level: ');
+    const findingQualityIndex = prompt.indexOf('Produce only structured review findings.');
+    assert.ok(adversarialIndex >= 0 && adversarialIndex < calibrationIndex && calibrationIndex < findingQualityIndex);
+  }
+});
+
+test('scope reviewer prompt defaults to the moderate level when no level is passed', () => {
+  assert.equal(
+    buildReviewerPrompt(REVIEW_LEVEL_SCOPE_ARGS),
+    buildReviewerPrompt({ ...REVIEW_LEVEL_SCOPE_ARGS, reviewLevel: 'moderate' }),
+  );
+});
+
+test('scope reviewer finding-quality severity line narrows under lenient only', () => {
+  const strict = buildReviewerPrompt({ ...REVIEW_LEVEL_SCOPE_ARGS, reviewLevel: 'strict' });
+  const moderate = buildReviewerPrompt({ ...REVIEW_LEVEL_SCOPE_ARGS, reviewLevel: 'moderate' });
+  const lenient = buildReviewerPrompt({ ...REVIEW_LEVEL_SCOPE_ARGS, reviewLevel: 'lenient' });
+  const blockingRobustnessLine = /Also use blocking severity for substantive robustness or performance regressions introduced by the implementation/;
+  const lenientLine = /Robustness or performance regressions introduced by the implementation are non_blocking unless they are a reachable correctness failure; use blocking severity only in that case\./;
+
+  assert.match(strict, blockingRobustnessLine);
+  assert.match(moderate, blockingRobustnessLine);
+  assert.doesNotMatch(lenient, blockingRobustnessLine);
+  assert.match(lenient, lenientLine);
+  assert.doesNotMatch(strict, lenientLine);
+  assert.doesNotMatch(moderate, lenientLine);
+
+  const findingQuality = (prompt: string) => prompt.slice(prompt.indexOf('Produce only structured review findings.'));
+  assert.equal(findingQuality(strict), findingQuality(moderate));
+  assert.notEqual(findingQuality(lenient), findingQuality(moderate));
+  // Every level keeps the correctness floor in the severity rules.
+  for (const prompt of [strict, moderate, lenient]) {
+    assert.match(prompt, /Use blocking severity for correctness, regression, or missing-verification issues\./);
+  }
+});
+
+test('final completion reviewer prompt renders each review level and maps demoted categories onto the existing verdict', async () => {
+  const baseArgs = await createReviewLevelCompletionArgs();
+  for (const level of REVIEW_LEVELS) {
+    const prompt = buildFinalCompletionReviewerPrompt({ ...baseArgs, reviewLevel: level });
+    assert.match(prompt, LEVEL_SENTINELS[level], `final completion reviewer must render the ${level} calibration line`);
+    for (const other of REVIEW_LEVELS) {
+      if (other !== level) {
+        assert.doesNotMatch(prompt, LEVEL_SENTINELS[other]);
+      }
+    }
+    assertLevelInvariantDoctrine(
+      prompt,
+      /guidance saying "ignore performance, correctness only" makes a performance regression not missing work, while a reachable correctness failure still blocks/,
+    );
+    assert.match(prompt, /In this review a demoted or ignored category is not missing work: it must not produce `continue_execution` or `block_for_operator`, and when the plan objectives are otherwise satisfied you return `accept_complete`\./);
+    assert.match(prompt, /A finding category that the review level or the User Guidance section has demoted or ignored is not missing work: never return `continue_execution` or `block_for_operator` for it\. When the plan objectives are otherwise satisfied, return `accept_complete`\./);
+    // No scope-review severity vocabulary leaks into the verdict contract.
+    assert.doesNotMatch(prompt, /non_blocking severity/);
+
+    const adversarialIndex = prompt.indexOf('Treat the whole-plan completion claim as hostile input.');
+    const calibrationIndex = prompt.indexOf('Review level: ');
+    assert.ok(adversarialIndex >= 0 && adversarialIndex < calibrationIndex);
+  }
+  assert.equal(
+    buildFinalCompletionReviewerPrompt(baseArgs),
+    buildFinalCompletionReviewerPrompt({ ...baseArgs, reviewLevel: 'moderate' }),
+  );
+});
+
+test('reviewer guidance renders after the review-level calibration in both code-reviewer prompts', async () => {
+  const previousGuidanceDir = process.env.NEAL_GUIDANCE_DIR;
+  const guidanceDir = await mkdtemp(join(tmpdir(), 'neal-review-level-guidance-'));
+  await writeFile(join(guidanceDir, 'reviewer.md'), 'We do defend the run directory against local processes.\n', 'utf8');
+  process.env.NEAL_GUIDANCE_DIR = guidanceDir;
+  clearUserGuidanceCache();
+  try {
+    const completionArgs = await createReviewLevelCompletionArgs();
+    for (const level of REVIEW_LEVELS) {
+      for (const prompt of [
+        buildReviewerPrompt({ ...REVIEW_LEVEL_SCOPE_ARGS, reviewLevel: level }),
+        buildFinalCompletionReviewerPrompt({ ...completionArgs, reviewLevel: level }),
+      ]) {
+        const calibrationIndex = prompt.indexOf('Review level: ');
+        const floorIndex = prompt.indexOf('Fixed floor at every level and under any guidance');
+        const guidanceIndex = prompt.indexOf('## User Guidance');
+        assert.ok(calibrationIndex >= 0);
+        assert.ok(floorIndex > calibrationIndex);
+        assert.ok(guidanceIndex > floorIndex, `guidance must render after the ${level} calibration`);
+        assert.match(prompt, /We do defend the run directory against local processes\./);
+      }
+    }
+  } finally {
+    if (previousGuidanceDir === undefined) {
+      delete process.env.NEAL_GUIDANCE_DIR;
+    } else {
+      process.env.NEAL_GUIDANCE_DIR = previousGuidanceDir;
+    }
+    clearUserGuidanceCache();
+  }
+});
+
+test('scope review round resolves neal.review_level from the repository config and passes it to the built prompt', async () => {
+  const { state } = await createScopeReviewCaptureFixture('anthropic-claude');
+  await writeFile(join(state.cwd, 'neal.yml'), 'neal:\n  notify_bin: /usr/bin/true\n  review_level: strict\n', 'utf8');
+  clearConfigCache(state.cwd);
+  const captured = installCapturingScopeReviewAdvisor('anthropic-claude');
+
+  await runRealScopeReviewAdjudication(state);
+
+  assert.equal(captured.length, 1);
+  const prompt = captured[0]!.prompt;
+  assert.match(prompt, LEVEL_SENTINELS.strict);
+  assert.doesNotMatch(prompt, LEVEL_SENTINELS.moderate);
+  assert.match(prompt, /Reachability filter: a blocking finding must describe a failure that is reachable/);
+});

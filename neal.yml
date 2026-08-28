@@ -42,6 +42,15 @@
 #   # for more work before neal stops reopening the plan.
 #   final_completion_continue_execution_max: 3
 #
+#   # How strict the scope and final-completion reviewers are about what
+#   # rises to a blocking finding. Under every level a blocking finding must
+#   # describe a failure reachable under the assumed trust boundaries.
+#   #   strict:   assume adversarial trust boundaries; block on hardening gaps
+#   #   moderate: ordinary trust boundaries; internal run artifacts are not
+#   #             security boundaries; block on correctness and normal-use bugs
+#   #   lenient:  correctness and real, reachable bugs only
+#   review_level: moderate
+#
 #   # Optional local notification command. Leave commented to keep
 #   # notifications disabled.
 #   # notify_bin: /absolute/path/to/notify

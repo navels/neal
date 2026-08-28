@@ -18,9 +18,11 @@ import {
   getFindingQualityLines,
   getPreexistingFailureContractLines,
   getRegressionPreservationLines,
+  getReviewLevelCalibrationLines,
   getVerificationSkepticismLines,
   type ReviewDoctrineAccessMode,
 } from './review-doctrine.js';
+import type { ReviewLevel } from '../config.js';
 
 const PROMPT_MODULE_PATH = 'src/neal/prompts/specialized.ts' as const;
 
@@ -188,6 +190,9 @@ export function buildFinalCompletionReviewerPrompt(args: {
   inlinedRangeDiff?: string | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
+  // Reviewer strictness from `neal.review_level`, resolved by rounds.ts via
+  // getReviewLevel(cwd). Defaults to 'moderate'.
+  reviewLevel?: ReviewLevel;
 }) {
   const spec = assertPromptBuilder('completion_reviewer', 'buildFinalCompletionReviewerPrompt', PROMPT_MODULE_PATH);
   const finalCompletionVariant = spec.variants.find((variant) => variant.kind === 'final_completion');
@@ -196,6 +201,7 @@ export function buildFinalCompletionReviewerPrompt(args: {
   }
 
   const accessMode = args.accessMode ?? 'tool-access';
+  const reviewLevel = args.reviewLevel ?? 'moderate';
   // A collected diff may legitimately be the empty string (a range with no
   // changes); distinguish "collected" (any string, including '') from "not
   // collected" (null/undefined) so an empty diff still rides the inlined channel
@@ -257,6 +263,7 @@ export function buildFinalCompletionReviewerPrompt(args: {
       judgmentTarget: 'whole-plan completion',
       proofTarget: 'the aggregate implementation satisfies the plan',
     }),
+    ...getReviewLevelCalibrationLines({ level: reviewLevel, outputContract: 'completion_verdict' }),
     ...falsificationLines,
     ...scratchLines,
     'Falsify cross-scope runtime invariants and integration behavior before accepting completion, especially paths that individual scope reviews could not see together.',
@@ -264,7 +271,7 @@ export function buildFinalCompletionReviewerPrompt(args: {
     ...skepticismLines,
     ...regressionLines,
     ...preexistingLines,
-    ...getFindingQualityLines({ outputContract: 'completion_verdict' }),
+    ...getFindingQualityLines({ outputContract: 'completion_verdict', level: reviewLevel }),
     'Review the whole-plan result for correctness and completeness against the plan objectives, regressions or missing behavior, cross-scope integration issues that may not have been visible in individual scope reviews, code quality, maintainability, and consistency of the final implementation, and adequacy of test coverage and verification for the total change.',
     ...getReviewerContextLines(args.reviewerContext),
     'Do not treat prior per-scope acceptance as sufficient evidence that the whole plan is complete or that the aggregate code quality is acceptable.',

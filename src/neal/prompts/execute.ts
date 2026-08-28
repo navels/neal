@@ -31,9 +31,11 @@ import {
   getFindingQualityLines,
   getPreexistingFailureContractLines,
   getRegressionPreservationLines,
+  getReviewLevelCalibrationLines,
   getVerificationSkepticismLines,
   type ReviewDoctrineAccessMode,
 } from './review-doctrine.js';
+import type { ReviewLevel } from '../config.js';
 
 const PROMPT_MODULE_PATH = 'src/neal/prompts/execute.ts' as const;
 
@@ -217,6 +219,9 @@ export function buildReviewerPrompt(args: {
   earlierScopeChanges?: readonly EarlierScopeFileChange[] | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
+  // Reviewer strictness from `neal.review_level`, resolved by rounds.ts via
+  // getReviewLevel(cwd). Defaults to 'moderate'.
+  reviewLevel?: ReviewLevel;
 }) {
   const spec = assertPromptBuilder('scope_reviewer', 'buildReviewerPrompt', PROMPT_MODULE_PATH);
   const primaryVariant = spec.variants.find((variant) => variant.kind === 'primary');
@@ -226,6 +231,7 @@ export function buildReviewerPrompt(args: {
   }
 
   const accessMode = args.accessMode ?? 'tool-access';
+  const reviewLevel = args.reviewLevel ?? 'moderate';
   // A collected diff may legitimately be the empty string (a range with no
   // changes); distinguish "collected" (any string, including '') from "not
   // collected" (null/undefined) so an empty diff still rides the inlined channel
@@ -277,8 +283,9 @@ export function buildReviewerPrompt(args: {
     ...getAdversarialReviewDoctrineLines({
       reviewSubject: 'the scope diff',
     }),
+    ...getReviewLevelCalibrationLines({ level: reviewLevel, outputContract: 'structured_findings' }),
     '',
-    ...getFindingQualityLines(),
+    ...getFindingQualityLines({ outputContract: 'structured_findings', level: reviewLevel }),
     ...skepticismLines,
     ...regressionLines,
     EARLIER_SCOPE_PRESERVATION_LINE,

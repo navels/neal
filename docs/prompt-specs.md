@@ -361,6 +361,8 @@ testing or profile experiments. That override wins over the default directory.
 
 When present, the file contents are appended under a fixed `## User Guidance` section inside the built-in prompt. Structured output contracts, completion markers, and the canonical plan contract survive injection.
 
+In the scope reviewer and final-completion reviewer prompts, `## User Guidance` renders after the `neal.review_level` calibration lines (`getReviewLevelCalibrationLines` in [src/neal/prompts/review-doctrine.ts](../src/neal/prompts/review-doctrine.ts)). The level supplies the baseline trust boundaries and the default finding-severity rules; guidance may widen or narrow those boundaries and demote or promote finding categories, and the refined boundaries are what "reachable" means when the reviewer decides whether a finding blocks. Guidance can't remove the floor: the reachability filter, the adversarial stance, and blocking on reachable correctness failures (including correctness regressions) stay on at every level. The calibration text itself states this merge rule, so the precedence is rendered in the prompt rather than implied by section order.
+
 Diagnostics: when a neal writer run initializes or resumes, it logs which roles have guidance applied and the byte count to the run's `stderr.log` and as a `run.user_guidance_applied` / `run.user_guidance_scanned` event. That is enough to confirm a guidance file was picked up without dumping contents.
 
 Non-goals: no repo-local `.neal/guidance/` override, no full-prompt replacement, no per-scope guidance variants, and no substitution of built-in sections.

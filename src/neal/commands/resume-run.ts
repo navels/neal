@@ -3,7 +3,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { parseResumeArgs } from '../cli.js';
-import { assertWriterProvidersConfigured } from '../config.js';
+import { assertWriterProvidersConfigured, getReviewLevel } from '../config.js';
 import { writeDiagnostic } from '../diagnostic.js';
 import { assertGitRepositoryWithCommit } from '../git.js';
 import { loadOrInitialize } from '../orchestrator.js';
@@ -373,6 +373,12 @@ async function withResumeWriterLock<T extends ResumeRunOutcome>(
   evidence: ResumeLockEvidence,
   action: () => Promise<T>,
 ): Promise<T | ResumeAlreadyRunningOutcome> {
+  // Every path that resumes writer work (plain, manual gate, --message) goes
+  // through this seam. The review level is read from current config, not
+  // persisted run state, so it is validated here before the lock is taken or
+  // any run state is rewritten. No-op and rejection outcomes (done, already
+  // running, waiting for guidance) are decided earlier and never reach it.
+  getReviewLevel(selection.state.cwd);
   let lock: ActiveRunLockHandle;
   try {
     lock = await acquireResumeWriterLock(selection, evidence);

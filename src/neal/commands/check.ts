@@ -15,6 +15,7 @@ import {
   getMaxReviewRounds,
   getNotifyBin,
   getPhaseHeartbeatMs,
+  getReviewLevel,
   getReviewStuckWindow,
 } from '../config.js';
 import { getNealDirGitIgnoreStatus } from '../git.js';
@@ -130,6 +131,7 @@ function validateConfig(cwd: string) {
   getInteractiveBlockedRecoveryMaxTurns(cwd);
   getFinalCompletionContinueExecutionMax(cwd);
   getNotifyBin(cwd);
+  getReviewLevel(cwd);
 
   return agentConfig;
 }

@@ -18,6 +18,17 @@ dependency-update policy.
   plan, so the decision lands where the later scope runs against it instead of in
   a side note. The coder never revises the current or an earlier scope, and a
   consultant-injected directive can't trigger it.
+- `neal.review_level` (`strict | moderate | lenient`, default `moderate`) sets
+  how strict the scope and final-completion reviewers are about what rises to
+  a blocking finding. Under every level a blocking finding must be reachable
+  under the assumed trust boundaries, and `~/.neal/guidance/reviewer.md` can
+  widen or narrow those boundaries or demote and promote finding categories
+  without turning off the reachability filter, the adversarial stance, or
+  blocking on reachable correctness failures. Blank means unset; any other
+  unknown value fails `neal check`, fresh writer commands, and a `neal resume`
+  that is about to resume writer work, before any run state is touched or an
+  agent turn starts.
+  The `scope_reviewer` and `completion_reviewer` prompt-spec versions bumped.
 
 ### Fixed
 

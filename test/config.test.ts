@@ -17,6 +17,7 @@ import {
   getPlanReviewDebtRoundThreshold,
   getRawMergedConfig,
   getConsultantMaxAttempts,
+  getReviewLevel,
   getReviewStuckWindow,
   isWriterProvidersNotConfiguredError,
 } from '../src/neal/config.js';
@@ -248,6 +249,89 @@ test('repo config can disable a user notification helper', async () => {
 
     assert.equal(getRawMergedConfig(cwd).neal?.notify_bin, null);
     assert.equal(getNotifyBin(cwd), null);
+  });
+});
+
+test('getReviewLevel defaults to moderate and resolves each valid value', async () => {
+  await withIsolatedHome(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-review-level-'));
+    clearConfigCache(cwd);
+    assert.equal(getReviewLevel(cwd), 'moderate');
+
+    for (const level of ['strict', 'moderate', 'lenient'] as const) {
+      await writeFile(join(cwd, 'neal.yml'), `neal:\n  review_level: ${level}\n`, 'utf8');
+      clearConfigCache(cwd);
+      assert.equal(getReviewLevel(cwd), level);
+    }
+
+    await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: "  "\n', 'utf8');
+    clearConfigCache(cwd);
+    assert.equal(getReviewLevel(cwd), 'moderate');
+
+    await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: null\n', 'utf8');
+    clearConfigCache(cwd);
+    assert.equal(getReviewLevel(cwd), 'moderate');
+  });
+});
+
+test('getReviewLevel rejects unknown values naming the field path and valid set', async () => {
+  await withIsolatedHome(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-review-level-invalid-'));
+    await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: paranoid\n', 'utf8');
+    clearConfigCache(cwd);
+
+    assert.throws(
+      () => getReviewLevel(cwd),
+      /Invalid review level for neal\.review_level: "paranoid"\. Valid values: strict, moderate, lenient/,
+    );
+
+    await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: 3\n', 'utf8');
+    clearConfigCache(cwd);
+    assert.throws(
+      () => getReviewLevel(cwd),
+      /Invalid review level for neal\.review_level: 3\. Valid values: strict, moderate, lenient/,
+    );
+  });
+});
+
+test('repo review_level overrides user review_level', async () => {
+  await withIsolatedHome(async (home) => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-review-level-precedence-'));
+    await writeUserConfig(home, 'neal:\n  review_level: strict\n');
+    clearConfigCache(cwd);
+    assert.equal(getReviewLevel(cwd), 'strict');
+
+    await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_level: lenient\n', 'utf8');
+    clearConfigCache(cwd);
+    assert.equal(getReviewLevel(cwd), 'lenient');
+  });
+});
+
+test('assertWriterProvidersConfigured rejects an invalid review_level and accepts valid or unset values', async () => {
+  await withIsolatedHome(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-assert-review-level-'));
+    const writerConfig = (reviewLevelLine: string | null) => [
+      ...(reviewLevelLine === null ? [] : ['neal:', `  review_level: ${reviewLevelLine}`]),
+      'agent:',
+      '  coder:',
+      '    provider: openai-codex',
+      '  reviewer:',
+      '    provider: anthropic-claude',
+      '',
+    ].join('\n');
+
+    await writeFile(join(cwd, 'neal.yml'), writerConfig('bogus'), 'utf8');
+    clearConfigCache(cwd);
+    assert.throws(
+      () => assertWriterProvidersConfigured(cwd),
+      /Invalid review level for neal\.review_level: "bogus"\. Valid values: strict, moderate, lenient/,
+    );
+
+    for (const reviewLevelLine of ['strict', null]) {
+      await writeFile(join(cwd, 'neal.yml'), writerConfig(reviewLevelLine), 'utf8');
+      clearConfigCache(cwd);
+      assert.equal(assertWriterProvidersConfigured(cwd).coder.provider, 'openai-codex');
+    }
   });
 });
 
