@@ -25,6 +25,9 @@ dependency-update policy.
   terminal directive resolving to `terminal_block` no longer fails to save. The
   terminal directive records one resolution turn past the cap, and the state
   invariant now allows that single extra turn (#37).
+- `neal review` no longer fails with `ENOTDIR` when the runs directory holds a
+  stray file such as macOS `.DS_Store`. Its read-only state check now looks at
+  run directories only.
 
 ## [0.6.0] - 2026-08-25
 
