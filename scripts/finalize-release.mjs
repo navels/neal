@@ -9,6 +9,7 @@ import {
   getChangelogSection,
   parseProvenanceStatement,
   parseRemoteTagTarget,
+  retryWhilePropagating,
 } from './release-utils.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -80,10 +81,15 @@ assert(repositorySlug === 'navels/neal', `Expected GITHUB_REPOSITORY navels/neal
 assert(process.env.GITHUB_REF === 'refs/heads/main', `Expected GITHUB_REF refs/heads/main; got ${process.env.GITHUB_REF ?? 'unset'}.`);
 assert(process.env.GH_TOKEN, 'GH_TOKEN is required.');
 
-run('npm', ['view', `${packageName}@${version}`, 'version', '--json']);
-await verifySignedAttestations();
+await retryWhilePropagating(`${packageName}@${version}`, () =>
+  run('npm', ['view', `${packageName}@${version}`, 'version', '--json']),
+);
+await retryWhilePropagating(`Signed attestations for ${packageName}@${version}`, () => verifySignedAttestations());
 
-const attestationResponse = await fetchProvenance();
+const attestationResponse = await retryWhilePropagating(
+  `Provenance attestation for ${packageName}@${version}`,
+  () => fetchProvenance(),
+);
 const statement = parseProvenanceStatement(attestationResponse);
 assertReleaseProvenance(statement, {
   packageName,

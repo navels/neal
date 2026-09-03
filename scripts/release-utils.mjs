@@ -1,7 +1,42 @@
 const provenancePredicateType = 'https://slsa.dev/provenance/v1';
 
+// npm's read replicas lag a publish: for a short window after a staged package
+// goes public, the version and its attestations can still read as 404. The
+// finalize step runs immediately after approval, so it polls through that
+// window instead of failing the release.
+export const REGISTRY_PROPAGATION_TIMEOUT_MS = 5 * 60_000;
+export const REGISTRY_PROPAGATION_INTERVAL_MS = 10_000;
+
 function fail(message) {
   throw new Error(message);
+}
+
+// A 404 from the registry right after publish means "not propagated yet". Any
+// other failure (auth, provenance mismatch, signature mismatch) is real and must
+// not be retried.
+export function isRegistryPropagationError(error) {
+  return /\b(?:E404|404)\b/.test(String(error?.message ?? ''));
+}
+
+export async function retryWhilePropagating(label, attempt, options = {}) {
+  const timeoutMs = options.timeoutMs ?? REGISTRY_PROPAGATION_TIMEOUT_MS;
+  const intervalMs = options.intervalMs ?? REGISTRY_PROPAGATION_INTERVAL_MS;
+  const now = options.now ?? (() => Date.now());
+  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const log = options.log ?? ((message) => console.log(message));
+  const deadline = now() + timeoutMs;
+
+  for (let attemptNumber = 1; ; attemptNumber += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!isRegistryPropagationError(error) || now() >= deadline) {
+        throw error;
+      }
+      log(`${label} is not visible in the npm registry yet (attempt ${attemptNumber}); retrying in ${Math.round(intervalMs / 1000)}s.`);
+      await sleep(intervalMs);
+    }
+  }
 }
 
 export function getChangelogSection(markdown, version) {

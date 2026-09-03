@@ -26,6 +26,18 @@ type ReleaseUtilsModule = {
     tagExists: boolean;
     version: string;
   }) => void;
+  isRegistryPropagationError: (error: unknown) => boolean;
+  retryWhilePropagating: <T>(
+    label: string,
+    attempt: () => T | Promise<T>,
+    options?: {
+      timeoutMs?: number;
+      intervalMs?: number;
+      now?: () => number;
+      sleep?: (ms: number) => Promise<void>;
+      log?: (message: string) => void;
+    },
+  ) => Promise<T>;
 };
 
 const releaseUtils = await import(
@@ -161,4 +173,81 @@ test('release-state recovery is allowed only on the real-publish path', () => {
     }),
     /Remote tag v0\.3\.1 already exists/,
   );
+});
+
+test('isRegistryPropagationError matches only registry 404s', () => {
+  assert.equal(releaseUtils.isRegistryPropagationError(new Error('npm error code E404')), true);
+  assert.equal(releaseUtils.isRegistryPropagationError(new Error('Unable to fetch npm attestations: HTTP 404.')), true);
+  assert.equal(releaseUtils.isRegistryPropagationError(new Error('npm error code E403 Forbidden')), false);
+  assert.equal(releaseUtils.isRegistryPropagationError(new Error('provenance commit mismatch')), false);
+  assert.equal(releaseUtils.isRegistryPropagationError(undefined), false);
+});
+
+test('retryWhilePropagating polls a lagging registry read until it succeeds', async () => {
+  const sleeps: number[] = [];
+  let calls = 0;
+  const result = await releaseUtils.retryWhilePropagating(
+    '@navels/neal@0.3.1',
+    () => {
+      calls += 1;
+      if (calls < 3) {
+        throw new Error('npm error code E404\nnpm error 404 No match found for version 0.3.1');
+      }
+      return 'visible';
+    },
+    {
+      intervalMs: 10_000,
+      sleep: async (ms: number) => {
+        sleeps.push(ms);
+      },
+      log: () => {},
+    },
+  );
+
+  assert.equal(result, 'visible');
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [10_000, 10_000]);
+});
+
+test('retryWhilePropagating rethrows a real failure without polling', async () => {
+  let calls = 0;
+  await assert.rejects(
+    () =>
+      releaseUtils.retryWhilePropagating(
+        'signed attestations',
+        () => {
+          calls += 1;
+          throw new Error('npm error code EINTEGRITY signature mismatch');
+        },
+        { sleep: async () => {}, log: () => {} },
+      ),
+    /EINTEGRITY/,
+  );
+  assert.equal(calls, 1, 'a non-propagation failure must fail the release immediately');
+});
+
+test('retryWhilePropagating gives up once the propagation window closes', async () => {
+  let clock = 0;
+  let calls = 0;
+  await assert.rejects(
+    () =>
+      releaseUtils.retryWhilePropagating(
+        '@navels/neal@0.3.1',
+        () => {
+          calls += 1;
+          throw new Error('npm error code E404');
+        },
+        {
+          timeoutMs: 30_000,
+          intervalMs: 10_000,
+          now: () => clock,
+          sleep: async (ms: number) => {
+            clock += ms;
+          },
+          log: () => {},
+        },
+      ),
+    /E404/,
+  );
+  assert.equal(calls, 4, 'polls through the window, then surfaces the registry error');
 });
