@@ -10,6 +10,16 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- The read-only reviewer doctrine told every reviewer it had read tools and no
+  shell. That's true for Claude and for OpenRouter models, but a Codex reviewer
+  reads through a shell in a read-only sandbox, so a model that took the wording
+  literally (`gpt-6-astra` did) had no way to open files and blocked every
+  review. The doctrine now says read access may be a read-only shell and that a
+  shell is for reading and searching only. The `scope_reviewer` and
+  `completion_reviewer` prompt-spec versions bumped (#57).
+
 ## [0.6.5] - 2026-09-04
 
 ### Changed
