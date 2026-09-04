@@ -301,6 +301,13 @@ function armShutdownWatchdog(finalState: OrchestrationState, logger: RunLogger) 
   };
 }
 
+// Keep a crash message readable on the console; `neal status` carries the
+// full text from the `phase.error` event.
+function truncateFailureMessage(message: string) {
+  const trimmed = message.trim();
+  return trimmed.length > 1000 ? `${trimmed.slice(0, 1000)}…` : trimmed;
+}
+
 function formatFinalSummaryLine(finalState: OrchestrationState, publicStatus: string) {
   if (publicStatus === 'waiting_for_manual_gate') {
     const gate = finalState.manualGate;
@@ -388,6 +395,7 @@ export function renderFinalRunOutput(
   statePath: string,
   displayStatus: RunDisplayStatus,
   autoSquashResult: ExecutedSquashResult | null = null,
+  failureMessage: string | null = null,
 ) {
   const runId = basename(finalState.runDir);
   const publicStatus = formatPublicRunStatus(displayStatus);
@@ -450,6 +458,12 @@ export function renderFinalRunOutput(
     // A block that is not waiting for `--message` guidance has no guidance
     // section, so print the stored reason under the same heading.
     lines.push('', '## Why Neal Stopped', finalState.blockerReason);
+  } else if (finalState.status === 'failed' && failureMessage) {
+    // A crashed round is caught above and rendered as a failed result instead
+    // of being rethrown, so the error text has to be printed here or the
+    // console never shows it. `neal status` reads the same message from the
+    // `phase.error` event.
+    lines.push('', '## Why Neal Stopped', truncateFailureMessage(failureMessage));
   }
 
   lines.push('', '## Next Action', `- ${formatFinalNextAction(finalState, displayStatus, runId, guidance)}`);
@@ -570,6 +584,7 @@ export async function executeRun(
     }
 
     let finalState;
+    let runFailureMessage: string | null = null;
     try {
       try {
         finalState = await runOnePass(state, statePath, logger, {
@@ -593,6 +608,7 @@ export async function executeRun(
         if (!finalState) {
           throw error;
         }
+        runFailureMessage = error instanceof Error ? error.message : String(error);
       }
     } finally {
       stopController.cleanup();
@@ -641,7 +657,7 @@ export async function executeRun(
       runDir: finalState.runDir,
     });
 
-    const finalOutput = renderFinalRunOutput(finalState, statePath, displayStatus, autoSquashResult);
+    const finalOutput = renderFinalRunOutput(finalState, statePath, displayStatus, autoSquashResult, runFailureMessage);
     process.stdout.write(finalOutput.trimEnd() + '\n');
 
     await logger.event('shutdown.final_output_written', {
