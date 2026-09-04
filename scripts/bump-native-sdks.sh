@@ -9,8 +9,10 @@
 # dashboard can tick past that filter. When neal needs a fix today, the
 # sanctioned route is a manual PR; this script is that PR. It resolves each
 # package's `latest` dist-tag (so a prerelease is never picked), rewrites the
-# two exact pins, refreshes the lockfile, pushes a branch, opens the PR, and
-# closes an open Renovate SDK PR as superseded so the two don't compete.
+# two exact pins, refreshes the lockfile, pushes a branch, and opens the PR.
+# Leave Renovate's own SDK PR alone: closing it just makes Renovate re-open
+# it, and once this PR merges Renovate closes its PR itself as no longer
+# needed.
 #
 # Usage: scripts/bump-native-sdks.sh
 #
@@ -86,12 +88,6 @@ ${CHANGE_LINES}
 Qualify before merge: \`scripts/qualify-sdk.sh <this PR>\`. Release with \`scripts/release-sdk-bump.sh <this PR>\`."
 PR_URL="$(gh pr create --title "Update native agentic SDKs" --body "$BODY" --base main --head "$BRANCH")"
 PR="${PR_URL##*/}"
-
-RENOVATE_PR="$(gh pr list --state open --head renovate/native-agentic-sdks --json number --jq '.[0].number // empty')"
-if [ -n "$RENOVATE_PR" ]; then
-  gh pr close "$RENOVATE_PR" --comment "Superseded by #${PR}, which bumps both SDKs to the current latest ahead of the soak." >/dev/null
-  echo "bump-native-sdks: closed Renovate PR #${RENOVATE_PR} as superseded"
-fi
 
 echo "Opened ${PR_URL}"
 echo "Qualify before merge: scripts/qualify-sdk.sh ${PR}"
