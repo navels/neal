@@ -63,7 +63,7 @@ export function buildReviewFindingsInlinedDiffSection(context: ReviewFindingsCon
   return [
     '## Inlined Selected-Range Diff',
     '',
-    'You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so the full selected-range diff is inlined below.',
+    'You have read-only repository access but no commit-range diff tool, so the full selected-range diff is inlined below. That access may be dedicated read and search tools, or a shell running in a read-only sandbox; if it is a shell, use it only to read files and search the tree, never to write.',
     'This inlined diff is the source of truth for what the resolved range actually changed, including deletions and renames that head-state file reads cannot reveal.',
     `Resolved range: ${context.externalBaseCommit}..${context.externalHeadCommit}.`,
     'Verify draft claims against the surrounding code with your read tools; absence from a diff hunk is not evidence of absence from the repository.',
