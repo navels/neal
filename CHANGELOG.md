@@ -10,6 +10,14 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- A planner block during `neal plan` no longer loses its reason. The planner's
+  explanation is saved with the run and shown on the console, in the run result,
+  and in `neal status`. The run result's next step now says a plain `neal resume`
+  re-runs the planner when that's what the block needs, instead of the generic
+  `--message` hint (#49).
+
 ## [0.6.3] - 2026-09-03
 
 ### Changed

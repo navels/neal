@@ -425,14 +425,16 @@ function renderLifecycleEvents(
 
   if (state.status === 'blocked') {
     const blockedPhase = state.blockedFromPhase ?? state.phase;
+    const blockLine = formatScopeRelatedPhase(blockedPhase)
+      ? options.scopeIntroEstablished
+        ? `Run is blocked during ${formatPublicPhase(blockedPhase)}.`
+        : `Run is blocked during ${formatPublicPhase(blockedPhase)} for ${scopeReference}.`
+      : `Run is blocked during ${formatPublicPhase(blockedPhase)}.`;
+    const reason = (state.blockerReason ?? state.interactiveBlockedRecovery?.blockedReason ?? '').replace(/\s+/g, ' ').trim();
     return [
       {
         signature: `lifecycle:${runId}:blocked:${blockedPhase}`,
-        line: formatScopeRelatedPhase(blockedPhase)
-          ? options.scopeIntroEstablished
-            ? `Run is blocked during ${formatPublicPhase(blockedPhase)}.`
-            : `Run is blocked during ${formatPublicPhase(blockedPhase)} for ${scopeReference}.`
-          : `Run is blocked during ${formatPublicPhase(blockedPhase)}.`,
+        line: reason ? `${blockLine} ${reason}` : blockLine,
       },
     ];
   }

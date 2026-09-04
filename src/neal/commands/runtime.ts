@@ -26,6 +26,7 @@ import {
   isPlanRefinementState,
 } from '../plan-refinement.js';
 import { acquireActiveRunLock, releaseActiveRunLockSync, type ActiveRunLockHandle } from '../run-lock.js';
+import { planResumeActions } from '../resume-planner.js';
 import { formatPublicRunStatus, getRunDisplayStatus, type RunDisplayStatus } from '../run-status.js';
 import { getCurrentScopeLabel } from '../scopes.js';
 import { resolveRunStatePath, type RunStatePathSource } from '../run-registry.js';
@@ -368,6 +369,9 @@ function formatFinalNextAction(
     return `Inspect failure: neal status --run ${runId}; resume when ready: neal resume --run ${runId}`;
   }
   if (finalState.status === 'blocked') {
+    if (planResumeActions(finalState).some((action) => action.kind === 'restore_resumable_blocked_phase')) {
+      return `Address the reason above, then re-run ${formatPublicPhase(finalState.blockedFromPhase ?? finalState.phase)}: neal resume --run ${runId}`;
+    }
     return `Inspect blocked run: neal status --run ${runId}; provide guidance with neal resume --run ${runId} --message "..." only if the run is waiting for operator guidance`;
   }
   if (displayStatus.effectiveStatus === 'paused') {
@@ -442,6 +446,10 @@ export function renderFinalRunOutput(
   });
   if (guidance) {
     lines.push('', ...renderBlockedGuidanceSections(guidance));
+  } else if (finalState.blockerReason) {
+    // A block that is not waiting for `--message` guidance has no guidance
+    // section, so print the stored reason under the same heading.
+    lines.push('', '## Why Neal Stopped', finalState.blockerReason);
   }
 
   lines.push('', '## Next Action', `- ${formatFinalNextAction(finalState, displayStatus, runId, guidance)}`);
