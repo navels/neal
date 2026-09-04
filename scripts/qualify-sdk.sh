@@ -7,8 +7,11 @@
 # adapters (they need subscription auth), so this script runs the missing
 # layer locally: the full test suite plus a live `neal compat --role all`
 # pass-through on the bumped adapter, using the Claude/Codex CLI auth already
-# present on this machine. On PASS it posts the compat matrix to the PR and
-# approves it; on FAIL it posts the evidence and leaves the PR open.
+# present on this machine. On PASS it posts the compat matrix to the PR as an
+# approving review, or as a comment review when the PR is your own (GitHub
+# won't let you approve your own PR; a manual bump from
+# scripts/bump-native-sdks.sh is one of those). On FAIL it posts the evidence
+# and leaves the PR open.
 #
 # Usage: scripts/qualify-sdk.sh <pr-number>
 #
@@ -121,8 +124,16 @@ done
 if [ "$PASS" = "true" ]; then
   BODY="$(printf '**SDK qualification: PASS** — %s.\n\nFull test suite green locally, and \`neal compat --role all\` passed on a subscription-authenticated machine for every bumped adapter.\n\n<details><summary>compat matrices</summary>\n\n%s\n\n</details>' \
     "$QUALIFIED" "$MATRIX")"
-  gh pr review "$PR" --approve --body "$BODY"
-  echo "PASS — approved PR #${PR}."
+  # GitHub rejects an approving review from the PR's own author, so a
+  # self-authored PR gets the same body as a comment review. release-sdk-bump.sh
+  # keys on the "SDK qualification: PASS" marker, not the review state.
+  if [ "$(gh pr view "$PR" --json author --jq .author.login)" = "$(gh api user --jq .login)" ]; then
+    gh pr review "$PR" --comment --body "$BODY"
+    echo "PASS — recorded on PR #${PR} (comment review; you can't approve your own PR)."
+  else
+    gh pr review "$PR" --approve --body "$BODY"
+    echo "PASS — approved PR #${PR}."
+  fi
   echo "Release when ready: scripts/release-sdk-bump.sh ${PR}"
   echo "(merges the PR and runs the full release; or merge only: gh pr merge ${PR} --squash)"
 else
