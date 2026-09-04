@@ -53,6 +53,9 @@ neal compat [--model <slug>] [--role coder|reviewer|planner|all] [--reference op
 
 - `--role` (default `all`) selects which role(s) to test: `coder`, `reviewer`,
   `planner`, or `all`.
+- With no flags at all, every role runs on your configured provider and model,
+  which is how to verify a native slug (`openai-codex` or `anthropic-claude`);
+  `--model` always routes the candidate to `openai-compatible`.
 - `--model <slug>` runs the slug on the **`openai-compatible`** provider in the
   candidate role (provider forced to `openai-compatible`, any configured effort
   dropped, so the slug drives a clean OpenRouter call). When omitted, the

@@ -156,6 +156,24 @@ don't support tool use.
 | `openai-codex` | supported | supported | supported |
 | `anthropic-claude` | supported | supported | supported |
 
+### Native model slugs run through the fixtures
+
+The adapters above are supported by construction. A row here means a specific
+slug has also been run through `neal compat`. To add one, put the slug in your
+config and run `neal compat` with no flags: every role then runs on your
+configured provider and model (`--model` always routes to `openai-compatible`,
+so it can't test a native slug). Cells are passed/total, same as the whitelist.
+
+| Slug | Provider | Coder | Reviewer | Planner | Run |
+| --- | --- | --- | --- | --- | --- |
+| `claude-fable-5-1` | `anthropic-claude` | 2/2 | not run | 1/1 | 2026-09-04 |
+| `gpt-6-astra` | `openai-codex` | not run | 2/2 pairs | not run | 2026-09-04 |
+
+`gpt-6-astra` as reviewer needs the read-only doctrine wording from #57. Before
+that, the doctrine told a Codex reviewer it had no shell, and Astra took it at
+its word and blocked every reviewer fixture for lack of a read tool; with the
+wording fixed it passed 4/4.
+
 ## Reproducing / extending
 
 ```
