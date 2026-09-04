@@ -28,7 +28,7 @@ export type CodeReviewFalsificationContext = {
   // Only meaningful with mode === 'read-only'. When true, Neal has inlined the
   // commit-range diff into the reviewer prompt (the reviewer has read tools but
   // no commit-range diff tool), so the doctrine references that inlined diff as
-  // the source of truth and must not name a `git_diff` tool or instruct shell.
+  // the source of truth and must not name a `git_diff` tool.
   // When false (the default, e.g. openai-compatible), the doctrine keeps the
   // existing `git_diff`-tool phrasing.
   rangeDiffInlined?: boolean;
@@ -100,6 +100,7 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
   if (mode === 'read-only') {
     lines.push(
       'A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.',
+      'Your read tools may be dedicated read and search tools, or a shell running in a read-only sandbox. If your only repository tool is that shell, use it to read files and search the tree (for example cat, sed -n, grep, ls); it cannot write, and you must not try to.',
     );
   }
 

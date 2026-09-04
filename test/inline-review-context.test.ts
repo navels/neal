@@ -99,7 +99,8 @@ test('renderInlinedRangeDiffSection affirms read tools and presents the diff as 
   const rendered = renderInlinedRangeDiffSection({ rangeLabel: 'aaa..bbb', diff: '+added line' });
 
   assert.match(rendered, /## Inlined commit-range diff from Neal \(aaa\.\.bbb\)/);
-  assert.match(rendered, /You have read-only repository tools \(read and search, no shell\) but no commit-range diff tool/);
+  assert.match(rendered, /You have read-only repository access but no commit-range diff tool/);
+  assert.match(rendered, /a shell running in a read-only sandbox/);
   assert.match(rendered, /source of truth for exactly what this range changed/);
   assert.match(rendered, /\+added line/);
   // This is not the no-read framing: it must not deny all repository access.

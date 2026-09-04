@@ -229,7 +229,7 @@ export function renderInlinedRangeDiffSection(args: { rangeLabel: string; diff: 
   return [
     `## Inlined commit-range diff from Neal (${args.rangeLabel})`,
     '',
-    'You have read-only repository tools (read and search, no shell) but no commit-range diff tool, so Neal has inlined the commit-range diff below.',
+    'You have read-only repository access but no commit-range diff tool, so Neal has inlined the commit-range diff below. That access may be dedicated read and search tools, or a shell running in a read-only sandbox; if it is a shell, use it only to read files and search the tree, never to write.',
     'This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.',
     '',
     args.diff.trim() === '' ? '(empty diff)' : truncateInlineSectionBody(args.diff),
