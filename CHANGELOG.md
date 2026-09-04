@@ -10,6 +10,8 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-09-04
+
 ### Fixed
 
 - The read-only reviewer doctrine told every reviewer it had read tools and no
