@@ -10,6 +10,8 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-09-04
+
 ### Fixed
 
 - A planner block during `neal plan` no longer loses its reason. The planner's
