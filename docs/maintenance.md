@@ -52,7 +52,9 @@ is gated on it as a whole.
    opens and merges the release-preparation PR (version bump + changelog), and
    runs the Publish workflow through the npm 2FA approval. See
    [docs/release.md](release.md). Urgent bumps (a fix neal needs immediately)
-   may skip the Renovate soak with a manual PR. Qualify them the same way.
+   may skip the Renovate soak with a manual PR: `scripts/bump-native-sdks.sh`
+   opens one at the current latest releases. Qualify it the same way. Leave
+   Renovate's own SDK PR open; it closes itself once the manual bump merges.
 
 ## TypeScript 6 and 7 side by side
 

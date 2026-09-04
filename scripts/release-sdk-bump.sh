@@ -102,11 +102,13 @@ DEP_CHANGES="$(node -e "
 " "$BASE_PKG" "$HEAD_PKG")"
 
 # --- native bumps need a qualify-sdk.sh PASS review ---
+# The marker is the signal, not the review state: qualify-sdk.sh approves a
+# bot-authored PR but can only comment on one you authored yourself.
 NATIVE_COUNT="$(grep -cE '^runtime\|(@openai/codex-sdk|@anthropic-ai/claude-agent-sdk)\|' <<<"$DEP_CHANGES" || true)"
 if [ "$NATIVE_COUNT" -gt 0 ]; then
   QUALIFIED="$(node -pe "
     JSON.parse(process.argv[1]).reviews.some(
-      (r) => r.state === 'APPROVED' && r.body.includes('SDK qualification: PASS'),
+      (r) => (r.state === 'APPROVED' || r.state === 'COMMENTED') && r.body.includes('SDK qualification: PASS'),
     )
   " "$PR_JSON")"
   if [ "$QUALIFIED" != "true" ]; then
