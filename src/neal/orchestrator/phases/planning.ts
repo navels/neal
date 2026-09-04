@@ -305,18 +305,24 @@ export async function runCoderPlanPhase(state: OrchestrationState, statePath: st
   }
   const completionProblem = getPlanningCompletionProblem(codex.marker);
   const dirtyWorktreeBlocker = await getPlanPhaseDirtyWorktreeBlocker(workingState, 'coder_plan');
+  const blocked = codex.marker === 'AUTONOMY_BLOCKED' || Boolean(completionProblem) || Boolean(dirtyWorktreeBlocker);
+  // Persist why the planner stopped so `neal status` and the run result can show
+  // it. A `coder_plan` block is never answerable via `neal resume --message`
+  // (that eligibility keys on `blockedFromPhase`), so a non-null reason here
+  // only informs the operator; it does not change resume behavior.
+  const reason = blocked
+    ? dirtyWorktreeBlocker ?? completionProblem ?? codex.blockedReason ?? 'The planner reported a blocker during plan refinement'
+    : null;
 
   const nextState = await saveState(statePath, {
     ...workingState,
     plannerSessionHandle: codex.sessionHandle,
     plannerSessionProtocol: codex.sessionHandle ? activePlannerSessionProtocol : null,
     lastScopeMarker: codex.marker as ScopeMarker | null,
-    phase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem || dirtyWorktreeBlocker ? 'blocked' : 'reviewer_plan',
-    status: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem || dirtyWorktreeBlocker ? 'blocked' : 'running',
-    blockedFromPhase: codex.marker === 'AUTONOMY_BLOCKED' || completionProblem || dirtyWorktreeBlocker ? 'coder_plan' : null,
-    // The initial coder_plan authoring block never carries the recoverable
-    // coder-response blocker reason; keep it cleared whether we advance or block.
-    blockerReason: null,
+    phase: blocked ? 'blocked' : 'reviewer_plan',
+    status: blocked ? 'blocked' : 'running',
+    blockedFromPhase: blocked ? 'coder_plan' : null,
+    blockerReason: reason,
   });
 
   await writeExecutionArtifacts(nextState);
@@ -326,8 +332,7 @@ export async function runCoderPlanPhase(state: OrchestrationState, statePath: st
     sessionHandle: codex.sessionHandle,
     nextPhase: nextState.phase,
   });
-  if (nextState.status === 'blocked') {
-    const reason = dirtyWorktreeBlocker ?? completionProblem ?? 'The coder reported a blocker during plan revision';
+  if (nextState.status === 'blocked' && reason !== null) {
     if (nextState.topLevelMode !== 'execute') {
       await notifyBlocked(nextState, reason, logger);
       return nextState;

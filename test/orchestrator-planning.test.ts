@@ -377,7 +377,60 @@ test('runCoderPlanPhase blocks when planner dirties non-plan files', async () =>
     assert.equal(nextState.blockedFromPhase, 'coder_plan');
     assert.equal(persisted.phase, 'blocked');
     assert.equal(nextState.interactiveBlockedRecovery, null);
+    assert.match(persisted.blockerReason ?? '', /worktree|dirty|non-plan/i);
     assert.match(await runGit(cwd, 'status', '--short'), /src\.ts/);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});
+
+test('runCoderPlanPhase persists the planner\'s reason when it blocks and the run stays resumable', async () => {
+  const { cwd, statePath, state } = await createResumeFixture({
+    topLevelMode: 'plan',
+    phase: 'coder_plan',
+    status: 'running',
+    blockedFromPhase: null,
+  });
+  const blockedReason = 'The plan asks for a Postgres migration but this repository has no database layer to migrate.';
+
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter() {
+      return {
+        async runPrompt(args: CoderRunPromptArgs) {
+          throw new Error(`unexpected text planning prompt: ${args.prompt}`);
+        },
+        async runStructuredPrompt<TStructured>() {
+          return {
+            sessionHandle: 'planner-blocked-session',
+            structured: {
+              action: 'blocked',
+              message: 'Cannot refine this plan as written.',
+              executionShape: 'one_shot',
+              planBody: '',
+              blockedReason,
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    const nextState = await runCoderPlanPhase(state, statePath);
+    const persisted = await loadState(statePath);
+
+    assert.equal(nextState.status, 'blocked');
+    assert.equal(nextState.blockedFromPhase, 'coder_plan');
+    assert.equal(persisted.blockerReason, blockedReason);
+
+    // A plain `neal resume` re-runs the planner; the block is not a `--message` block.
+    assert.equal(getPlanReviewGuidanceOriginPhase(persisted), null);
+    assert.ok(planResumeActions(persisted).some((action) => action.kind === 'restore_resumable_blocked_phase'));
+
+    const snapshot = await buildStatusSnapshot({ cwd, statePath, now: new Date() });
+    assert.equal(snapshot.blocker.reason, blockedReason);
+    assert.equal(snapshot.blocker.source, 'RUN_STATE.json blocker reason');
+    assert.match(renderHumanStatusSnapshot(snapshot), /Postgres migration/);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }

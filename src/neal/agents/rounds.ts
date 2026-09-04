@@ -771,7 +771,7 @@ export async function runCoderPlanRound(args: {
   // instructing the refiner to keep it single-scope.
   authoredOneShot?: boolean;
   logger?: RunLogger;
-}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null }> {
+}): Promise<{ sessionHandle: string | null; finalResponse: string; marker: string | null; blockedReason: string | null }> {
   if (args.sessionHandle && args.coderSessionProtocol === null) {
     throw new Error('Cannot resume planner planning session without plannerSessionProtocol.');
   }
@@ -815,6 +815,7 @@ export async function runCoderPlanRound(args: {
       sessionHandle,
       finalResponse,
       marker,
+      blockedReason: normalizedPayload.action === 'blocked' ? normalizedPayload.blockedReason.trim() || null : null,
     };
   }
 
@@ -864,6 +865,7 @@ export async function runCoderPlanRound(args: {
     sessionHandle,
     finalResponse,
     marker,
+    blockedReason: null,
   };
 }
 

@@ -389,6 +389,22 @@ test('final run output is compact and points to the retrospective artifact', asy
   assert.doesNotMatch(output, /This detailed retrospective should stay in the artifact/);
 });
 
+test('final run output prints the crash message so the console says why the run failed', async () => {
+  const { state, statePath } = await createState({
+    phase: 'coder_scope',
+    status: 'failed',
+  });
+  const failureMessage = 'Coder scope round failed: provider returned 503 Service Unavailable after 3 retries.';
+
+  const output = renderFinalRunOutput(state, statePath, getRunDisplayStatus(state), null, failureMessage);
+
+  assert.match(output, /## Why Neal Stopped/);
+  assert.match(output, /provider returned 503 Service Unavailable after 3 retries/);
+
+  const silent = renderFinalRunOutput(state, statePath, getRunDisplayStatus(state));
+  assert.doesNotMatch(silent, /## Why Neal Stopped/);
+});
+
 test('final run output directs failed runs to status and resume', async () => {
   const { state, statePath } = await createState({
     phase: 'coder_scope',
