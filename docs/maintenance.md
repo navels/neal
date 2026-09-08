@@ -10,7 +10,7 @@ Grouped so at most a handful of dependency PRs are ever open at once:
 | Bucket | Contents | Cadence | Update posture |
 | --- | --- | --- | --- |
 | **Weekly non-major** | everything except the native SDKs (minor/patch/pin/digest) | weekly, one grouped PR | auto-merge after CI and the live smoke pass, subject to a 3-day soak |
-| **Native SDKs** | `@openai/codex-sdk` and `@anthropic-ai/claude-agent-sdk`, both exact-pinned. `ai`, `@ai-sdk/openai-compatible`, and `zod` also stay exact-pinned. | one grouped PR, opened after the 3-day soak instead of waiting for the weekly schedule | qualify on a subscription-authenticated machine with `scripts/qualify-sdk.sh`. Never auto-merge. Skip the CI smoke because it does not exercise the native adapters. |
+| **Native SDKs** | `@openai/codex-sdk` and `@anthropic-ai/claude-agent-sdk`, both exact-pinned. `ai`, `@ai-sdk/openai-compatible`, and `zod` also stay exact-pinned. | one grouped PR, opened after the 3-day soak instead of waiting for the weekly schedule | qualify on a subscription-authenticated machine with `scripts/qualify-sdk.sh`. Never auto-merge. The CI smoke skips itself on these PRs because it does not exercise the native adapters. |
 | **Library majors** | every npm major except the native SDKs (`typescript`, `@types/node`, `ai`, `@ai-sdk/openai-compatible`, `zod`, etc.) | monthly, one grouped PR | review manually because some need code changes |
 | **GitHub Actions majors** | `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, etc. | monthly, one grouped PR separate from library majors | review and merge on green CI. Do not auto-merge because a major action bump can still change behavior. |
 
@@ -19,7 +19,7 @@ tool-calling, structured output, or sandbox behavior. That breaks neal's loop
 **without** breaking compilation. And CI can't behaviorally exercise the
 native adapters: their auth is subscription-based and lives only on a
 maintainer's machine. Everything else is behaviorally exercised in CI: the
-live smoke runs on every package.json/lockfile PR, so the weekly grouped PR
+live smoke runs on package.json/lockfile PRs that change something it exercises, so the weekly grouped PR
 is gated on it as a whole.
 
 ## The update flow
@@ -31,7 +31,7 @@ is gated on it as a whole.
 2. **Verify (automatic).** CI (`.github/workflows/ci.yml`) runs typecheck + lint
    + unit tests + package verification on Node 24.18.0, which catches
    **API-shape / contract** breaks. The live smoke
-   (`.github/workflows/smoke.yml`) runs on every package.json / lockfile PR: a
+   (`.github/workflows/smoke.yml`) runs on package.json / lockfile PRs that change something it exercises (a version bump or a native-SDK pin bump skips it): a
    real `neal compat` run against a cheap OpenRouter model through
    `openai-compatible`, catching **behavioral** breaks in the AI-SDK tier. The
    weekly non-major PR auto-merges when both are green.

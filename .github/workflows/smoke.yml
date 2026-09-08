@@ -41,6 +41,9 @@ jobs:
   smoke:
     name: neal compat smoke (openai-compatible / OpenRouter)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     # A wedged provider call otherwise runs to GitHub's 6-hour default; the
     # whole 3-attempt loop normally finishes in ~20 minutes (#56).
     timeout-minutes: 45
@@ -63,28 +66,49 @@ jobs:
       # below override per-role, but provider detection wants a default.
       OPENAI_COMPATIBLE_MODEL: ${{ inputs.model || 'minimax/minimax-m2.5' }}
     steps:
-      - name: Guard — skip when no OpenRouter key or on native-SDK PRs
+      - name: Guard — run only when something the smoke exercises changed
         id: guard
-        # HEAD_REF via env, never inlined into the script: a branch name is
-        # untrusted input.
+        # The smoke drives the AI-SDK tier through openai-compatible, plus the
+        # compat command and its fixtures. A PR that changes none of that (a
+        # version bump, or a bump to the native SDK pins, which the smoke never
+        # drives; qualify-sdk.sh covers those) has nothing for it to test, and
+        # it costs ~20 minutes, so skip it. Decided from the PR's actual diff
+        # via the API, never from the branch name. Anything unclear runs.
         env:
-          HEAD_REF: ${{ github.head_ref }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ -z "${OPENROUTER_API_KEY}" ]; then
             echo "No OPENROUTER_API_KEY secret present; skipping live smoke."
             echo "run=false" >> "$GITHUB_OUTPUT"
-          elif [ "${HEAD_REF}" = "renovate/native-agentic-sdks" ]; then
-            # The smoke drives openai-compatible/OpenRouter and never exercises the
-            # native @openai/codex-sdk / @anthropic-ai/claude-agent-sdk adapters
-            # (no subscription auth in CI). Those are qualified locally by
-            # scripts/qualify-sdk.sh, so running the smoke here tests nothing that
-            # changed. Skip it (the job still reports green so a required-check
-            # gate stays satisfied).
-            echo "Native-SDK PR; the smoke does not exercise the native adapters (qualify-sdk.sh does). Skipping."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
+          if printf '%s\n' "$files" | grep -qE '^(src/neal/commands/compat\.ts|examples/compat/|scripts/smoke-aggregate\.mjs|\.github/workflows/smoke\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$files" | grep -qx 'package.json'; then
+            residual="$(diff \
+              <(gh api "repos/${GITHUB_REPOSITORY}/contents/package.json?ref=${BASE_SHA}" -H 'Accept: application/vnd.github.raw+json') \
+              <(gh api "repos/${GITHUB_REPOSITORY}/contents/package.json?ref=${HEAD_SHA}" -H 'Accept: application/vnd.github.raw+json') \
+              | grep -E '^[<>]' | grep -vE '"version":|"@openai/codex-sdk":|"@anthropic-ai/claude-agent-sdk":' || true)"
+            if [ -n "$residual" ]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "package.json changed only the version and/or the native SDK pins; the smoke exercises neither. Skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Check out repository
         if: steps.guard.outputs.run == 'true'
