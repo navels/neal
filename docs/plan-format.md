@@ -61,6 +61,8 @@ planner is instructed to keep the plan one scope and make the smallest complete
 change, and the plan reviewer is instructed to raise a blocking finding if the
 refined document declares any other execution shape or adds orchestration
 sections. That finding routes through the normal revision loop like any other.
+The one exception is operator work that depends on something the run builds;
+see [Manual gates](#manual-gates).
 
 There is deliberately no hard mechanical clamp: if the review loop converges on
 a different shape (the reviewer accepts an expansion), neal adopts the refined
@@ -171,6 +173,46 @@ The success condition should state what must be true after the scope is
 complete. It is not a prose summary of the goal. It is the reviewable exit
 criterion. Good success conditions mention the changed surface, the expected
 behavior or docs state, and the verification evidence required for acceptance.
+
+## Manual gates
+
+A manual gate is how the coder pauses a scope for work only the operator can do:
+running something on real hardware, flipping a setting in an external console,
+making a call the plan left to a person. The coder writes instructions and one
+or more resume checks, neal saves the instructions to a run-local `GATE-<id>.md`
+file and stops, and `neal resume --run <run-id>` re-runs the checks and hands the
+scope back to the coder when they pass.
+
+A gate opens during the coder's first pass on a scope, before any review. The
+reviewer sees nothing from that scope until the coder says the scope is done. So
+anything the operator is asked to use at the gate has to come from a scope that
+was already reviewed and accepted.
+
+When a plan needs operator work that depends on something the run builds (a test
+harness, a procedure, a script), split it into two scopes. The first builds that
+tooling and verifies it as far as it can without the operator, and is reviewed
+and accepted like any other scope. The next scope opens the manual gate at its
+start and works with the results.
+
+```md
+### Scope 1: Build the sensor test harness
+- Goal: Add `scripts/sensor-harness.sh`, which runs the calibration sweep against an attached board and writes `tmp/sensor-results.json`.
+- Verification: `pnpm test`, plus a harness dry run against the recorded fixture.
+- Success Condition: The harness runs end to end against the fixture and its output matches the documented result format.
+
+### Scope 2: Run the harness on hardware and apply the results
+- Goal: Open a manual gate asking the operator to run the harness on the bench board. Then set the calibration constants from `tmp/sensor-results.json`.
+- Verification: The gate's resume check confirms `tmp/sensor-results.json` exists and parses; then `pnpm test`.
+- Success Condition: The calibration constants come from a real hardware run, and the tests pass with them.
+```
+
+The planner, the plan reviewer, and the coder all hold to this. The planner
+splits the plan this way. The plan reviewer raises a blocking finding on a scope
+that both builds operator-facing tooling and gates on the operator using it. A
+coder that lands in such a scope anyway returns `split_plan` with the two-scope
+version instead of opening the gate. A plan authored `one_shot` may expand to
+`multi_scope` for this, only as far as the tooling scope and the gate scope
+require.
 
 ## Planning normalization
 

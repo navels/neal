@@ -10,6 +10,21 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Changed
+
+- A manual gate opens during the coder's first pass on a scope, before any
+  review. A scope that both built something for the operator to use (a test
+  harness, a procedure, a script) and gated on the operator using it handed over
+  unreviewed tooling, and a buggy handoff looped gate, resume, coder fix, gate
+  without ever reaching the reviewer. The planner now puts that tooling in its
+  own scope ahead of the gate scope, the plan reviewer raises a blocking finding
+  on a scope that does both, and a coder that lands in one returns `split_plan`
+  instead of opening the gate. A plan authored `one_shot` may expand to
+  `multi_scope` for this case only. `docs/plan-format.md` has a new "Manual
+  gates" section and `docs/troubleshooting.md` covers the reopening gate. The
+  `plan_author` (now 7), `plan_reviewer` (now 6), and `scope_coder` (now 4)
+  prompt-spec versions bumped (#70).
+
 ## [0.6.8] - 2026-09-14
 
 ### Changed

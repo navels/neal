@@ -254,6 +254,67 @@ test('plan reviewer performs independent material review without becoming code-d
   assert.doesNotMatch(prompt, /If the change removes/);
 });
 
+test('planner, plan reviewer, and scope coder put operator-facing tooling in its own scope ahead of the manual gate', () => {
+  const twoScopeRule =
+    /the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results/;
+
+  const plannerPrompt = buildPlanningPrompt('/tmp/PLAN.md');
+  assert.match(plannerPrompt, /operator work that depends on something the run builds \(a test harness, a procedure, a script\), split it into two scopes/);
+  assert.match(plannerPrompt, twoScopeRule);
+  assert.match(plannerPrompt, /it opens before that scope has been reviewed/);
+
+  const reviewerArgs = { planDoc: '/tmp/PLAN.md', round: 1, reviewMarkdownPath: '/tmp/REVIEW.md' };
+  const reviewerPrompts = [
+    buildPlanReviewerPrompt({ ...reviewerArgs, mode: 'plan' }),
+    buildPlanReviewerPrompt({
+      ...reviewerArgs,
+      planDoc: '/tmp/DERIVED_PLAN.md',
+      mode: 'derived-plan',
+      parentPlanDoc: '/tmp/PLAN.md',
+      derivedFromScopeNumber: 3,
+    }),
+  ];
+  for (const prompt of reviewerPrompts) {
+    assert.match(
+      prompt,
+      /Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use \(a test harness, a procedure, a script\) and opens a manual gate on the operator using it/,
+    );
+    assert.match(prompt, /Require two scopes instead/);
+    assert.match(prompt, twoScopeRule);
+  }
+
+  const scopePrompt = buildScopePrompt('/tmp/PLAN.md', 'Current scope: 1');
+  assert.match(scopePrompt, /Do not open a manual gate that asks the operator to use tooling built in this same scope/);
+  assert.match(scopePrompt, /nothing built in this scope has been reviewed yet\. Check for this before you start building/);
+  assert.match(
+    scopePrompt,
+    /set action=`split_plan` with a derived plan that builds and verifies the tooling in its own scope and opens the manual gate at the start of the next scope\. Use `blocked` only when no such derived plan is practical/,
+  );
+});
+
+test('authored one_shot planner and reviewer prompts expand to multi_scope for operator work that depends on run-built tooling', () => {
+  const plannerPrompt = buildPlanningPrompt('/tmp/PLAN.md', null, { authoredOneShot: true });
+  assert.match(plannerPrompt, /keep it one scope, make the smallest complete change/);
+  assert.match(
+    plannerPrompt,
+    /The one exception is operator work that depends on something the run builds: that plan cannot stay one scope, so declare `multi_scope`, expand only as far as the tooling scope and the manual-gate scope require, and say why in `message`/,
+  );
+  assert.match(plannerPrompt, /split it into two scopes/);
+
+  const reviewerPrompt = buildPlanReviewerPrompt({
+    planDoc: '/tmp/PLAN.md',
+    round: 1,
+    reviewMarkdownPath: '/tmp/REVIEW.md',
+    authoredOneShot: true,
+  });
+  assert.match(reviewerPrompt, /raise a blocking finding if the document declares any other execution shape/);
+  assert.match(
+    reviewerPrompt,
+    /The one exception is a plan that needs operator work that depends on something the run builds: accept `multi_scope` there when the expansion goes only as far as the tooling scope and the manual-gate scope require, and do not ask for that work to be folded back into one scope/,
+  );
+  assert.match(reviewerPrompt, /Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use/);
+});
+
 test('derived-plan prompts require the same canonical Neal-executable contract', () => {
   const scopePrompt = buildScopePrompt('/tmp/PLAN.md', 'Current scope: 1');
   const coderResponsePrompt = buildCoderResponsePrompt({
