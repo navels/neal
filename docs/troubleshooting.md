@@ -121,6 +121,15 @@ run-local `GATE-<id>.md` file shown by `neal status`.
 **Fix:** do the manual step, then `neal resume --run <run-id>`, which re-runs
 the gate's checks and resumes the scope when they pass. No `--message` here.
 
+**Symptom:** the same gate keeps reopening: you do the step, resume, the coder
+patches the script or procedure it handed you, and the gate opens again.
+**Cause:** the tooling you were handed was built in the same scope that opened
+the gate. A gate opens before its scope is reviewed, so that tooling reached you
+unreviewed, and each fix-and-reopen round skips the reviewer too.
+**Fix:** don't resume again. Split the plan so the tooling gets its own scope
+ahead of the gate scope, then start a new run on the revised plan. See
+[Manual gates](plan-format.md#manual-gates).
+
 **Symptom:** a run seems hung or died silently.
 **Where to look:** raw detail is persisted even when hidden from the terminal:
 `.neal/runs/<run-id>/stderr.log` (full transcript) and

@@ -251,7 +251,7 @@ const CONSULTANT_CONTEXT = context('ConsultantPromptContext', [
 export const PROMPT_SPECS: readonly PromptSpec[] = [
   {
     id: 'plan_author',
-    version: 5,
+    version: 6,
     changelog: [
       {
         version: 1,
@@ -272,6 +272,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 5,
         renderSha: '148ed793be3f39c4a5505289ab3045ff124d8c44a53bf5fa9ccc8c3c5f20d408',
+      },
+      {
+        version: 6,
+        renderSha: '7c302d4befbb252b8346fce67c47dbab38668c9a232f92a715831ddc11da59ec',
       },
     ],
     role: 'coder',
@@ -347,7 +351,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'plan_reviewer',
-    version: 4,
+    version: 5,
     changelog: [
       {
         version: 1,
@@ -364,6 +368,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 4,
         renderSha: '65ad05a8bbe1f4a6d631db8778bf6bed82249151f3412a7773f9568ae2d40f11',
+      },
+      {
+        version: 5,
+        renderSha: '45730ee47b7cb5dc93bc776a6db4a3fb1800160b0c6173d41b43b81c6244f85a',
       },
     ],
     role: 'reviewer',
@@ -460,7 +468,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_coder',
-    version: 3,
+    version: 4,
     changelog: [
       {
         version: 1,
@@ -473,6 +481,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 3,
         renderSha: '8fb94430bf9d9abcb11f905106a3a04fc1b81bd101104c88f84a8693f705c5ea',
+      },
+      {
+        version: 4,
+        renderSha: '7c413f0bd9a71f77cc2dc93c44af6f672717324d8e4071bde93ecc25756b2841',
       },
     ],
     role: 'coder',

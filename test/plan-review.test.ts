@@ -254,6 +254,35 @@ test('plan reviewer performs independent material review without becoming code-d
   assert.doesNotMatch(prompt, /If the change removes/);
 });
 
+test('the manual-gate scope rule reaches the planner, the plan reviewer, and the coder', () => {
+  const reviewerArgs = { planDoc: '/tmp/PLAN.md', round: 1, reviewMarkdownPath: '/tmp/REVIEW.md' };
+  const prompts = [
+    buildPlanningPrompt('/tmp/PLAN.md'),
+    buildPlanReviewerPrompt({ ...reviewerArgs, mode: 'plan' }),
+    buildPlanReviewerPrompt({
+      ...reviewerArgs,
+      planDoc: '/tmp/DERIVED_PLAN.md',
+      mode: 'derived-plan',
+      parentPlanDoc: '/tmp/PLAN.md',
+      derivedFromScopeNumber: 3,
+    }),
+    buildScopePrompt('/tmp/PLAN.md', 'Current scope: 1'),
+  ];
+  // The exact wording is pinned by the render-integrity goldens; this only
+  // checks that each role is told about manual gates at all.
+  for (const prompt of prompts) {
+    assert.match(prompt, /manual gate/);
+  }
+});
+
+test('the one_shot exception for manual-gate tooling renders only for plans authored one_shot', () => {
+  const reviewerArgs = { planDoc: '/tmp/PLAN.md', round: 1, reviewMarkdownPath: '/tmp/REVIEW.md' };
+  assert.match(buildPlanningPrompt('/tmp/PLAN.md', null, { authoredOneShot: true }), /one exception/);
+  assert.doesNotMatch(buildPlanningPrompt('/tmp/PLAN.md'), /one exception/);
+  assert.match(buildPlanReviewerPrompt({ ...reviewerArgs, authoredOneShot: true }), /one exception/);
+  assert.doesNotMatch(buildPlanReviewerPrompt(reviewerArgs), /one exception/);
+});
+
 test('derived-plan prompts require the same canonical Neal-executable contract', () => {
   const scopePrompt = buildScopePrompt('/tmp/PLAN.md', 'Current scope: 1');
   const coderResponsePrompt = buildCoderResponsePrompt({

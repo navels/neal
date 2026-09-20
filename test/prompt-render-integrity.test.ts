@@ -639,8 +639,8 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
 };
 
 const EXPECTED_MODULE_SHAS: Record<(typeof MATRIX_BUILDER_MODULES)[number], string> = {
-  'src/neal/prompts/planning.ts': '0d0e88130af09545f7bfb5d74bf03d333954152baabd37a7926279e361167cde',
-  'src/neal/prompts/execute.ts': '2b94a85d63e08bd676bdb2415eb9c1de2f27cdce6e858ee220cfb44c18dacfb0',
+  'src/neal/prompts/planning.ts': '602857121d8b3c1dea023ef1156b7f7259c298a378ab7f4b74503b675b91b1fe',
+  'src/neal/prompts/execute.ts': 'c95f55c42f5571204f6e795a575ea97a57375b064772c8e1f2421fbe6978ca98',
   'src/neal/prompts/specialized.ts': '396c46ab85aa4e41ef0bf5cbce5c84d0dd11210d07b25a4c58327fd615ca8683',
   'src/neal/agents/prompts.ts': 'c9b8b6bd135206ec8c7055aa887d65003490b8fdef95c3a662797018d01a667e',
   'src/neal/context/reviewer-context.ts': '7168f61b26ff2c9fb9fa67ce7c608f452722fcfc5187f8c346910264a4c00674',
