@@ -6,8 +6,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -101,8 +100,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -189,8 +187,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -223,6 +220,7 @@ The derived plan should preserve the same target while replacing only the invali
 If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
 Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
 This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+The one exception is a plan that needs operator work that depends on something the run builds: accept `multi_scope` there when the expansion goes only as far as the tooling scope and the manual-gate scope require, and do not ask for that work to be folded back into one scope.
 
 Bounded current-run continuity context:
 # Reviewer Continuity Context
@@ -285,8 +283,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -319,6 +316,7 @@ Focus on whether the plan is now a clean, human-reviewable future execution plan
 If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
 Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
 This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+The one exception is a plan that needs operator work that depends on something the run builds: accept `multi_scope` there when the expansion goes only as far as the tooling scope and the manual-gate scope require, and do not ask for that work to be folded back into one scope.
 
 Bounded current-run continuity context:
 # Reviewer Continuity Context
@@ -374,8 +372,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -469,8 +466,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -557,8 +553,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -591,6 +586,7 @@ The derived plan should preserve the same target while replacing only the invali
 If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
 Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
 This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+The one exception is a plan that needs operator work that depends on something the run builds: accept `multi_scope` there when the expansion goes only as far as the tooling scope and the manual-gate scope require, and do not ask for that work to be folded back into one scope.
 
 Bounded current-run continuity context:
 # Reviewer Continuity Context
@@ -653,8 +649,7 @@ Review the plan independently and look for material problems before accepting it
 A ready plan preserves the requested objective, proposes a sound approach, accounts for major architectural constraints and dependencies, uses a valid execution shape with coherent scopes, and gives each scope meaningful verification and a reviewable success condition.
 The plan is written for both neal and the operator. It should be concise enough for a person to review, specific enough to guide implementation, and open enough for the coder to make local choices after inspecting the code.
 Raise a blocking finding only when an omission is likely to produce the wrong implementation, make a scope unsafe or impractical, hide a major dependency, leave sequencing materially unclear, or allow incorrect work to appear complete.
-Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on the operator using it. A manual gate opens before its scope has been reviewed, so the operator would be handed unreviewed tooling.
-Require two scopes instead: the first builds that tooling and verifies it as far as it can without the operator, and is reviewed and accepted like any other scope; the next scope opens the manual gate at its start and works with the results.
+Raise a blocking scope granularity finding when a single scope both builds tooling for the operator to use (a test harness, a procedure, a script) and opens a manual gate on its use. A gate opens before its scope is reviewed, so that tooling belongs in its own scope, reviewed and accepted first, with the gate opening at the start of the next scope.
 Missing routine implementation detail is not a finding. Do not require exhaustive file, symbol, caller, test, command, assertion, line-number, pinned-value, or fixture inventories.
 More detail can make a plan worse by turning tentative implementation choices into acceptance requirements. Ask for low-level detail only when it records a fixed decision, preserves compatibility, or prevents a known failure.
 A repository-wide invariant or global regression guarantee belongs in the plan only when it is necessary for the requested change to be correct.
@@ -687,6 +682,7 @@ Focus on whether the plan is now a clean, human-reviewable future execution plan
 If the plan is already Neal-executable, confirm that quickly and return no manufactured findings.
 Read /tmp/REVIEW.md before finalizing findings so you can inspect prior review history and coder responses.
 This plan was authored `one_shot`; raise a blocking finding if the document declares any other execution shape or adds orchestration sections.
+The one exception is a plan that needs operator work that depends on something the run builds: accept `multi_scope` there when the expansion goes only as far as the tooling scope and the manual-gate scope require, and do not ask for that work to be folded back into one scope.
 
 Bounded current-run continuity context:
 # Reviewer Continuity Context

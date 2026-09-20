@@ -22,7 +22,7 @@ dependency-update policy.
   instead of opening the gate. A plan authored `one_shot` may expand to
   `multi_scope` for this case only. `docs/plan-format.md` has a new "Manual
   gates" section and `docs/troubleshooting.md` covers the reopening gate. The
-  `plan_author` (now 7), `plan_reviewer` (now 6), and `scope_coder` (now 4)
+  `plan_author` (now 6), `plan_reviewer` (now 5), and `scope_coder` (now 4)
   prompt-spec versions bumped (#70).
 
 ## [0.6.8] - 2026-09-14
