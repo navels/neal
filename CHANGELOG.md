@@ -16,8 +16,6 @@ dependency-update policy.
 
 - Updated `@anthropic-ai/claude-agent-sdk` from `0.3.269` to `0.3.274`. Re-qualified the native adapter with `neal compat`; no behavior change.
 
-### Changed
-
 - A manual gate opens during the coder's first pass on a scope, before any
   review. A scope that both built something for the operator to use (a test
   harness, a procedure, a script) and gated on the operator using it handed over
