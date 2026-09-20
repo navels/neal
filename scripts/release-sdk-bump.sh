@@ -32,7 +32,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 PACKAGE_NAME="$(node -p "require('./package.json').name")"
 
-if git status --porcelain | grep -q .; then
+if [ -n "$(git status --porcelain)" ]; then
   echo "release-sdk-bump: working tree is not clean; commit or stash first." >&2
   exit 1
 fi
@@ -191,8 +191,11 @@ PREP_PR_URL="$(gh pr create --title "Prepare ${VERSION} release" --body "$(print
 PREP_PR="${PREP_PR_URL##*/}"
 
 echo "Waiting for Verify on release-prep PR #${PREP_PR}..."
-until gh pr checks "$PREP_PR" 2>/dev/null | grep -qE '^Verify[[:space:]]+(pass|fail)'; do sleep 15; done
-if ! gh pr checks "$PREP_PR" | grep -qE '^Verify[[:space:]]+pass'; then
+# Capture gh's output before matching. Under `set -o pipefail`, `gh ... | grep -q`
+# is a race: grep -q exits on the first match, gh can die of SIGPIPE writing the
+# next line, and the pipeline then reads as a failure even though Verify passed.
+until CHECKS="$(gh pr checks "$PREP_PR" 2>/dev/null || true)"; grep -qE '^Verify[[:space:]]+(pass|fail)' <<<"$CHECKS"; do sleep 15; done
+if ! grep -qE '^Verify[[:space:]]+pass' <<<"$CHECKS"; then
   echo "release-sdk-bump: Verify failed on PR #${PREP_PR}; branch ${RELEASE_BRANCH} left in place." >&2
   exit 1
 fi
@@ -231,8 +234,8 @@ fi
 echo "Running Publish (real)..."
 RUN_ID="$(start_publish_run false)"
 echo "Waiting for the Stage publish step on run ${RUN_ID}..."
-until gh api "repos/{owner}/{repo}/actions/runs/${RUN_ID}/jobs" \
-  --jq '.jobs[0].steps[] | select(.name == "Stage publish") | select(.status == "completed") | .name' 2>/dev/null | grep -q .; do
+until [ -n "$(gh api "repos/{owner}/{repo}/actions/runs/${RUN_ID}/jobs" \
+  --jq '.jobs[0].steps[] | select(.name == "Stage publish") | select(.status == "completed") | .name' 2>/dev/null)" ]; do
   sleep 15
 done
 
