@@ -53,10 +53,13 @@ cd "$WORK/wt"
 DIFF="$(git diff "$(git merge-base HEAD origin/main)" HEAD -- package.json)"
 ADAPTERS=()
 if grep -q '"@openai/codex-sdk"' <<<"$DIFF"; then
-  ADAPTERS+=("@openai/codex-sdk|openai-codex|gpt-5.5")
+  # Pin the reference effort too. Codex otherwise inherits model_reasoning_effort
+  # from ~/.codex/config.toml, and a value that suits the operator's everyday
+  # model (e.g. max) can be one gpt-5.5 rejects, failing every cell up front.
+  ADAPTERS+=("@openai/codex-sdk|openai-codex|gpt-5.5|high")
 fi
 if grep -q '"@anthropic-ai/claude-agent-sdk"' <<<"$DIFF"; then
-  ADAPTERS+=("@anthropic-ai/claude-agent-sdk|anthropic-claude|claude-opus-4-8")
+  ADAPTERS+=("@anthropic-ai/claude-agent-sdk|anthropic-claude|claude-opus-4-8|")
 fi
 if [ ${#ADAPTERS[@]} -eq 0 ]; then
   echo "qualify-sdk: PR #${PR} does not change a native agentic SDK in package.json." >&2
@@ -81,8 +84,11 @@ QUALIFIED=""
 MATRIX=""
 PIDS=()
 for entry in "${ADAPTERS[@]}"; do
-  IFS='|' read -r PKG PROVIDER MODEL <<<"$entry"
-  echo "Qualifying ${PKG} on the ${PROVIDER} adapter (model ${MODEL})."
+  IFS='|' read -r PKG PROVIDER MODEL EFFORT <<<"$entry"
+  # Always write the key: an absent key falls back to ~/.neal/config.yml, and a
+  # personal effort setting is exactly what must not leak into a qualification.
+  EFFORT_LINE="    effort: ${EFFORT:-null}"
+  echo "Qualifying ${PKG} on the ${PROVIDER} adapter (model ${MODEL}${EFFORT:+, effort ${EFFORT}})."
   COMPAT_CWD="$WORK/compat-cwd-${PROVIDER}"
   mkdir -p "$COMPAT_CWD"
   cat > "$COMPAT_CWD/neal.yml" <<EOF
@@ -90,9 +96,11 @@ agent:
   coder:
     provider: ${PROVIDER}
     model: ${MODEL}
+${EFFORT_LINE}
   reviewer:
     provider: ${PROVIDER}
     model: ${MODEL}
+${EFFORT_LINE}
 EOF
 
   echo "Running live compat qualification for ${PROVIDER} (real provider calls)..."
