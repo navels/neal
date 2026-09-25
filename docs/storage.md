@@ -69,6 +69,7 @@ neal operations and diagnostics.
 | Path | Classification | Contract |
 | --- | --- | --- |
 | `.neal/runs/<run-id>/RUN_STATE.json` | Internal state | Child-run ledger. neal validates current v1 state on read, but scripts should use `neal status --json` rather than depend on this file as a public API. |
+| `.neal/provider-sessions/openai-compatible/<id>.json` | Internal state | Neal-owned OpenAI-compatible coder/planner session mirror. It contains the explicit model message history and in-flight operation stage needed to honor the normal writer `resumeHandle` contract. It may contain prompts, tool results, source excerpts, and model responses and must be treated with the same privacy care as run artifacts. |
 | `.neal/runs/<run-id>/events.ndjson` | Support/debug artifact | Append-only event log for audit, diagnostics, command output references, and provider/runtime events. Readers should tolerate malformed or partial final lines where implemented. |
 | `.neal/runs/<run-id>/stderr.log` | Support/debug artifact | Append-only stderr transcript for writer runs. It includes visible narrative lines plus low-level detail such as provider/tool telemetry, command output, reviewer context, and heartbeat diagnostics that may be hidden from the normal terminal stream. |
 | `.neal/runs/<run-id>/meta.json` | Support/debug artifact | Run metadata used for diagnostics. New writes include `version: 1`. Metadata alone cannot make a run selectable for squash or status. It is not the stable automation surface. |
@@ -154,10 +155,15 @@ them on read. Child-run state uses strict current v1 hydration: missing or
 malformed required child-run fields fail instead of receiving defaults. These
 ledgers are not public JSON APIs.
 
-neal does not write, read, migrate, or repair a session mirror. Use
-`.neal/current.json` as the default writer-run pointer, `neal status --all` to
-discover run IDs, and `--run <run-id>` when selecting a specific run for
-`resume` or `status`.
+Most provider sessions remain provider-owned and are referenced only by opaque
+handles in run state. The OpenAI-compatible coder/planner adapter is the
+exception: because Chat Completions has no provider-side session object, Neal
+maintains a project-local v1 session mirror under
+`.neal/provider-sessions/openai-compatible/`. A run remains selectable through
+its normal `RUN_STATE.json`; the session mirror is only the backing context for
+a persisted writer session handle. Use `.neal/current.json` as the default
+writer-run pointer, `neal status --all` to discover run IDs, and `--run
+<run-id>` when selecting a specific run for `resume` or `status`.
 
 Squash discovery requires readable run-local state. Run metadata and progress
 artifacts can help humans inspect a run, but they cannot make a run selectable
