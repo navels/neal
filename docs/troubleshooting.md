@@ -48,6 +48,15 @@ local setup.
 **Fix:** complete the provider's normal local auth setup (the `codex` / `claude`
 login flows), then `neal check` again.
 
+**Symptom:** an OpenAI-compatible provider returns HTTP 400 mentioning
+`json_schema`, `response_format`, or "This response_format type is unavailable now".
+**Cause:** that Chat Completions endpoint supports JSON Output but not
+schema-enforced JSON.
+**Fix:** set `providers.openai_compatible.structured_output_mode: json_object`.
+This is a generic endpoint-capability switch, not a DeepSeek special case.
+Neal requests native JSON mode with no schema attached to the transport, then
+applies its existing protocol schema validator locally.
+
 **Symptom:** `Set providers.openai_compatible.base_url (or OPENAI_COMPATIBLE_BASE_URL) and OPENAI_COMPATIBLE_API_KEY before running Neal.`
 (or `No model is resolvable for the openai-compatible ... role`).
 **Cause:** `openai-compatible` resolves settings from config first,
