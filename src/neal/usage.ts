@@ -43,7 +43,6 @@ export type NealRunUsageSnapshot = {
   runDir: string;
   planDoc: string;
   topLevelMode: OrchestrationState['topLevelMode'];
-  executionProfile: OrchestrationState['executionProfile'];
   status: OrchestrationState['status'];
   phase: OrchestrationState['phase'];
   agentConfig: AgentConfig;
@@ -289,7 +288,6 @@ async function buildRunSnapshotFromStatePath(cwd: string, statePath: string): Pr
     runDir: state.runDir,
     planDoc: state.planDoc,
     topLevelMode: state.topLevelMode,
-    executionProfile: state.executionProfile,
     status: state.status,
     phase: state.phase,
     agentConfig: state.agentConfig,
@@ -446,7 +444,7 @@ export function renderHumanRunUsage(snapshot: NealRunUsageSnapshot) {
     '',
     `Run: ${snapshot.runId}`,
     `Plan: ${displayPath(snapshot.cwd, snapshot.planDoc)}`,
-    `Mode: ${snapshot.topLevelMode}${snapshot.executionProfile === 'shadow' ? ' (shadow)' : ''}`,
+    `Mode: ${snapshot.topLevelMode}`,
     `Status: ${snapshot.status} / ${snapshot.phase}`,
     renderCostSummary(aggregate),
     '',
