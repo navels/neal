@@ -70,6 +70,17 @@ test('computeRateCostUsd subtracts cached tokens from the inclusive input (no do
   assert.equal(cost, 0.00492);
 });
 
+test('computeRateCostUsd supports nested AI SDK usage without double-billing cache reads', () => {
+  const cost = computeRateCostUsd(
+    {
+      inputTokens: { total: 1000, noCache: 600, cacheRead: 400, cacheWrite: 0 },
+      outputTokens: { total: 200, text: 150, reasoning: 50 },
+    },
+    PRICING,
+  );
+  assert.equal(cost, 0.00492);
+});
+
 test('computeRateCostUsd maps snake_case fields identically', () => {
   const cost = computeRateCostUsd(
     { input_tokens: 1000, cached_input_tokens: 400, output_tokens: 200 },
