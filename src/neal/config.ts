@@ -18,6 +18,8 @@ export type NealConfigFile = {
     plan_review_debt_round_threshold?: number | null;
     inactivity_timeout_ms?: number | null;
     api_retry_limit?: number | null;
+    openai_compatible_max_steps?: number | null;
+    openai_compatible_advisor_max_steps?: number | null;
     agent_turn_startup_timeout_ms?: number | null;
     agent_turn_retry_limit?: number | null;
     interactive_blocked_recovery_max_turns?: number | null;
@@ -81,6 +83,8 @@ type NealResolvedConfig = {
     plan_review_debt_round_threshold: number;
     inactivity_timeout_ms: number;
     api_retry_limit: number;
+    openai_compatible_max_steps: number;
+    openai_compatible_advisor_max_steps: number;
     agent_turn_startup_timeout_ms: number;
     agent_turn_retry_limit: number;
     interactive_blocked_recovery_max_turns: number;
@@ -136,6 +140,8 @@ const DEFAULT_CONFIG: NealResolvedConfig = {
     plan_review_debt_round_threshold: 3,
     inactivity_timeout_ms: 600_000,
     api_retry_limit: 10,
+    openai_compatible_max_steps: 48,
+    openai_compatible_advisor_max_steps: 24,
     agent_turn_startup_timeout_ms: 300_000,
     agent_turn_retry_limit: 1,
     interactive_blocked_recovery_max_turns: 3,
@@ -235,6 +241,18 @@ function parseNumberValue(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function parsePositiveIntegerValue(value: unknown, fieldPath: string): number | undefined {
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+    return undefined;
+  }
+
+  const parsed = parseNumberValue(value);
+  if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Invalid ${fieldPath}: expected a positive integer.`);
+  }
+  return parsed;
 }
 
 function parseStringValue(value: unknown): string | undefined {
@@ -469,6 +487,28 @@ export function getApiRetryLimit(cwd = process.cwd()) {
   return (
     parseNumberValue(config.neal?.api_retry_limit) ??
     DEFAULT_CONFIG.neal.api_retry_limit
+  );
+}
+
+export function getOpenAICompatibleMaxSteps(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parsePositiveIntegerValue(
+      config.neal?.openai_compatible_max_steps,
+      'neal.openai_compatible_max_steps',
+    ) ??
+    DEFAULT_CONFIG.neal.openai_compatible_max_steps
+  );
+}
+
+export function getOpenAICompatibleAdvisorMaxSteps(cwd = process.cwd()) {
+  const config = loadConfigFile(cwd);
+  return (
+    parsePositiveIntegerValue(
+      config.neal?.openai_compatible_advisor_max_steps,
+      'neal.openai_compatible_advisor_max_steps',
+    ) ??
+    DEFAULT_CONFIG.neal.openai_compatible_advisor_max_steps
   );
 }
 

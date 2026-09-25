@@ -24,6 +24,14 @@
 #   # Maximum retry attempts for transient API/internal provider failures.
 #   api_retry_limit: 10
 #
+#   # Maximum model turns in an OpenAI-compatible coder tool loop before the
+#   # attempt fails. Increase this for large scopes or tool-heavy models.
+#   openai_compatible_max_steps: 48
+#
+#   # Maximum model turns in an OpenAI-compatible structured-advisor/reviewer
+#   # read-only tool loop before the round fails.
+#   openai_compatible_advisor_max_steps: 24
+#
 #   # Milliseconds an agent turn may stay silent after starting, with no
 #   # observable progress (no tool use, commands, file changes, or assistant
 #   # text), before neal aborts and retries the turn; once any progress is

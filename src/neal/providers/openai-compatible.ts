@@ -48,7 +48,12 @@ import {
   type ToolSet,
 } from 'ai';
 
-import { getOpenAICompatibleSettings, type OpenAICompatibleSettings } from '../config.js';
+import {
+  getOpenAICompatibleAdvisorMaxSteps,
+  getOpenAICompatibleMaxSteps,
+  getOpenAICompatibleSettings,
+  type OpenAICompatibleSettings,
+} from '../config.js';
 import { withOpenRouterRouting } from './openrouter-routing.js';
 import { resolveRateCost, type ProviderPricing } from './pricing.js';
 import {
@@ -78,26 +83,15 @@ import type {
 const OPENAI_COMPATIBLE_PROVIDER_ID = 'openai-compatible';
 
 /**
- * Step cap for the coder loop: the maximum number of successful model turns
- * per prompt before the adapter fails the attempt with `provider_failed`.
- * This is a constant, not a config knob, by design. It originally shipped at
- * 24, and live runs on `examples/issue-triage-js` hit that cap repeatedly on
- * ordinary scopes (one tool call per turn means read/inspect/edit/test cycles
- * consume turns quickly), so it was raised to 48. Raise it again only on live
- * evidence that the cap binds on real projects, not speculatively.
+ * Default step cap for the coder loop. Repositories can override it with
+ * `neal.openai_compatible_max_steps`; keeping the exported default preserves
+ * the provider's established 48-turn behavior when no override is configured.
  */
 export const OPENAI_COMPATIBLE_MAX_STEPS = 48;
 
 /**
- * Step cap for the structured-advisor read-only tool loop: the maximum number
- * of successful model turns per round before the adapter fails the round with
- * a non-retryable `provider_failed`. A constant, not a config knob, by design
- * (mirroring `OPENAI_COMPATIBLE_MAX_STEPS`). It ships at half the coder cap
- * because reviews are bounded inspections, not implementations: the advisor
- * only reads, lists, and greps before judging, while the coder's
- * read/inspect/edit/test cycles consume turns far faster. Provider telemetry
- * records tool turns per review round; raise this cap only on live evidence
- * that reviews hit it, the same way the coder cap moved 24 -> 48.
+ * Default step cap for the structured-advisor read-only tool loop.
+ * Repositories can override it with `neal.openai_compatible_advisor_max_steps`.
  */
 export const OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS = 24;
 
@@ -599,15 +593,17 @@ type AgentStepCap = {
   loopDescription: string;
 };
 
-const CODER_STEP_CAP: AgentStepCap = {
-  limit: OPENAI_COMPATIBLE_MAX_STEPS,
-  constantName: 'OPENAI_COMPATIBLE_MAX_STEPS',
-  loopDescription: 'coder loop',
-};
-
-function advisorStepCap(label: string): AgentStepCap {
+function coderStepCap(cwd: string): AgentStepCap {
   return {
-    limit: OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS,
+    limit: getOpenAICompatibleMaxSteps(cwd),
+    constantName: 'OPENAI_COMPATIBLE_MAX_STEPS',
+    loopDescription: 'coder loop',
+  };
+}
+
+function advisorStepCap(label: string, cwd: string): AgentStepCap {
+  return {
+    limit: getOpenAICompatibleAdvisorMaxSteps(cwd),
     constantName: 'OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS',
     loopDescription: `${label} advisor loop`,
   };
@@ -1183,7 +1179,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         sessionHandle,
         inactivityTimeoutMs: args.inactivityTimeoutMs,
         apiRetryLimit: 0,
-        stepCap: CODER_STEP_CAP,
+        stepCap: coderStepCap(args.cwd),
         includeStepsTelemetry: false,
         sleep: this.options.sleep ?? defaultSleep,
         signal: args.signal,
@@ -1256,7 +1252,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         label: args.label,
         inactivityTimeoutMs: args.inactivityTimeoutMs,
         apiRetryLimit: args.apiRetryLimit ?? 0,
-        stepCap: CODER_STEP_CAP,
+        stepCap: coderStepCap(args.cwd),
         includeStepsTelemetry: false,
         sleep: this.options.sleep ?? defaultSleep,
         signal: args.signal,
@@ -1518,7 +1514,7 @@ class OpenAICompatibleStructuredAdvisorAdapter implements StructuredAdvisorAdapt
         label: args.label,
         inactivityTimeoutMs: args.inactivityTimeoutMs,
         apiRetryLimit: args.apiRetryLimit,
-        stepCap: advisorStepCap(args.label),
+        stepCap: advisorStepCap(args.label, args.cwd),
         includeStepsTelemetry: true,
         sleep: this.options.sleep ?? defaultSleep,
         // Caller cancellation is wired into every turn — the read-only tool
