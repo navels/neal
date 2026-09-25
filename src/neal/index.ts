@@ -7,6 +7,7 @@ import process from 'node:process';
 import {
   buildUsageLines,
 } from './cli.js';
+import { runChangesCommand } from './commands/changes.js';
 import { runCheckCommand } from './commands/check.js';
 import { runCompatCommand } from './commands/compat.js';
 import { runNewRunCommand } from './commands/new-run.js';
@@ -75,6 +76,11 @@ async function main() {
 
   if (args[0] === 'status') {
     await runStatusCommand(args);
+    return;
+  }
+
+  if (args[0] === 'changes') {
+    await runChangesCommand(args);
     return;
   }
 
