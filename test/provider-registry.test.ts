@@ -438,7 +438,6 @@ test('openai-compatible writer handles satisfy Neal resume while reviewer handle
       plannerSessionHandle: 'openai-compatible:v1:111111111111111111111111',
       coderSessionHandle: 'openai-compatible:v1:222222222222222222222222',
       reviewerSessionHandle: null,
-      executionProfile: 'normal',
     }),
   );
 
@@ -448,7 +447,6 @@ test('openai-compatible writer handles satisfy Neal resume while reviewer handle
         plannerSessionHandle: null,
         coderSessionHandle: null,
         reviewerSessionHandle: 'openai-compatible:reviewer-session',
-        executionProfile: 'normal',
       }),
     /reviewer role: .*missing session resume/,
   );
