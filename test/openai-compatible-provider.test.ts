@@ -9,9 +9,9 @@
  * envelope repair (prompt-only repair turns on the same message history) and
  * repair exhaustion; the transient-retry battery (thrown 429,
  * missing-content turns, the exact api_retry tool_progress shape,
- * apiRetryLimit: 0 rethrow); step-cap exhaustion; null session semantics
- * (onSessionStarted never invoked, sessionHandle null, resumeHandle ->
- * session_unavailable); and the cancellation/inactivity battery (abort
+ * apiRetryLimit: 0 rethrow); step-cap exhaustion; durable coder-session
+ * handles, mid-tool-loop resume, finalization resume, invalid-handle
+ * rejection; and the cancellation/inactivity battery (abort
  * signal observed inside the SDK call, caller abort vs inactivity expiry
  * disambiguation, retry/no-retry behavior under apiRetryLimit).
  *
@@ -291,6 +291,7 @@ function expectProviderError(expected: {
   kind: NealProviderError['kind'];
   retryable: boolean;
   messagePattern?: RegExp;
+  sessionHandle?: 'present' | 'null';
 }) {
   return (error: unknown) => {
     assert.ok(error instanceof NealProviderError, `expected NealProviderError, got ${String(error)}`);
@@ -300,12 +301,11 @@ function expectProviderError(expected: {
     if (expected.messagePattern) {
       assert.match(error.message, expected.messagePattern);
     }
-    // The synthetic session handle is events-only: thrown errors must never
-    // carry it, because the orchestrator persists `error.sessionHandle` into
-    // `state.coderSessionHandle` on coder-phase and final-completion failures
-    // and a persisted handle makes resume demand session_resume support,
-    // which this provider declares false.
-    assert.equal(error.sessionHandle, null, 'thrown NealProviderError must not carry a session handle');
+    if (expected.sessionHandle === 'present') {
+      assert.match(String(error.sessionHandle), /^openai-compatible:v1:/);
+    } else if (expected.sessionHandle === 'null') {
+      assert.equal(error.sessionHandle, null);
+    }
     return true;
   };
 }
@@ -330,9 +330,8 @@ test('scripted tool-call run returns the structured payload with the ordered eve
   });
 
   assert.deepEqual(result.structured, { done: true });
-  // Session semantics: handle never persisted, callback never invoked.
-  assert.equal(result.sessionHandle, null);
-  assert.deepEqual(sessionStartedCalls, []);
+  assert.match(String(result.sessionHandle), /^openai-compatible:v1:/);
+  assert.deepEqual(sessionStartedCalls, [result.sessionHandle]);
 
   // Tool loop to the zero-tool-call completion turn, then exactly one
   // finalization turn; structured_output_received is emitted by the adapter
@@ -362,8 +361,8 @@ test('scripted tool-call run returns the structured payload with the ordered eve
 
   const sessionStarted = events[0];
   assert.equal(sessionStarted.type, 'session_started');
-  assert.match(String(sessionStarted.sessionHandle), /^openai-compatible:/);
-  // Every event carries the same synthetic events-only handle and label.
+  assert.match(String(sessionStarted.sessionHandle), /^openai-compatible:v1:/);
+  // Every event carries the same durable coder-session handle and label.
   for (const event of events) {
     assert.equal(event.provider, 'openai-compatible');
     assert.equal(event.role, 'coder');
@@ -1000,6 +999,7 @@ test('step-cap exhaustion throws provider_failed naming OPENAI_COMPATIBLE_MAX_ST
       kind: 'provider_failed',
       retryable: false,
       messagePattern: new RegExp(`OPENAI_COMPATIBLE_MAX_STEPS cap of ${OPENAI_COMPATIBLE_MAX_STEPS}`),
+      sessionHandle: 'present',
     }),
   );
   // 48 because the original 24-turn cap bound repeatedly on ordinary
@@ -1011,7 +1011,7 @@ test('step-cap exhaustion throws provider_failed naming OPENAI_COMPATIBLE_MAX_ST
   );
 });
 
-test('a non-null resumeHandle throws session_unavailable from both coder methods', async () => {
+test('an invalid or missing durable resumeHandle throws session_unavailable before a model turn', async () => {
   const cwd = await createWorkDir();
   const model = scriptedModel([jsonPayloadResponse]);
   const adapter = createAdapter({ model });
@@ -1026,7 +1026,7 @@ test('a non-null resumeHandle throws session_unavailable from both coder methods
     expectProviderError({
       kind: 'session_unavailable',
       retryable: false,
-      messagePattern: /never persists session handles/,
+      messagePattern: /unavailable or invalid/,
     }),
   );
 
@@ -1035,15 +1035,139 @@ test('a non-null resumeHandle throws session_unavailable from both coder methods
       cwd,
       prompt: 'continue',
       inactivityTimeoutMs: 5_000,
-      resumeHandle: 'openai-compatible:corrupted:handle',
+      resumeHandle: 'openai-compatible:v1:000000000000000000000000',
     }),
-    expectProviderError({ kind: 'session_unavailable', retryable: false }),
+    expectProviderError({
+      kind: 'session_unavailable',
+      retryable: false,
+      messagePattern: /unavailable or invalid/,
+    }),
   );
-  // The model was never called: the corrupted handle is rejected up front.
   assert.equal(model.doGenerateCalls.length, 0);
 });
 
-test('runPrompt runs the same loop and returns the final assistant text with a null handle', async () => {
+test('step-cap failure resumes the same tool-loop history without duplicating the user prompt', async () => {
+  const cwd = await createWorkDir();
+  const producers: Producer[] = Array.from(
+    { length: OPENAI_COMPATIBLE_MAX_STEPS },
+    (_, index) => () => listDirToolCallResponse(`call-${index + 1}`),
+  );
+  producers.push(
+    () => textResponse('Work is verified complete after resume.'),
+    jsonPayloadResponse,
+  );
+  const model = scriptedModel(producers);
+  const adapter = createAdapter({ model });
+  const { sink } = collectEvents();
+  let resumeHandle: string | null = null;
+
+  await assert.rejects(
+    adapter.runStructuredPrompt<TestPayload>({ ...structuredArgs(cwd, sink), apiRetryLimit: 0 }),
+    (error: unknown) => {
+      assert.ok(error instanceof NealProviderError);
+      assert.equal(error.kind, 'provider_failed');
+      assert.match(String(error.sessionHandle), /^openai-compatible:v1:/);
+      resumeHandle = error.sessionHandle;
+      return true;
+    },
+  );
+  assert.ok(resumeHandle);
+
+  const resumed = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, sink),
+    apiRetryLimit: 0,
+    resumeHandle,
+  });
+  assert.equal(resumed.sessionHandle, resumeHandle);
+  assert.deepEqual(resumed.structured, { done: true });
+  assert.equal(model.doGenerateCalls.length, OPENAI_COMPATIBLE_MAX_STEPS + 2);
+
+  const resumedPrompt = JSON.stringify(model.doGenerateCalls[OPENAI_COMPATIBLE_MAX_STEPS].prompt);
+  assert.equal((resumedPrompt.match(/Do the scoped task\./g) ?? []).length, 1);
+});
+
+test('structured finalization failure resumes at finalization without replaying the tool loop', async () => {
+  const cwd = await createWorkDir();
+  const model = scriptedModel([
+    () => textResponse('Tool work is complete.'),
+    transient429,
+    jsonPayloadResponse,
+  ]);
+  const adapter = createAdapter({ model });
+  const { sink } = collectEvents();
+  let resumeHandle: string | null = null;
+
+  await assert.rejects(
+    adapter.runStructuredPrompt<TestPayload>({ ...structuredArgs(cwd, sink), apiRetryLimit: 0 }),
+    (error: unknown) => {
+      assert.ok(error instanceof NealProviderError);
+      assert.equal(error.kind, 'api_error');
+      assert.match(String(error.sessionHandle), /^openai-compatible:v1:/);
+      resumeHandle = error.sessionHandle;
+      return true;
+    },
+  );
+  assert.ok(resumeHandle);
+  assert.equal(model.doGenerateCalls.length, 2);
+
+  const resumed = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, sink),
+    apiRetryLimit: 0,
+    resumeHandle,
+  });
+  assert.deepEqual(resumed.structured, { done: true });
+  assert.equal(resumed.sessionHandle, resumeHandle);
+  assert.equal(model.doGenerateCalls.length, 3);
+
+  const finalPrompt = JSON.stringify(model.doGenerateCalls[2].prompt);
+  assert.equal((finalPrompt.match(/Do the scoped task\./g) ?? []).length, 1);
+  assert.equal((finalPrompt.match(/Return the final test_payload control payload now/g) ?? []).length, 1);
+});
+
+test('a completed writer session carries context into the next Neal round without re-firing session start', async () => {
+  const cwd = await createWorkDir();
+  const model = scriptedModel([
+    () => textResponse('First writer round complete.'),
+    jsonPayloadResponse,
+    () => textResponse('Second writer round complete with prior context.'),
+    jsonPayloadResponse,
+  ]);
+  const adapter = createAdapter({ model });
+  const { sink } = collectEvents();
+  const started: string[] = [];
+
+  const first = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, sink),
+    prompt: 'First Neal writer phase.',
+    apiRetryLimit: 0,
+    onSessionStarted: (handle) => {
+      started.push(handle);
+    },
+  });
+  assert.ok(first.sessionHandle);
+  assert.deepEqual(started, [first.sessionHandle]);
+
+  const second = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, sink),
+    prompt: 'Second Neal writer phase.',
+    apiRetryLimit: 0,
+    resumeHandle: first.sessionHandle,
+    onSessionStarted: (handle) => {
+      started.push(handle);
+    },
+  });
+
+  assert.equal(second.sessionHandle, first.sessionHandle);
+  assert.deepEqual(second.structured, { done: true });
+  assert.deepEqual(started, [first.sessionHandle]);
+
+  const secondRoundPrompt = JSON.stringify(model.doGenerateCalls[2].prompt);
+  assert.equal((secondRoundPrompt.match(/First Neal writer phase\./g) ?? []).length, 1);
+  assert.equal((secondRoundPrompt.match(/Second Neal writer phase\./g) ?? []).length, 1);
+  assert.match(secondRoundPrompt, /First writer round complete\./);
+});
+
+test('runPrompt runs the same loop and returns a durable session handle', async () => {
   const cwd = await createWorkDir();
   const model = scriptedModel([
     () => listDirToolCallResponse('call-1'),
@@ -1064,8 +1188,8 @@ test('runPrompt runs the same loop and returns the final assistant text with a n
   });
 
   assert.equal(result.finalResponse, 'All requested changes are in place.');
-  assert.equal(result.sessionHandle, null);
-  assert.deepEqual(sessionStartedCalls, []);
+  assert.match(String(result.sessionHandle), /^openai-compatible:v1:/);
+  assert.deepEqual(sessionStartedCalls, [result.sessionHandle]);
   // No structured-protocol events on the unstructured path.
   assert.ok(!events.some((event) => event.type === 'structured_output_received'));
   assert.equal(events.filter((event) => event.type === 'turn_completed').length, 2);
