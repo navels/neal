@@ -1011,6 +1011,34 @@ test('step-cap exhaustion throws provider_failed naming OPENAI_COMPATIBLE_MAX_ST
   );
 });
 
+test('coder step cap honors neal.openai_compatible_max_steps', async () => {
+  const cwd = await createWorkDir();
+  await writeFile(
+    path.join(cwd, 'neal.yml'),
+    'neal:\n  openai_compatible_max_steps: 2\n',
+    'utf8',
+  );
+  let calls = 0;
+  const model = scriptedModel([
+    () => {
+      calls += 1;
+      return listDirToolCallResponse(`call-${calls}`);
+    },
+  ]);
+  const adapter = createAdapter({ model });
+  const { sink } = collectEvents();
+
+  await assert.rejects(
+    adapter.runStructuredPrompt<TestPayload>({ ...structuredArgs(cwd, sink), apiRetryLimit: 0 }),
+    expectProviderError({
+      kind: 'provider_failed',
+      retryable: false,
+      messagePattern: /OPENAI_COMPATIBLE_MAX_STEPS cap of 2/,
+    }),
+  );
+  assert.equal(model.doGenerateCalls.length, 2);
+});
+
 test('a non-null resumeHandle throws session_unavailable from both coder methods', async () => {
   const cwd = await createWorkDir();
   const model = scriptedModel([jsonPayloadResponse]);
@@ -1777,6 +1805,34 @@ test('advisor: step-cap exhaustion throws provider_failed naming OPENAI_COMPATIB
   const providerError = events.find((event) => event.type === 'provider_error');
   assert.ok(providerError && providerError.type === 'provider_error');
   assert.equal(providerError.errorKind, 'provider_failed');
+});
+
+test('advisor step cap honors neal.openai_compatible_advisor_max_steps', async () => {
+  const cwd = await createWorkDir();
+  await writeFile(
+    path.join(cwd, 'neal.yml'),
+    'neal:\n  openai_compatible_advisor_max_steps: 2\n',
+    'utf8',
+  );
+  let calls = 0;
+  const model = scriptedModel([
+    () => {
+      calls += 1;
+      return listDirToolCallResponse(`call-${calls}`);
+    },
+  ]);
+  const adapter = createAdvisorAdapter({ model });
+  const { sink } = collectEvents();
+
+  await assert.rejects(
+    adapter.runStructuredRound<TestPayload>(advisorArgs(cwd, sink)),
+    expectProviderError({
+      kind: 'provider_failed',
+      retryable: false,
+      messagePattern: /OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS cap of 2/,
+    }),
+  );
+  assert.equal(model.doGenerateCalls.length, 2);
 });
 
 test('advisor: a transient failure mid-loop retries within apiRetryLimit and the round completes', async () => {
