@@ -1,4 +1,5 @@
 import { formatMaybePublicPhase } from './phase-display.js';
+import { normalizeProviderUsage } from './provider-usage.js';
 import type { RunEvent } from './verification-events.js';
 
 export type RunUsageTotals = {
@@ -97,28 +98,15 @@ function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function numberValue(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
 function addUsage(target: RunUsageTotals, value: unknown) {
-  if (!isRecord(value)) {
-    return;
-  }
-
-  target.inputTokens += numberValue(value.input_tokens) + numberValue(value.inputTokens);
-  target.cachedInputTokens += numberValue(value.cached_input_tokens) + numberValue(value.cachedInputTokens);
-  target.cacheCreationInputTokens +=
-    numberValue(value.cache_creation_input_tokens) + numberValue(value.cacheCreationInputTokens);
-  target.cacheReadInputTokens += numberValue(value.cache_read_input_tokens) + numberValue(value.cacheReadInputTokens);
-  target.outputTokens += numberValue(value.output_tokens) + numberValue(value.outputTokens);
-  target.reasoningOutputTokens +=
-    numberValue(value.reasoning_output_tokens) + numberValue(value.reasoningOutputTokens);
-  target.totalTokens += numberValue(value.total_tokens) + numberValue(value.totalTokens);
+  const normalized = normalizeProviderUsage(value);
+  target.inputTokens += normalized.inputTokens;
+  target.cachedInputTokens += normalized.cachedInputTokens;
+  target.cacheCreationInputTokens += normalized.cacheCreationInputTokens;
+  target.cacheReadInputTokens += normalized.cacheReadInputTokens;
+  target.outputTokens += normalized.outputTokens;
+  target.reasoningOutputTokens += normalized.reasoningOutputTokens;
+  target.totalTokens += normalized.totalTokens;
 }
 
 function hasUsage(usage: RunUsageTotals) {
