@@ -600,6 +600,7 @@ providers:
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
     default_model: deepseek-chat
+    structured_output_mode: json_object
 
 agent:
   coder:
@@ -643,6 +644,13 @@ Settings resolve config-first with environment fallbacks:
 - model: the role-level `agent.<role>.model` override, else
   `providers.openai_compatible.default_model`, else `OPENAI_COMPATIBLE_MODEL`.
   One of these is required.
+- `structured_output_mode`: optional transport capability, `json_schema`
+  (default) or `json_object`. Choose `json_schema` when the endpoint natively
+  enforces JSON Schema; choose `json_object` when the endpoint supports
+  OpenAI-compatible JSON mode but not schema-enforced response formats (direct
+  DeepSeek Chat Completions is one example). In `json_object` mode the
+  transport guarantees valid JSON and Neal applies the same protocol schema
+  validator locally.
 - `headers`: optional string-to-string map of extra HTTP headers (useful for
   OpenRouter attribution headers).
 - `pricing`: an **optional override** for per-million-token rates. It is no
