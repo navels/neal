@@ -504,9 +504,8 @@ export async function runPlanningResponsePhase(
   // Top-level `neal plan` refinement (reviewMode === 'plan', i.e. !derivedPlanReview) is normally
   // authored by a persisted planner session, so a missing handle stays a hard error for
   // resume-capable planner providers. Derived-plan revisions are authored by the coder and create
-  // no planner session, and no-resume planner providers (`supportsSessionResume: false`, e.g.
-  // openai-compatible) never persist a planner handle at all — they start a
-  // fresh planner session instead.
+  // no planner session, and providers that genuinely lack session resume never persist a planner
+  // handle at all — both cases start a fresh planner session instead.
   if (
     !derivedPlanReview &&
     !state.plannerSessionHandle &&
