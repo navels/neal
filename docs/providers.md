@@ -538,13 +538,13 @@ Role support and behavior:
   scopes stay committed. Only the in-flight scope is redone. Top-level
   plan-refinement revision rounds likewise start a fresh planner session per
   round instead of resuming the planning conversation.
-- Step caps: each coder prompt's tool loop is bounded by the exported
-  `OPENAI_COMPATIBLE_MAX_STEPS` constant (currently `48` model turns per
-  prompt). Structured-advisor/reviewer rounds use the smaller exported
-  `OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS` constant (currently `24`: reviews are
-  bounded inspections, not implementations). Reaching either cap fails the
-  attempt with a non-retryable `provider_failed` error naming the cap. There
-  are no config knobs for the caps.
+- Step caps: each coder prompt's tool loop defaults to
+  `OPENAI_COMPATIBLE_MAX_STEPS` (currently `48` model turns per prompt), and
+  structured-advisor/reviewer rounds default to
+  `OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS` (currently `24`). Repositories can
+  override those defaults with `neal.openai_compatible_max_steps` and
+  `neal.openai_compatible_advisor_max_steps`. Reaching either cap fails the
+  attempt with a non-retryable `provider_failed` error naming the cap.
 - Reviewer telemetry: advisor rounds report cumulative per-tool call and
   error counts plus a `steps` count (model turns consumed) under
   `providerData` on `turn_completed` / `usage_reported` events, so
@@ -592,9 +592,14 @@ models on a disposable project before using them on real work.
 
 Add a `providers.openai_compatible` block (repo `neal.yml` overrides
 `~/.neal/config.yml`, matching normal config precedence) and point one or
-more roles at the provider. A worked DeepSeek example:
+more roles at the provider. Runtime step caps are optional `neal` settings;
+for example, a tool-heavy coder can raise the default 48-turn cap to 200
+without changing the advisor cap:
 
 ```yaml
+neal:
+  openai_compatible_max_steps: 200
+
 providers:
   openai_compatible:
     base_url: https://api.deepseek.com
@@ -633,7 +638,13 @@ OpenRouter config above routes planning through `openai-compatible` too.
 Structured-advisor rounds additionally honor a neal-internal round-level model
 override first.
 
-Settings resolve config-first with environment fallbacks:
+The loop-cap settings are positive integers:
+
+- `neal.openai_compatible_max_steps`: coder tool-loop cap; default `48`.
+- `neal.openai_compatible_advisor_max_steps`: structured-advisor/reviewer
+  read-only tool-loop cap; default `24`.
+
+Provider connection settings resolve config-first with environment fallbacks:
 
 - `base_url`: `providers.openai_compatible.base_url`, else
   `OPENAI_COMPATIBLE_BASE_URL`. Required.
