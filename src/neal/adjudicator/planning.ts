@@ -68,10 +68,10 @@ export function isDerivedPlanReviewState(state: OrchestrationState) {
 
 // The planner role runs through the coder adapter, so its session-resume capability comes from
 // the provider's coder capabilities. Providers that declare `supportsSessionResume: false`
-// (openai-compatible) never persist a planner session handle — a null handle is
-// their expected steady state, so top-level plan-refinement responses must start a fresh planner
-// session for them instead of treating the missing handle as corrupted state. Resume-capable
-// planner providers keep the hard invariant: a missing handle there is a genuine violation.
+// never persist a planner session handle, so top-level plan-refinement responses start a fresh
+// planner session for them instead of treating the missing handle as corrupted state. Resume-capable
+// planner providers, including openai-compatible, keep the hard invariant: a missing handle there
+// is a genuine violation.
 export function plannerProviderStartsFreshSessions(planner: AgentRoleConfig): boolean {
   return !getProviderDefinition(planner.provider).capabilities.coder.supportsSessionResume;
 }
@@ -561,9 +561,8 @@ export async function runPlanningResponseAdjudication(args: {
   // planner session, so a missing handle is a genuine invariant violation for resume-capable
   // planner providers and must keep throwing. Two paths legitimately run without one:
   // derived-plan revisions (reviewMode === 'derived-plan') are authored by the coder during
-  // coder_scope and never create a planner session, and no-resume planner providers
-  // (`supportsSessionResume: false`) never persist a handle at all. Both start a fresh planner
-  // session (resumeHandle: null).
+  // coder_scope and never create a planner session, and no-resume planner providers never persist
+  // a handle at all. Both start a fresh planner session (resumeHandle: null).
   if (
     context.reviewMode === 'plan' &&
     !args.state.plannerSessionHandle &&
