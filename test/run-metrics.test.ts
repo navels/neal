@@ -125,6 +125,27 @@ test('summarizeRunMetrics reports phase timing, command counts, provider turns, 
   assert.match(markdown, /\| anthropic-claude \/ reviewer:final \| 1 \| - \| - \| - \| 50 \| 7 \| - \| - \|/);
 });
 
+test('summarizeRunMetrics supports nested AI SDK token usage', () => {
+  const metrics = summarizeRunMetrics([
+    event('2026-05-18T00:00:00.000Z', 'provider.usage_reported', {
+      provider: 'openai-compatible',
+      role: 'coder',
+      usage: {
+        inputTokens: { total: 1_000, noCache: 700, cacheRead: 300, cacheWrite: 25 },
+        outputTokens: { total: 200, text: 150, reasoning: 50 },
+      },
+    }),
+  ]);
+
+  const bucket = metrics.providers[0];
+  assert.ok(bucket);
+  assert.equal(bucket.usage.inputTokens, 1_000);
+  assert.equal(bucket.usage.cachedInputTokens, 300);
+  assert.equal(bucket.usage.cacheCreationInputTokens, 25);
+  assert.equal(bucket.usage.outputTokens, 200);
+  assert.equal(bucket.usage.reasoningOutputTokens, 50);
+});
+
 test('summarizeRunMetrics separates non-zero commands resolved by later passing reruns', () => {
   const metrics = summarizeRunMetrics([
     event('2026-05-18T00:00:00.000Z', 'phase.start', { phase: 'coder_scope' }),
