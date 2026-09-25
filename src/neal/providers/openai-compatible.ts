@@ -22,10 +22,11 @@
  *   turn carries `output: Output.object(...)` (see
  *   `runStructuredFinalizationTurn`, shared by both paths); there are no
  *   fence instructions and no repair turns on this provider;
- * - events-only synthetic session handles: `supportsSessionResume: false`,
- *   so `args.onSessionStarted` is never invoked, returned session handles
- *   are always null, and a non-null `args.resumeHandle` is corrupted state
- *   (`session_unavailable`);
+ * - Neal-owned resumable coder sessions: the explicit AI SDK message history
+ *   is persisted under `.neal/provider-sessions/openai-compatible/` behind
+ *   an opaque session handle. Coder/planner turns resume through Neal's normal
+ *   `resumeHandle` contract; scope boundaries still clear the handle, so each
+ *   new scope starts with fresh context;
  * - a structured-advisor adapter running the same outer loop over the
  *   read-only toolset (`read_file`, `list_dir`, `grep`, `git_diff`) with its own smaller
  *   step cap (`OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS`), the same settings
@@ -35,6 +36,8 @@
  *   relying on Neal-inlined context.
  */
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import {
@@ -48,6 +51,7 @@ import {
   type ToolSet,
 } from 'ai';
 
+import { writeJsonAtomic } from '../atomic-write.js';
 import { getOpenAICompatibleSettings, type OpenAICompatibleSettings } from '../config.js';
 import { withOpenRouterRouting } from './openrouter-routing.js';
 import { resolveRateCost, type ProviderPricing } from './pricing.js';
@@ -196,21 +200,131 @@ function createOpenAICompatibleProviderError(args: {
   });
 }
 
+type OpenAICompatibleCoderOperationStage =
+  | 'tool_loop'
+  | 'finalization_pending'
+  | 'finalization';
+
+type OpenAICompatibleCoderOperation = {
+  kind: 'prompt' | 'structured_prompt';
+  label: string | null;
+  stage: OpenAICompatibleCoderOperationStage;
+};
+
+type OpenAICompatibleCoderSessionRecord = {
+  version: 1;
+  modelSlug: string;
+  messages: ModelMessage[];
+  activeOperation: OpenAICompatibleCoderOperation | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const OPENAI_COMPATIBLE_CODER_SESSION_HANDLE_PATTERN =
+  /^openai-compatible:v1:([a-f0-9]{24})$/;
+
+function buildPersistentCoderSessionHandle() {
+  return `${OPENAI_COMPATIBLE_PROVIDER_ID}:v1:${randomBytes(12).toString('hex')}`;
+}
+
 function buildSyntheticSessionHandle() {
-  // Synthetic events-only handle. This provider has no session resume;
-  // adapter methods always return sessionHandle: null and never invoke
-  // onSessionStarted, so no resumable handle is ever persisted for it.
+  // Structured-advisor sessions remain events-only and stateless.
   return `${OPENAI_COMPATIBLE_PROVIDER_ID}:${new Date().toISOString()}:${randomBytes(4).toString('hex')}`;
 }
 
+function getPersistentCoderSessionPath(cwd: string, sessionHandle: string) {
+  const match = OPENAI_COMPATIBLE_CODER_SESSION_HANDLE_PATTERN.exec(sessionHandle);
+  if (!match) {
+    throw new Error(`invalid OpenAI-compatible coder session handle: ${JSON.stringify(sessionHandle)}`);
+  }
+  return join(cwd, '.neal', 'provider-sessions', 'openai-compatible', `${match[1]}.json`);
+}
+
+function parsePersistentCoderSessionRecord(value: unknown): OpenAICompatibleCoderSessionRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('session file must contain an object');
+  }
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) {
+    throw new Error(`unsupported session version ${JSON.stringify(record.version)}`);
+  }
+  if (typeof record.modelSlug !== 'string' || record.modelSlug.length === 0) {
+    throw new Error('session modelSlug must be a non-empty string');
+  }
+  if (!Array.isArray(record.messages)) {
+    throw new Error('session messages must be an array');
+  }
+
+  let activeOperation: OpenAICompatibleCoderOperation | null = null;
+  if (record.activeOperation !== null) {
+    if (!record.activeOperation || typeof record.activeOperation !== 'object' || Array.isArray(record.activeOperation)) {
+      throw new Error('session activeOperation must be an object or null');
+    }
+    const operation = record.activeOperation as Record<string, unknown>;
+    if (operation.kind !== 'prompt' && operation.kind !== 'structured_prompt') {
+      throw new Error('session activeOperation.kind is invalid');
+    }
+    if (operation.label !== null && typeof operation.label !== 'string') {
+      throw new Error('session activeOperation.label is invalid');
+    }
+    if (
+      operation.stage !== 'tool_loop' &&
+      operation.stage !== 'finalization_pending' &&
+      operation.stage !== 'finalization'
+    ) {
+      throw new Error('session activeOperation.stage is invalid');
+    }
+    activeOperation = {
+      kind: operation.kind,
+      label: operation.label as string | null,
+      stage: operation.stage,
+    };
+  }
+
+  if (typeof record.createdAt !== 'string' || typeof record.updatedAt !== 'string') {
+    throw new Error('session timestamps are invalid');
+  }
+
+  return {
+    version: 1,
+    modelSlug: record.modelSlug,
+    messages: record.messages as ModelMessage[],
+    activeOperation,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+async function readPersistentCoderSession(cwd: string, sessionHandle: string) {
+  try {
+    const path = getPersistentCoderSessionPath(cwd, sessionHandle);
+    const raw = await readFile(path, 'utf8');
+    return parsePersistentCoderSessionRecord(JSON.parse(raw) as unknown);
+  } catch (error) {
+    throw createOpenAICompatibleProviderError({
+      message:
+        `openai-compatible coder session ${JSON.stringify(sessionHandle)} is unavailable or invalid: ` +
+        describeError(error),
+      role: 'coder',
+      sessionHandle,
+      kind: 'session_unavailable',
+      retryable: false,
+      cause: error,
+    });
+  }
+}
+
+async function writePersistentCoderSession(
+  cwd: string,
+  sessionHandle: string,
+  record: OpenAICompatibleCoderSessionRecord,
+) {
+  await writeJsonAtomic(getPersistentCoderSessionPath(cwd, sessionHandle), record);
+}
+
 function withEventsOnlySessionHandle(error: NealProviderError): NealProviderError {
-  // The synthetic session handle is events-only telemetry and must never ride
-  // on thrown errors: the orchestrator persists `error.sessionHandle` into
-  // `state.coderSessionHandle` on coder-phase and final-completion failures
-  // (src/neal/orchestrator/phases/coder.ts, src/neal/orchestrator/completion.ts),
-  // and any persisted handle makes `assertAgentConfigSupportsResume` demand
-  // session_resume support — which this provider declares false — rejecting
-  // `neal resume` for the whole run.
+  // Structured-advisor sessions are telemetry-only. They still must not leak
+  // their synthetic handle into durable writer state.
   if (error.sessionHandle === null) {
     return error;
   }
@@ -581,6 +695,10 @@ type AgentLoopState = {
   modelSlug: string;
   tools: ToolSet;
   messages: ModelMessage[];
+  persistentSession?: {
+    record: OpenAICompatibleCoderSessionRecord;
+    save: () => Promise<void>;
+  };
   toolCalls: Record<string, number>;
   toolErrors: Record<string, number>;
   steps: number;
@@ -714,8 +832,34 @@ function forwardAgentToolEvent(
  * and self-corrects or runs into the step cap. That native feedback behavior
  * is the whole strict-input contract; no coercion or repair hook wraps it.
  */
-async function runAgentToolLoop(ctx: AgentTurnContext, prompt: string): Promise<string> {
-  ctx.state.messages.push({ role: 'user', content: prompt });
+async function persistAgentLoopSession(state: AgentLoopState) {
+  if (state.persistentSession) {
+    state.persistentSession.record.updatedAt = new Date().toISOString();
+    await state.persistentSession.save();
+  }
+}
+
+function setPersistentOperationStage(
+  state: AgentLoopState,
+  stage: OpenAICompatibleCoderOperationStage,
+) {
+  if (state.persistentSession?.record.activeOperation) {
+    state.persistentSession.record.activeOperation.stage = stage;
+  }
+}
+
+async function runAgentToolLoop(
+  ctx: AgentTurnContext,
+  prompt: string,
+  options: {
+    resumeActiveOperation?: boolean;
+    persistentCompletion?: 'clear_operation' | 'finalization_pending';
+  } = {},
+): Promise<string> {
+  if (!options.resumeActiveOperation) {
+    ctx.state.messages.push({ role: 'user', content: prompt });
+    await persistAgentLoopSession(ctx.state);
+  }
   while (true) {
     if (ctx.state.steps >= ctx.stepCap.limit) {
       throw createOpenAICompatibleProviderError({
@@ -730,6 +874,14 @@ async function runAgentToolLoop(ctx: AgentTurnContext, prompt: string): Promise<
     }
     const turn = await runAgentModelTurn(ctx, { useTools: true });
     ctx.state.messages.push(...turn.responseMessages);
+    if (turn.toolCallCount === 0 && ctx.state.persistentSession?.record.activeOperation) {
+      if (options.persistentCompletion === 'clear_operation') {
+        ctx.state.persistentSession.record.activeOperation = null;
+      } else if (options.persistentCompletion === 'finalization_pending') {
+        ctx.state.persistentSession.record.activeOperation.stage = 'finalization_pending';
+      }
+    }
+    await persistAgentLoopSession(ctx.state);
     if (turn.toolCallCount > 0) {
       // Completion is structural only: a model that narrates completion
       // while still calling tools keeps looping until it makes a turn with
@@ -1088,6 +1240,7 @@ async function runStructuredFinalizationTurn<TStructured>(args: {
   protocol: StructuredJsonProtocolSpec<TStructured>;
   /** The spec's schema, narrowed to its object form by the caller's guard. */
   schema: Record<string, unknown>;
+  resumeActiveOperation?: boolean;
 }): Promise<TStructured> {
   const { ctx, protocol, schema } = args;
   // The schema (and example payload, when the spec provides one) rides in the
@@ -1104,18 +1257,25 @@ async function runStructuredFinalizationTurn<TStructured>(args: {
   if (protocol.examplePayload !== undefined) {
     promptLines.push('', 'Example payload:', JSON.stringify(protocol.examplePayload, null, 2));
   }
-  ctx.state.messages.push({ role: 'user', content: promptLines.join('\n') });
+  if (!args.resumeActiveOperation) {
+    setPersistentOperationStage(ctx.state, 'finalization');
+    ctx.state.messages.push({ role: 'user', content: promptLines.join('\n') });
+    await persistAgentLoopSession(ctx.state);
+  }
 
   const turn = await runAgentModelTurn(ctx, {
     useTools: false,
     structuredOutput: { schema, schemaLabel: protocol.schemaLabel },
   });
   ctx.state.messages.push(...turn.responseMessages);
+  await persistAgentLoopSession(ctx.state);
 
   let structured: TStructured;
   try {
     structured = protocol.validator(turn.structuredOutput);
   } catch (validationError) {
+    setPersistentOperationStage(ctx.state, 'finalization_pending');
+    await persistAgentLoopSession(ctx.state);
     throw createOpenAICompatibleProviderError({
       message:
         `openai-compatible ${ctx.label ?? ctx.role} finalization payload failed "${protocol.schemaLabel}" ` +
@@ -1164,35 +1324,54 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
   constructor(private readonly options: OpenAICompatibleAdapterOptions) {}
 
   async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
-    const sessionHandle = buildSyntheticSessionHandle();
+    let sessionHandle: string | null = args.resumeHandle ?? null;
     try {
-      this.assertNoResumeHandle(args.resumeHandle, sessionHandle);
-      const state = this.prepareLoopState({
+      const prepared = await this.prepareLoopState({
         cwd: args.cwd,
-        sessionHandle,
+        resumeHandle: args.resumeHandle,
         events: args.events,
         toolPolicy: args.toolPolicy,
       });
-      await this.emitSessionStarted({ sessionHandle, events: args.events });
+      sessionHandle = prepared.sessionHandle;
+      if (prepared.isNewSession) {
+        await args.onSessionStarted?.(sessionHandle);
+        await this.emitSessionStarted({ sessionHandle, events: args.events });
+      }
+
+      const operation = this.beginOrResumeOperation(prepared.state, sessionHandle, {
+        kind: 'prompt',
+        label: null,
+      });
+      if (operation.stage !== 'tool_loop') {
+        throw this.sessionUnavailable(
+          sessionHandle,
+          `unstructured coder operation cannot resume from stage ${JSON.stringify(operation.stage)}`,
+        );
+      }
+
       // CoderRunPromptArgs carries no apiRetryLimit: runPrompt performs no
       // in-round transient retries; the liveness supervisor and orchestrator
       // retries own recovery there.
-      const finalResponse = await runAgentToolLoop({
-        role: 'coder',
-        state,
-        sessionHandle,
-        inactivityTimeoutMs: args.inactivityTimeoutMs,
-        apiRetryLimit: 0,
-        stepCap: CODER_STEP_CAP,
-        includeStepsTelemetry: false,
-        sleep: this.options.sleep ?? defaultSleep,
-        signal: args.signal,
-        events: args.events,
-      }, args.prompt);
-      // Never persist a resumable handle for this provider, and never invoke
-      // args.onSessionStarted: the orchestrator persists that callback's
-      // handle and would then demand session_resume support.
-      return { sessionHandle: null, finalResponse };
+      const finalResponse = await runAgentToolLoop(
+        {
+          role: 'coder',
+          state: prepared.state,
+          sessionHandle,
+          inactivityTimeoutMs: args.inactivityTimeoutMs,
+          apiRetryLimit: 0,
+          stepCap: CODER_STEP_CAP,
+          includeStepsTelemetry: false,
+          sleep: this.options.sleep ?? defaultSleep,
+          signal: args.signal,
+          events: args.events,
+        },
+        args.prompt,
+        {
+          resumeActiveOperation: prepared.resumedActiveOperation,
+          persistentCompletion: 'clear_operation',
+        },
+      );
+      return { sessionHandle, finalResponse };
     } catch (error) {
       throw await this.surfaceError(error, {
         sessionHandle,
@@ -1205,14 +1384,10 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
   async runStructuredPrompt<TStructured>(
     args: CoderStructuredPromptArgs<TStructured>,
   ): Promise<CoderStructuredPromptResult<TStructured>> {
-    const sessionHandle = buildSyntheticSessionHandle();
+    let sessionHandle: string | null = args.resumeHandle ?? null;
     try {
-      this.assertNoResumeHandle(args.resumeHandle, sessionHandle);
       const protocol = args.structuredJsonProtocol;
       if (!protocol || protocol.protocol !== 'neal-json-block-v1') {
-        // The spec is still required: it carries the schema, validator, and
-        // labels that drive the SDK-native structured-output finalization
-        // turn (the fence protocol itself is never rendered here).
         throw createOpenAICompatibleProviderError({
           message:
             `openai-compatible ${args.label} prompts require the neal-json-block-v1 structured JSON ` +
@@ -1225,9 +1400,6 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         });
       }
       if (typeof protocol.schema === 'string') {
-        // Configuration error: the SDK's jsonSchema(...) needs the object
-        // form. No runtime caller passes the string arm of the spec's
-        // schema union today.
         throw createOpenAICompatibleProviderError({
           message:
             `openai-compatible ${args.label} prompts require an object-form JSON schema for ` +
@@ -1240,18 +1412,26 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         });
       }
 
-      const state = this.prepareLoopState({
+      const prepared = await this.prepareLoopState({
         cwd: args.cwd,
-        sessionHandle,
+        resumeHandle: args.resumeHandle,
         label: args.label,
         events: args.events,
         toolPolicy: args.toolPolicy,
       });
-      await this.emitSessionStarted({ sessionHandle, label: args.label, events: args.events });
+      sessionHandle = prepared.sessionHandle;
+      if (prepared.isNewSession) {
+        await args.onSessionStarted?.(sessionHandle);
+        await this.emitSessionStarted({ sessionHandle, label: args.label, events: args.events });
+      }
 
+      const operation = this.beginOrResumeOperation(prepared.state, sessionHandle, {
+        kind: 'structured_prompt',
+        label: args.label,
+      });
       const turnContext: AgentTurnContext = {
         role: 'coder',
-        state,
+        state: prepared.state,
         sessionHandle,
         label: args.label,
         inactivityTimeoutMs: args.inactivityTimeoutMs,
@@ -1263,19 +1443,35 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         events: args.events,
       };
 
-      // The tool loop runs to its normal zero-tool-call completion turn on a
-      // fence-free prompt; its assistant text stays in the shared history.
-      // Then exactly one finalization turn produces the structured payload.
-      await runAgentToolLoop(turnContext, appendResponseShapeHint(args.prompt, protocol));
+      if (operation.stage === 'tool_loop') {
+        await runAgentToolLoop(
+          turnContext,
+          appendResponseShapeHint(args.prompt, protocol),
+          {
+            resumeActiveOperation: prepared.resumedActiveOperation,
+            persistentCompletion: 'finalization_pending',
+          },
+        );
+      }
+
+      const currentStage = prepared.state.persistentSession!.record.activeOperation?.stage;
+      if (currentStage !== 'finalization_pending' && currentStage !== 'finalization') {
+        throw this.sessionUnavailable(
+          sessionHandle,
+          `structured coder operation cannot resume from stage ${JSON.stringify(currentStage)}`,
+        );
+      }
+
       const structured = await runStructuredFinalizationTurn({
         ctx: turnContext,
         protocol,
         schema: protocol.schema,
+        resumeActiveOperation: currentStage === 'finalization',
       });
 
-      // Never persist a resumable handle; args.onSessionStarted is never
-      // invoked for this provider (see runPrompt).
-      return { sessionHandle: null, structured };
+      prepared.state.persistentSession!.record.activeOperation = null;
+      await persistAgentLoopSession(prepared.state);
+      return { sessionHandle, structured };
     } catch (error) {
       throw await this.surfaceError(error, {
         sessionHandle,
@@ -1286,30 +1482,47 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
     }
   }
 
-  private assertNoResumeHandle(resumeHandle: string | null | undefined, sessionHandle: string) {
-    if (resumeHandle === undefined || resumeHandle === null) {
-      return;
+  private beginOrResumeOperation(
+    state: AgentLoopState,
+    sessionHandle: string,
+    expected: Pick<OpenAICompatibleCoderOperation, 'kind' | 'label'>,
+  ): OpenAICompatibleCoderOperation {
+    const record = state.persistentSession?.record;
+    if (!record) {
+      throw new Error('persistent coder session is missing from loop state');
     }
-    // Defensive: this provider never persists a session handle, so a
-    // non-null resume handle can only come from corrupted run state.
-    throw createOpenAICompatibleProviderError({
-      message:
-        'openai-compatible does not support session resume and never persists session handles, ' +
-        `but a resume handle was provided (${JSON.stringify(resumeHandle)}); this indicates corrupted run state.`,
-      role: 'coder',
-      sessionHandle,
-      kind: 'session_unavailable',
-      retryable: false,
-    });
+    const active = record.activeOperation;
+    if (active) {
+      if (active.kind !== expected.kind || active.label !== expected.label) {
+        throw this.sessionUnavailable(
+          sessionHandle,
+          `active operation is ${active.kind}/${JSON.stringify(active.label)}, expected ` +
+            `${expected.kind}/${JSON.stringify(expected.label)}`,
+        );
+      }
+      return active;
+    }
+
+    const operation: OpenAICompatibleCoderOperation = {
+      ...expected,
+      stage: 'tool_loop',
+    };
+    record.activeOperation = operation;
+    return operation;
   }
 
-  private prepareLoopState(args: {
+  private async prepareLoopState(args: {
     cwd: string;
-    sessionHandle: string;
+    resumeHandle?: string | null;
     label?: string | undefined;
     events?: ProviderEventSink | undefined;
     toolPolicy?: CoderRunPromptArgs['toolPolicy'];
-  }): AgentLoopState {
+  }): Promise<{
+    state: AgentLoopState;
+    sessionHandle: string;
+    isNewSession: boolean;
+    resumedActiveOperation: boolean;
+  }> {
     const resolveSettings = this.options.resolveSettings ?? getOpenAICompatibleSettings;
     const settings = resolveOpenAICompatibleSettings({
       cwd: args.cwd,
@@ -1331,15 +1544,40 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       model: settings.model,
     });
 
+    const isNewSession = !args.resumeHandle;
+    const sessionHandle = args.resumeHandle ?? buildPersistentCoderSessionHandle();
+    const now = new Date().toISOString();
+    const sessionRecord = isNewSession
+      ? {
+          version: 1 as const,
+          modelSlug: settings.model,
+          messages: [],
+          activeOperation: null,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : await readPersistentCoderSession(args.cwd, sessionHandle);
+
+    if (sessionRecord.modelSlug !== settings.model) {
+      throw this.sessionUnavailable(
+        sessionHandle,
+        `saved session uses model ${JSON.stringify(sessionRecord.modelSlug)}, current config resolves ${JSON.stringify(settings.model)}`,
+      );
+    }
+
     const state: AgentLoopState = {
       model,
       modelSlug: settings.model,
-      // Assigned immediately below; the toolset's event hook needs the state
-      // object to update the cumulative per-tool telemetry maps.
       tools: undefined as unknown as ToolSet,
-      messages: [],
+      messages: sessionRecord.messages,
+      persistentSession: {
+        record: sessionRecord,
+        save: () => writePersistentCoderSession(args.cwd, sessionHandle, sessionRecord),
+      },
       toolCalls: {},
       toolErrors: {},
+      // The cap is per adapter invocation. A resumed invocation receives a
+      // fresh turn budget while keeping the full prior message history.
       steps: 0,
       pricing: settings.pricing,
     };
@@ -1351,12 +1589,32 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         forwardAgentToolEvent(event, {
           role: 'coder',
           state,
-          sessionHandle: args.sessionHandle,
+          sessionHandle,
           label: args.label,
           events: args.events,
         }),
     });
-    return state;
+
+    if (isNewSession) {
+      await persistAgentLoopSession(state);
+    }
+
+    return {
+      state,
+      sessionHandle,
+      isNewSession,
+      resumedActiveOperation: !isNewSession && sessionRecord.activeOperation !== null,
+    };
+  }
+
+  private sessionUnavailable(sessionHandle: string | null, reason: string) {
+    return createOpenAICompatibleProviderError({
+      message: `openai-compatible coder session is unavailable: ${reason}.`,
+      role: 'coder',
+      sessionHandle,
+      kind: 'session_unavailable',
+      retryable: false,
+    });
   }
 
   private async emitSessionStarted(args: {
@@ -1376,7 +1634,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
   private async surfaceError(
     error: unknown,
     ctx: {
-      sessionHandle: string;
+      sessionHandle: string | null;
       label?: string | undefined;
       events?: ProviderEventSink | undefined;
       callerSignal?: AbortSignal | undefined;
@@ -1398,10 +1656,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       errorKind: providerError.kind,
       providerData: providerErrorData(providerError),
     });
-    // Thrown errors must not carry the events-only synthetic handle (see
-    // withEventsOnlySessionHandle): the orchestrator persists it from the
-    // error and resume would then demand session_resume support.
-    return withEventsOnlySessionHandle(providerError);
+    return providerError;
   }
 }
 
@@ -1596,7 +1851,7 @@ export const openAICompatibleProviderDefinition = {
     coder: {
       supported: true,
       toolAccess: { read: true, write: true, shell: true },
-      supportsSessionResume: false,
+      supportsSessionResume: true,
       supportsModelOverride: true,
       supportsStructuredOutput: true,
       usageReporting: 'opportunistic',
