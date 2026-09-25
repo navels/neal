@@ -725,6 +725,103 @@ test('the default model construction enables SDK structured outputs (real factor
   );
 });
 
+test('json_object mode disables transport json_schema while preserving local validation', () => {
+  const model = openAICompatibleProviderTestHooks.createDefaultOpenAICompatibleModel({
+    baseUrl: 'https://example.test/v1',
+    apiKey: 'test-key',
+    headers: {},
+    model: 'test-model',
+    structuredOutputMode: 'json_object',
+  });
+  assert.equal(
+    (model as { supportsStructuredOutputs?: unknown }).supportsStructuredOutputs,
+    false,
+  );
+});
+
+test('json_object mode gives the SDK schema-free JSON output and validates shape locally', async () => {
+  const cwd = await createWorkDir();
+  const model = scriptedModel([
+    () => textResponse('Implementation complete.'),
+    jsonPayloadResponse,
+  ]);
+  const adapter = createAdapter({
+    model,
+    settings: fakeSettings({ structuredOutputMode: 'json_object' }),
+  });
+
+  const result = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, () => {}),
+    apiRetryLimit: 0,
+  });
+
+  assert.deepEqual(result.structured, { done: true });
+  assert.deepEqual(model.doGenerateCalls[1].responseFormat, { type: 'json' });
+});
+
+test('json_object mode rejects schema-invalid JSON through Neal validation', async () => {
+  const cwd = await createWorkDir();
+  const model = scriptedModel([
+    () => textResponse('Implementation complete.'),
+    () => textResponse('{ "done": false }'),
+  ]);
+  const adapter = createAdapter({
+    model,
+    settings: fakeSettings({ structuredOutputMode: 'json_object' }),
+  });
+
+  await assert.rejects(
+    adapter.runStructuredPrompt<TestPayload>({
+      ...structuredArgs(cwd, () => {}),
+      apiRetryLimit: 0,
+    }),
+    expectProviderError({
+      kind: 'structured_output_invalid',
+      retryable: false,
+      messagePattern: /test_payload.*validation/,
+    }),
+  );
+});
+
+test('json_object mode serializes response_format=json_object on the real SDK transport', async () => {
+  const cwd = await createWorkDir();
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let calls = 0;
+  const captureFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+    calls += 1;
+    const content = calls === 1 ? 'Implementation complete.' : VALID_JSON_PAYLOAD;
+    return new Response(JSON.stringify(openAiChatCompletion(content)), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as unknown as typeof fetch;
+
+  const model = createOpenAICompatible({
+    name: 'openai-compatible',
+    baseURL: 'https://example.test/v1',
+    apiKey: 'test-key',
+    headers: {},
+    supportsStructuredOutputs: false,
+    fetch: captureFetch,
+  }).chatModel('test-model');
+
+  const adapter = openAICompatibleProviderTestHooks.createCoderAdapterWithInjection({
+    resolveSettings: () => fakeSettings({ structuredOutputMode: 'json_object' }),
+    createModel: () => model,
+    sleep: async () => {},
+  });
+
+  const result = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, () => {}),
+    apiRetryLimit: 0,
+  });
+
+  assert.deepEqual(result.structured, { done: true });
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(requestBodies[1].response_format, { type: 'json_object' });
+});
+
 test('an HTTP 400 rejection on the structured finalization turn is attributable structured_output_invalid', async () => {
   const cwd = await createWorkDir();
   // The model rejects the schema-enforced `json_schema` request with HTTP 400
