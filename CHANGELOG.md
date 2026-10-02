@@ -10,6 +10,15 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Added
+
+- `providers.openai_compatible.structured_output_mode` (`json_schema` or
+  `json_object`, default `json_schema`) for OpenAI-compatible endpoints that
+  support JSON mode but not schema-enforced output, such as direct DeepSeek.
+  In `json_object` mode neal asks for plain JSON, accepts a reply wrapped in a
+  `` ```json `` fence, and checks it with the same protocol validator. The
+  default is unchanged (#81).
+
 ## [0.6.11] - 2026-10-02
 
 ### Changed

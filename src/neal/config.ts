@@ -48,6 +48,7 @@ export type NealConfigFile = {
       base_url?: string | null;
       api_key_env?: string | null;
       default_model?: string | null;
+      structured_output_mode?: string | null;
       headers?: Record<string, unknown> | null;
       pricing?: {
         input_per_million?: number | null;
@@ -59,6 +60,7 @@ export type NealConfigFile = {
 };
 
 export type ReviewLevel = 'strict' | 'moderate' | 'lenient';
+export type OpenAICompatibleStructuredOutputMode = 'json_schema' | 'json_object';
 
 const REVIEW_LEVELS: readonly ReviewLevel[] = ['strict', 'moderate', 'lenient'];
 
@@ -67,6 +69,7 @@ export type OpenAICompatibleSettings = {
   apiKeyEnv: string;
   apiKey: string | null;
   defaultModel: string | null;
+  structuredOutputMode?: OpenAICompatibleStructuredOutputMode;
   headers: Record<string, string>;
   pricing: ProviderPricing | null;
 };
@@ -597,6 +600,23 @@ function parseOpenAICompatibleHeaders(value: unknown): Record<string, string> {
   return headers;
 }
 
+function parseOpenAICompatibleStructuredOutputMode(
+  value: unknown,
+): OpenAICompatibleStructuredOutputMode | undefined {
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+    return undefined;
+  }
+
+  const mode = typeof value === 'string' ? value.trim() : value;
+  if (mode !== 'json_schema' && mode !== 'json_object') {
+    throw new Error(
+      'Invalid providers.openai_compatible.structured_output_mode: expected "json_schema" or "json_object".',
+    );
+  }
+
+  return mode;
+}
+
 function parseOpenAICompatiblePricing(value: unknown): ProviderPricing | null {
   if (value === undefined || value === null) {
     return null;
@@ -643,6 +663,9 @@ export function getOpenAICompatibleSettings(
     parseStringValue(config?.default_model) ??
     parseStringValue(env.OPENAI_COMPATIBLE_MODEL) ??
     null;
+  const structuredOutputMode = parseOpenAICompatibleStructuredOutputMode(
+    config?.structured_output_mode,
+  );
   const headers = parseOpenAICompatibleHeaders(config?.headers);
   const pricing = parseOpenAICompatiblePricing(config?.pricing);
 
@@ -651,6 +674,7 @@ export function getOpenAICompatibleSettings(
     apiKeyEnv,
     apiKey,
     defaultModel,
+    ...(structuredOutputMode ? { structuredOutputMode } : {}),
     headers,
     pricing,
   };
