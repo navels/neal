@@ -19,6 +19,17 @@ dependency-update policy.
   `` ```json `` fence, and checks it with the same protocol validator. The
   default is unchanged (#81).
 
+### Fixed
+
+- OpenAI-compatible runs overstated cost. The AI SDK reports cached input as
+  `inputTokenDetails.cacheReadTokens`, and the cost math never read it, so
+  every cached token was billed at the full input rate. Agent loops resend the
+  whole conversation each turn, so most input is cached: on an 80%-cached turn
+  with cached input priced at a tenth of the full rate, the input cost came out
+  about 3.6 times too high. Run metrics now also count
+  cache writes and reasoning tokens from the same shape. Costs already recorded
+  in old runs aren't recomputed.
+
 ## [0.6.11] - 2026-10-02
 
 ### Changed

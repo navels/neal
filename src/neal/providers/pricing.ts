@@ -33,10 +33,10 @@ function num(value: unknown): number {
  *   count. For OpenAI-compatible Chat Completions this count is *inclusive of*
  *   cached tokens (`prompt_tokens` already contains
  *   `prompt_tokens_details.cached_tokens`; the AI SDK surfaces these as
- *   `inputTokens` and `cachedInputTokens`).
+ *   `inputTokens` and `inputTokenDetails.cacheReadTokens`).
  * - `cachedInput = cached_input_tokens + cachedInputTokens +
- *   cache_read_input_tokens + cacheReadInputTokens` — tokens billed at the
- *   cached rate.
+ *   cache_read_input_tokens + cacheReadInputTokens +
+ *   inputTokenDetails.cacheReadTokens` — tokens billed at the cached rate.
  * - `billedUncachedInput = max(0, totalInput - cachedInput)` — cached tokens
  *   are subtracted from the inclusive total so a cached token is billed once,
  *   at the cached rate, never also at the full input rate. The `max(0, ...)`
@@ -56,12 +56,19 @@ export function computeRateCostUsd(usage: unknown, pricing: ProviderPricing): nu
     ? (usage as Record<string, unknown>)
     : {}) as Record<string, unknown>;
 
+  // The AI SDK (openai-compatible) reports cached reads under
+  // `inputTokenDetails.cacheReadTokens`, alongside a plain `inputTokens` total.
+  const inputDetails = (value.inputTokenDetails && typeof value.inputTokenDetails === 'object'
+    ? value.inputTokenDetails
+    : {}) as Record<string, unknown>;
+
   const totalInput = num(value.input_tokens) + num(value.inputTokens);
   const cachedInput =
     num(value.cached_input_tokens) +
     num(value.cachedInputTokens) +
     num(value.cache_read_input_tokens) +
-    num(value.cacheReadInputTokens);
+    num(value.cacheReadInputTokens) +
+    num(inputDetails.cacheReadTokens);
   const billedUncachedInput = Math.max(0, totalInput - cachedInput);
   const output = num(value.output_tokens) + num(value.outputTokens);
 
