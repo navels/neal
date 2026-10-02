@@ -1,5 +1,4 @@
 import { formatMaybePublicPhase } from './phase-display.js';
-import { normalizeProviderUsage } from './provider-usage.js';
 import type { RunEvent } from './verification-events.js';
 
 export type RunUsageTotals = {
@@ -98,15 +97,40 @@ function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function numberValue(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function addUsage(target: RunUsageTotals, value: unknown) {
-  const normalized = normalizeProviderUsage(value);
-  target.inputTokens += normalized.inputTokens;
-  target.cachedInputTokens += normalized.cachedInputTokens;
-  target.cacheCreationInputTokens += normalized.cacheCreationInputTokens;
-  target.cacheReadInputTokens += normalized.cacheReadInputTokens;
-  target.outputTokens += normalized.outputTokens;
-  target.reasoningOutputTokens += normalized.reasoningOutputTokens;
-  target.totalTokens += normalized.totalTokens;
+  if (!isRecord(value)) {
+    return;
+  }
+
+  // The AI SDK (openai-compatible) puts cache and reasoning counts in detail
+  // objects next to plain `inputTokens`/`outputTokens` totals.
+  const inputDetails = isRecord(value.inputTokenDetails) ? value.inputTokenDetails : {};
+  const outputDetails = isRecord(value.outputTokenDetails) ? value.outputTokenDetails : {};
+
+  target.inputTokens += numberValue(value.input_tokens) + numberValue(value.inputTokens);
+  target.cachedInputTokens += numberValue(value.cached_input_tokens) + numberValue(value.cachedInputTokens);
+  target.cacheCreationInputTokens +=
+    numberValue(value.cache_creation_input_tokens) +
+    numberValue(value.cacheCreationInputTokens) +
+    numberValue(inputDetails.cacheWriteTokens);
+  target.cacheReadInputTokens +=
+    numberValue(value.cache_read_input_tokens) +
+    numberValue(value.cacheReadInputTokens) +
+    numberValue(inputDetails.cacheReadTokens);
+  target.outputTokens += numberValue(value.output_tokens) + numberValue(value.outputTokens);
+  target.reasoningOutputTokens +=
+    numberValue(value.reasoning_output_tokens) +
+    numberValue(value.reasoningOutputTokens) +
+    numberValue(outputDetails.reasoningTokens);
+  target.totalTokens += numberValue(value.total_tokens) + numberValue(value.totalTokens);
 }
 
 function hasUsage(usage: RunUsageTotals) {

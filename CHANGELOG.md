@@ -10,6 +10,32 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Added
+
+- `providers.openai_compatible.structured_output_mode` (`json_schema` or
+  `json_object`, default `json_schema`) for OpenAI-compatible endpoints that
+  support JSON mode but not schema-enforced output, such as direct DeepSeek.
+  In `json_object` mode neal asks for plain JSON, accepts a reply wrapped in a
+  `` ```json `` fence, and checks it with the same protocol validator. The
+  default is unchanged (#81).
+
+### Fixed
+
+- OpenAI-compatible runs overstated cost. The AI SDK reports cached input as
+  `inputTokenDetails.cacheReadTokens`, and the cost math never read it, so
+  every cached token was billed at the full input rate. Agent loops resend the
+  whole conversation each turn, so most input is cached: on an 80%-cached turn
+  with cached input priced at a tenth of the full rate, the input cost came out
+  about 3.6 times too high. Run metrics now also count
+  cache writes and reasoning tokens from the same shape. Costs already recorded
+  in old runs aren't recomputed.
+
+## [0.6.11] - 2026-10-02
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.280` to `0.3.287` and `@openai/codex-sdk` from `0.156.1` to `0.160.0`. Re-qualified both native adapters with `neal compat`; no behavior change.
+
 ## [0.6.10] - 2026-09-23
 
 ### Changed

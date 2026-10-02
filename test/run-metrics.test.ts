@@ -125,27 +125,6 @@ test('summarizeRunMetrics reports phase timing, command counts, provider turns, 
   assert.match(markdown, /\| anthropic-claude \/ reviewer:final \| 1 \| - \| - \| - \| 50 \| 7 \| - \| - \|/);
 });
 
-test('summarizeRunMetrics supports nested AI SDK token usage', () => {
-  const metrics = summarizeRunMetrics([
-    event('2026-05-18T00:00:00.000Z', 'provider.usage_reported', {
-      provider: 'openai-compatible',
-      role: 'coder',
-      usage: {
-        inputTokens: { total: 1_000, noCache: 700, cacheRead: 300, cacheWrite: 25 },
-        outputTokens: { total: 200, text: 150, reasoning: 50 },
-      },
-    }),
-  ]);
-
-  const bucket = metrics.providers[0];
-  assert.ok(bucket);
-  assert.equal(bucket.usage.inputTokens, 1_000);
-  assert.equal(bucket.usage.cachedInputTokens, 300);
-  assert.equal(bucket.usage.cacheCreationInputTokens, 25);
-  assert.equal(bucket.usage.outputTokens, 200);
-  assert.equal(bucket.usage.reasoningOutputTokens, 50);
-});
-
 test('summarizeRunMetrics separates non-zero commands resolved by later passing reruns', () => {
   const metrics = summarizeRunMetrics([
     event('2026-05-18T00:00:00.000Z', 'phase.start', { phase: 'coder_scope' }),
@@ -462,6 +441,31 @@ test('writeCheckpointRetrospective writes current and archived RUN_METRICS.json 
   );
   assert.equal(bucket.costUsd, 0.0123);
   assert.equal(bucket.costSource, 'rate');
+});
+
+test('run metrics count cache and reasoning tokens from the AI SDK usage shape', () => {
+  const metrics = summarizeRunMetrics([
+    event('2026-05-18T00:00:00.000Z', 'phase.start', { phase: 'coder_scope' }),
+    event('2026-05-18T00:00:10.000Z', 'provider.usage_reported', {
+      provider: 'openai-compatible',
+      role: 'coder',
+      usage: {
+        inputTokens: 1000,
+        inputTokenDetails: { noCacheTokens: 150, cacheReadTokens: 800, cacheWriteTokens: 50 },
+        outputTokens: 300,
+        outputTokenDetails: { textTokens: 180, reasoningTokens: 120 },
+        totalTokens: 1300,
+      },
+    }),
+  ]);
+
+  const usage = metrics.providers.find((bucket) => bucket.provider === 'openai-compatible')?.usage;
+  assert.ok(usage);
+  assert.equal(usage.inputTokens, 1000);
+  assert.equal(usage.cacheReadInputTokens, 800);
+  assert.equal(usage.cacheCreationInputTokens, 50);
+  assert.equal(usage.outputTokens, 300);
+  assert.equal(usage.reasoningOutputTokens, 120);
 });
 
 function event(ts: string, type: string, data: Record<string, unknown> = {}): RunEvent {

@@ -9,7 +9,6 @@
 // instead, and that provider-reported cost always wins upstream (it never
 // reaches `resolveRateCost`).
 
-import { normalizeProviderUsage } from '../provider-usage.js';
 import { RATE_CARD, type RateCard } from './rate-card.js';
 
 export type ProviderPricing = {
@@ -18,27 +17,34 @@ export type ProviderPricing = {
   outputPerMillion: number;
 };
 
+// Same coercion as `numberValue` in run-metrics.ts: non-number or non-finite
+// values normalize to 0 so the arithmetic never yields NaN.
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
 /**
  * Rate-compute the USD cost of one turn's token usage.
  *
  * Field-to-rate mapping (kept explicit so the math is reproducible from the
  * source alone):
  *
- * - `totalInput` is the normalized prompt/input count. Neal accepts both
- *   the legacy flat fields and the newer AI SDK nested
- *   `inputTokens.total/cacheRead/cacheWrite` shape. The total is inclusive
- *   of cached tokens.
- * - `cachedInput` combines normalized cached-input and cache-read counts —
- *   tokens billed at the cached rate.
+ * - `totalInput = input_tokens + inputTokens` — the reported prompt/input
+ *   count. For OpenAI-compatible Chat Completions this count is *inclusive of*
+ *   cached tokens (`prompt_tokens` already contains
+ *   `prompt_tokens_details.cached_tokens`; the AI SDK surfaces these as
+ *   `inputTokens` and `inputTokenDetails.cacheReadTokens`).
+ * - `cachedInput = cached_input_tokens + cachedInputTokens +
+ *   cache_read_input_tokens + cacheReadInputTokens +
+ *   inputTokenDetails.cacheReadTokens` — tokens billed at the cached rate.
  * - `billedUncachedInput = max(0, totalInput - cachedInput)` — cached tokens
  *   are subtracted from the inclusive total so a cached token is billed once,
  *   at the cached rate, never also at the full input rate. The `max(0, ...)`
  *   clamp is the defined handling for inconsistent counts (cached reported
  *   greater than total): treat the excess as fully cached rather than emitting a
  *   negative term.
- * - `output` is the normalized output total (including nested
- *   `outputTokens.total`). It already includes reasoning tokens for these
- *   providers, so reasoning output is not added separately.
+ * - `output = output_tokens + outputTokens` — already includes reasoning
+ *   tokens for these providers, so reasoning output is not added separately.
  * - Cache-creation tokens (`cache_creation_input_tokens`) are an Anthropic-only
  *   concept billed via provider-reported cost, not by these rates, so they are
  *   intentionally excluded here.
@@ -46,11 +52,25 @@ export type ProviderPricing = {
  * Returns 0 (never NaN) when no tokens are present.
  */
 export function computeRateCostUsd(usage: unknown, pricing: ProviderPricing): number {
-  const normalized = normalizeProviderUsage(usage);
-  const totalInput = normalized.inputTokens;
-  const cachedInput = normalized.cachedInputTokens + normalized.cacheReadInputTokens;
+  const value = (usage && typeof usage === 'object' && !Array.isArray(usage)
+    ? (usage as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+
+  // The AI SDK (openai-compatible) reports cached reads under
+  // `inputTokenDetails.cacheReadTokens`, alongside a plain `inputTokens` total.
+  const inputDetails = (value.inputTokenDetails && typeof value.inputTokenDetails === 'object'
+    ? value.inputTokenDetails
+    : {}) as Record<string, unknown>;
+
+  const totalInput = num(value.input_tokens) + num(value.inputTokens);
+  const cachedInput =
+    num(value.cached_input_tokens) +
+    num(value.cachedInputTokens) +
+    num(value.cache_read_input_tokens) +
+    num(value.cacheReadInputTokens) +
+    num(inputDetails.cacheReadTokens);
   const billedUncachedInput = Math.max(0, totalInput - cachedInput);
-  const output = normalized.outputTokens;
+  const output = num(value.output_tokens) + num(value.outputTokens);
 
   return (
     (billedUncachedInput / 1e6) * pricing.inputPerMillion +

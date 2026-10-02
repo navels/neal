@@ -997,6 +997,43 @@ test('openai_compatible config values take precedence over environment fallbacks
   });
 });
 
+test('openai_compatible structured_output_mode is opt-in and validated', async () => {
+  await withIsolatedHome(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-openai-compat-structured-mode-'));
+    await writeFile(
+      join(cwd, 'neal.yml'),
+      [
+        'providers:',
+        '  openai_compatible:',
+        '    base_url: https://api.deepseek.com',
+        '    structured_output_mode: json_object',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    clearConfigCache(cwd);
+
+    assert.equal(getOpenAICompatibleSettings(cwd, {}).structuredOutputMode, 'json_object');
+
+    await writeFile(
+      join(cwd, 'neal.yml'),
+      [
+        'providers:',
+        '  openai_compatible:',
+        '    structured_output_mode: invalid',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    clearConfigCache(cwd);
+
+    assert.throws(
+      () => getOpenAICompatibleSettings(cwd, {}),
+      /structured_output_mode.*json_schema.*json_object/,
+    );
+  });
+});
+
 test('invalid openai_compatible headers produce a clear config error', async () => {
   await withIsolatedHome(async () => {
     const nonStringValueCwd = await mkdtemp(join(tmpdir(), 'neal-config-openai-compat-bad-header-'));
