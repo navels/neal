@@ -36,6 +36,12 @@ export type ParsedStatusArgs = {
   all: boolean;
 };
 
+export type ParsedUsageArgs = {
+  runId: string | null;
+  json: boolean;
+  all: boolean;
+};
+
 export type ParsedResumeArgs = {
   runId: string | null;
   message: string | null;
@@ -74,6 +80,8 @@ export function buildUsageLines(version: string) {
     '   or: neal compat [--model <slug>] [--role coder|reviewer|planner|all] [--reference openai-codex|anthropic-claude|openai-compatible:<model>] [--json]',
     '   or: neal status [--json] [--run <run-id>]',
     '   or: neal status [--json] --all',
+    '   or: neal usage [--json] [--run <run-id>]',
+    '   or: neal usage [--json] --all',
     '   or: neal version',
     '   or: neal --version',
     '   or: neal -V',
@@ -94,6 +102,8 @@ export function buildUsageLines(version: string) {
     '  neal squash',
     '  neal status',
     '  neal status --all',
+    '  neal usage',
+    '  neal usage --all',
     '  neal check',
     '  neal compat --model deepseek/deepseek-chat --role all --reference openai-codex --json  # --model runs the slug on openai-compatible; reference roles run on the native adapter',
     '  neal setup',
@@ -378,6 +388,57 @@ export function parseStatusArgs(args: string[]): ParsedStatusArgs {
 
   if (all && runId) {
     throw new Error('neal status --all and --run are mutually exclusive');
+  }
+
+  return { runId, json: sawJson, all };
+}
+
+export function parseUsageArgs(args: string[]): ParsedUsageArgs {
+  if (args[0] !== 'usage') {
+    throw new Error(`Unknown argument: ${args[0] ?? ''}`);
+  }
+
+  let sawJson = false;
+  let all = false;
+  let runId: string | null = null;
+  let index = 1;
+
+  while (index < args.length) {
+    const flag = args[index];
+    switch (flag) {
+      case '--json':
+        if (sawJson) {
+          throw new Error('neal usage accepts --json only once');
+        }
+        sawJson = true;
+        index += 1;
+        break;
+      case '--all':
+        if (all) {
+          throw new Error('neal usage accepts --all only once');
+        }
+        all = true;
+        index += 1;
+        break;
+      case '--run': {
+        if (runId !== null) {
+          throw new Error('neal usage accepts --run only once');
+        }
+        const value = args[index + 1];
+        if (!value || value.startsWith('--')) {
+          throw new Error('neal usage --run requires a run id argument');
+        }
+        runId = value;
+        index += 2;
+        break;
+      }
+      default:
+        throw new Error(`Unknown argument: ${flag}`);
+    }
+  }
+
+  if (all && runId) {
+    throw new Error('neal usage --all and --run are mutually exclusive');
   }
 
   return { runId, json: sawJson, all };
