@@ -18,6 +18,11 @@ dependency-update policy.
   In `json_object` mode neal asks for plain JSON, accepts a reply wrapped in a
   `` ```json `` fence, and checks it with the same protocol validator. The
   default is unchanged (#81).
+- `neal usage` totals turns, tokens, and cost by provider and role for the
+  current run, one run (`--run <run-id>`), or every run in the repo (`--all`),
+  with `--json` for scripts. It reads each run's `events.ndjson`, so it covers
+  whole runs, including unfinished ones. `RUN_METRICS.json` only has whole-run
+  totals for finished runs (#82).
 
 ### Fixed
 

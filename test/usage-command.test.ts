@@ -68,8 +68,10 @@ test('usage run snapshot reads live events and latest follows the current run po
       provider: 'openai-compatible',
       role: 'coder',
       usage: {
-        inputTokens: { total: 1000, noCache: 800, cacheRead: 200, cacheWrite: 0 },
-        outputTokens: { total: 100, text: 90, reasoning: 10 },
+        inputTokens: 1000,
+        inputTokenDetails: { noCacheTokens: 800, cacheReadTokens: 200, cacheWriteTokens: 0 },
+        outputTokens: 100,
+        outputTokenDetails: { textTokens: 90, reasoningTokens: 10 },
       },
       costUsd: 0.001,
       costSource: 'rate',
@@ -87,7 +89,7 @@ test('usage run snapshot reads live events and latest follows the current run po
   const snapshot = await buildRunUsageSnapshot({ cwd, runId: 'latest' });
   assert.equal(snapshot.runId, currentId);
   assert.equal(snapshot.metrics.providers[0]?.usage.inputTokens, 1000);
-  assert.equal(snapshot.metrics.providers[0]?.usage.cachedInputTokens, 200);
+  assert.equal(snapshot.metrics.providers[0]?.usage.cacheReadInputTokens, 200);
   assert.equal(snapshot.metrics.providers[0]?.usage.outputTokens, 100);
   const rendered = renderHumanRunUsage(snapshot);
   assert.match(rendered, /openai-compatible\s+coder/);
@@ -175,8 +177,10 @@ test('human usage output renders aligned columns and semantic roles without a mi
       role: 'structured-advisor',
       label: 'review',
       usage: {
-        inputTokens: { total: 439_668, cacheRead: 409_856 },
-        outputTokens: { total: 3_008, reasoning: 1_252 },
+        inputTokens: 439_668,
+        inputTokenDetails: { cacheReadTokens: 409_856 },
+        outputTokens: 3_008,
+        outputTokenDetails: { reasoningTokens: 1_252 },
       },
     }),
   ], (initial) => ({
@@ -202,15 +206,28 @@ test('human usage output renders aligned columns and semantic roles without a mi
   assert.doesNotMatch(rendered, /\| ---/);
 });
 
-test('ambiguous same-provider finalization keeps the internal role instead of inventing a semantic role', async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), 'neal-usage-ambiguous-role-'));
+test('usage roles come from each turn\'s own provider role and label', async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-usage-roles-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
 
-  await createRun(cwd, 'run-ambiguous', [
+  // Coder and reviewer share one provider; the turns still name themselves.
+  await createRun(cwd, 'run-roles', [
     event('2026-09-21T12:00:00.000Z', 'provider.usage_reported', {
+      provider: 'openai-compatible',
+      role: 'coder',
+      label: 'Planner plan round',
+      usage: { input_tokens: 10, output_tokens: 2 },
+    }),
+    event('2026-09-21T12:00:01.000Z', 'provider.usage_reported', {
       provider: 'openai-compatible',
       role: 'structured-advisor',
       label: 'final-completion',
+      usage: { input_tokens: 10, output_tokens: 2 },
+    }),
+    event('2026-09-21T12:00:02.000Z', 'provider.usage_reported', {
+      provider: 'openai-compatible',
+      role: 'structured-advisor',
+      label: 'consultant',
       usage: { input_tokens: 10, output_tokens: 2 },
     }),
   ], (initial) => ({
@@ -222,10 +239,10 @@ test('ambiguous same-provider finalization keeps the internal role instead of in
     },
   }));
 
-  const rendered = renderHumanRunUsage(
-    await buildRunUsageSnapshot({ cwd, runId: 'run-ambiguous' }),
-  );
-  assert.match(rendered, /structured-advisor:final-completion/);
+  const rendered = renderHumanRunUsage(await buildRunUsageSnapshot({ cwd, runId: 'run-roles' }));
+  assert.match(rendered, /openai-compatible\s+planner\s/);
+  assert.match(rendered, /openai-compatible\s+reviewer:final\s/);
+  assert.match(rendered, /openai-compatible\s+consultant\s/);
 });
 
 test('aggregateUsageMetrics preserves unknown cost instead of inventing dollars', () => {
