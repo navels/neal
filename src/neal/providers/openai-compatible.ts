@@ -48,6 +48,7 @@ import {
   type ToolSet,
 } from 'ai';
 
+import { extractStructuredJsonPayload } from '../agents/structured-json.js';
 import { getOpenAICompatibleSettings, type OpenAICompatibleSettings } from '../config.js';
 import { withOpenRouterRouting } from './openrouter-routing.js';
 import { resolveRateCost, type ProviderPricing } from './pricing.js';
@@ -155,11 +156,20 @@ function createDefaultOpenAICompatibleModel(args: {
   // maxRetries: 0 on each generateText call keeps neal's own apiRetryLimit
   // loop the only retry layer for this provider.
   //
-  // json_schema is the default and preserves transport-level schema
-  // enforcement. Some OpenAI-compatible Chat Completions endpoints expose
-  // only JSON mode. For those, structured_output_mode: json_object tells the
-  // SDK to request response_format.type=json_object instead; Neal still runs
-  // the parsed object through the same protocol validator before accepting it.
+  // In the default json_schema mode, supportsStructuredOutputs: true tells the
+  // SDK to send the structured finalization turn's request with
+  // `response_format.type: 'json_schema'` carrying neal's schema (the
+  // `Output.object`/`jsonSchema` constraint in runAgentModelTurn). Without it
+  // the SDK silently drops the schema, downgrades to loose `json_object`, and
+  // emits the request-build warning "JSON response format schema is only
+  // supported with structuredOutputs": a silent schema-drop that makes neal ask
+  // for enforced JSON but receive unenforced JSON. With the flag set, a gateway
+  // that cannot honor the schema fails attributably instead.
+  //
+  // Some OpenAI-compatible endpoints expose only JSON mode. For those,
+  // structured_output_mode: json_object turns the flag off on purpose and the
+  // finalization turn asks for plain JSON (jsonModeOutput below); neal's
+  // protocol validator still checks the parsed object before accepting it.
   return createOpenAICompatible({
     name: OPENAI_COMPATIBLE_PROVIDER_ID,
     baseURL: args.baseUrl,
@@ -747,8 +757,8 @@ type AgentTurnOptions = {
   /**
    * When set, the turn is a dedicated JSON finalization turn. In
    * json_schema mode the SDK receives Output.object(schema), so the transport
-   * enforces the schema. In json_object mode it receives Output.json(), so the
-   * transport guarantees valid JSON while Neal's protocol validator enforces
+   * enforces the schema. In json_object mode it receives jsonModeOutput(), so the
+   * transport guarantees valid JSON while neal's protocol validator enforces
    * the schema locally. No tools are exposed on either path.
    */
   structuredOutput?: { schema: Record<string, unknown>; schemaLabel: string };
@@ -791,6 +801,34 @@ function schemaHasOptionalProperties(schema: unknown): boolean {
  * to `apiRetryLimit` times with backoff and the standard `api_retry`
  * event; a successful call consumes one step.
  */
+// JSON mode only promises JSON, and some endpoints don't enforce even that:
+// minimax/minimax-m2.7 through OpenRouter answers about half the time with the
+// object wrapped in a ```json fence. The SDK's own Output.json() parses with
+// strict JSON.parse and rejects that. This keeps the SDK's `json` response
+// format but parses with neal's structured-JSON extractor, which accepts a raw
+// JSON object or a lone fenced one (the same tolerance the native adapters
+// get). A reply it can't read still throws NoObjectGeneratedError, so the
+// error handling in runAgentModelTurn is unchanged.
+function jsonModeOutput(): ReturnType<typeof Output.json> {
+  const base = Output.json();
+  return {
+    ...base,
+    async parseCompleteOutput(options, context) {
+      const extracted = extractStructuredJsonPayload(options.text);
+      if (!extracted.ok) {
+        throw new NoObjectGeneratedError({
+          message: `No object generated: ${extracted.errorSummary}`,
+          text: options.text,
+          response: context.response,
+          usage: context.usage,
+          finishReason: context.finishReason,
+        });
+      }
+      return extracted.payload as Awaited<ReturnType<typeof base.parseCompleteOutput>>;
+    },
+  };
+}
+
 async function runAgentModelTurn(
   ctx: AgentTurnContext,
   turnOptions: AgentTurnOptions,
@@ -809,7 +847,7 @@ async function runAgentModelTurn(
   };
   // Only json_schema mode has transport-level schema enforcement. The
   // openai-compatible SDK defaults strict JSON Schema to true, which rejects
-  // legitimately optional properties before Neal's tolerant validator can
+  // legitimately optional properties before neal's tolerant validator can
   // normalize them, so those schemas disable strict mode. json_object mode
   // carries no schema to the transport and therefore needs no strict option.
   const relaxStrictJsonSchema =
@@ -833,7 +871,7 @@ async function runAgentModelTurn(
           ? {
               output:
                 ctx.state.structuredOutputMode === 'json_object'
-                  ? Output.json()
+                  ? jsonModeOutput()
                   : Output.object({ schema: jsonSchema(turnOptions.structuredOutput.schema) }),
             }
           : {}),
@@ -1066,7 +1104,7 @@ async function runAgentModelTurn(
  * The dedicated SDK-native structured-output finalization turn, shared by the
  * coder and structured-advisor paths: appends one user message requesting the
  * final control payload, runs exactly one no-tools `runAgentModelTurn` with
- * either Output.object(schema) or Output.json() according to the configured
+ * either Output.object(schema) or jsonModeOutput() according to the configured
  * response-format capability, then validates the SDK-parsed JSON with the
  * protocol spec's validator. The validator is always authoritative; json_schema
  * additionally enforces the contract at the transport layer, while json_object
