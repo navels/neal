@@ -1,7 +1,10 @@
 import { readFile, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 
+import YAML, { isMap } from 'yaml';
+
 import { writeJsonAtomic, writeTextAtomic } from './atomic-write.js';
+import { clearConfigCache } from './config.js';
 import { buildBlockedGuidance } from './blocked-guidance.js';
 import {
   cleanUntrackedPaths as cleanGitUntrackedPaths,
@@ -187,6 +190,14 @@ const QUEUE_ITEM_STATUSES = new Set<PlanAndExecuteQueueItemStatus>([
   'completed',
 ]);
 const QUEUE_CHILD_STAGES = new Set<QueueChildStage>(['planning', 'execution']);
+const REPO_NEAL_CONFIG_PATH = 'neal.yml';
+const OPENAI_COMPATIBLE_STEP_LIMIT_SNAPSHOT_FILE = 'OPENAI_COMPATIBLE_STEP_LIMITS.json';
+
+type OpenAICompatibleStepLimitSnapshot = {
+  version: 1;
+  openai_compatible_max_steps?: number | null;
+  openai_compatible_advisor_max_steps?: number | null;
+};
 
 export function getPlanAndExecuteQueuesDir(cwd: string): string {
   return getQueuesDir(resolve(cwd));
@@ -300,6 +311,8 @@ export async function createPlanAndExecuteQueue(
       stopReason: null,
     });
   }
+
+  await writeOpenAICompatibleStepLimitSnapshot(cwd, queueId);
 
   return savePlanAndExecuteQueueState({
     version: 1,
@@ -811,7 +824,7 @@ async function runFreshPlanAndExecuteChild(
         undefined,
         topLevelMode,
         {
-          allowedDirtyPaths: args.stage === 'execution' ? [planDoc] : [],
+          allowedDirtyPaths: args.stage === 'execution' ? [planDoc, REPO_NEAL_CONFIG_PATH] : [],
           runDir: prepared.runDir,
           // Seed the queue's resolved squash preference onto the child run
           // state (unstaged: planning children persist it too so a resumed
@@ -933,6 +946,7 @@ async function completePlanningStage(
     getAllowedDirtyPlanPaths(state.cwd, finalState.planDoc),
   );
   await restoreQueuePlanningSideEffects({ ...state, allowedDirtyPlanPaths }, deps);
+  await restoreOpenAICompatibleStepLimitSnapshot(state);
   return savePlanAndExecuteQueueState({
     ...state,
     status: 'running',
@@ -951,6 +965,120 @@ async function completePlanningStage(
       stopReason: null,
     }),
   });
+}
+
+
+function getOpenAICompatibleStepLimitSnapshotPath(cwd: string, queueId: string) {
+  return join(
+    getPlanAndExecuteQueueDir(cwd, queueId),
+    OPENAI_COMPATIBLE_STEP_LIMIT_SNAPSHOT_FILE,
+  );
+}
+
+async function writeOpenAICompatibleStepLimitSnapshot(cwd: string, queueId: string) {
+  const snapshot: OpenAICompatibleStepLimitSnapshot = { version: 1 };
+  try {
+    const parsed = YAML.parse(await readFile(join(cwd, REPO_NEAL_CONFIG_PATH), 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const neal = (parsed as { neal?: unknown }).neal;
+      if (neal && typeof neal === 'object' && !Array.isArray(neal)) {
+        const values = neal as Record<string, unknown>;
+        if (Object.prototype.hasOwnProperty.call(values, 'openai_compatible_max_steps')) {
+          const value = values.openai_compatible_max_steps;
+          if (typeof value === 'number' || value === null) {
+            snapshot.openai_compatible_max_steps = value;
+          }
+        }
+        if (Object.prototype.hasOwnProperty.call(values, 'openai_compatible_advisor_max_steps')) {
+          const value = values.openai_compatible_advisor_max_steps;
+          if (typeof value === 'number' || value === null) {
+            snapshot.openai_compatible_advisor_max_steps = value;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? (error as NodeJS.ErrnoException).code
+        : null;
+    if (code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  await writeJsonAtomic(getOpenAICompatibleStepLimitSnapshotPath(cwd, queueId), snapshot);
+}
+
+async function restoreOpenAICompatibleStepLimitSnapshot(state: PlanAndExecuteQueueState) {
+  let snapshot: OpenAICompatibleStepLimitSnapshot;
+  try {
+    snapshot = JSON.parse(
+      await readFile(
+        getOpenAICompatibleStepLimitSnapshotPath(state.cwd, state.queueId),
+        'utf8',
+      ),
+    ) as OpenAICompatibleStepLimitSnapshot;
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? (error as NodeJS.ErrnoException).code
+        : null;
+    if (code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  if (snapshot.version !== 1) {
+    throw new Error(
+      `Invalid OpenAI-compatible step-limit snapshot version: ${String(snapshot.version)}`,
+    );
+  }
+
+  const preservedEntries = [
+    ['openai_compatible_max_steps', snapshot.openai_compatible_max_steps],
+    ['openai_compatible_advisor_max_steps', snapshot.openai_compatible_advisor_max_steps],
+  ] as const;
+  if (preservedEntries.every(([, value]) => value === undefined)) {
+    return;
+  }
+
+  const configPath = join(state.cwd, REPO_NEAL_CONFIG_PATH);
+  let source = '{}\n';
+  try {
+    source = await readFile(configPath, 'utf8');
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? (error as NodeJS.ErrnoException).code
+        : null;
+    if (code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const document = YAML.parseDocument(source.trim() === '' ? '{}\n' : source);
+  if (document.errors.length > 0) {
+    throw new Error(
+      `Could not restore OpenAI-compatible step limits in ${configPath}: ${document.errors[0]?.message ?? 'invalid YAML'}`,
+    );
+  }
+  if (document.contents === null || !isMap(document.contents)) {
+    throw new Error(
+      `Could not restore OpenAI-compatible step limits in ${configPath}: expected a YAML mapping at the document root`,
+    );
+  }
+  document.contents.flow = false;
+
+  for (const [key, value] of preservedEntries) {
+    if (value !== undefined) {
+      document.setIn(['neal', key], value);
+    }
+  }
+
+  await writeTextAtomic(configPath, document.toString());
+  clearConfigCache(state.cwd);
 }
 
 function getAllowedDirtyPlanPaths(cwd: string, planPath: string): string[] {
@@ -1206,7 +1334,11 @@ function splitQueueSideEffectPaths(statusOutput: string): { trackedPaths: string
 }
 
 function filterAllowedDirtyPlanStatus(state: PlanAndExecuteQueueState, statusOutput: string): string {
-  return filterAllowedDirtyPathStatus(state.cwd, statusOutput, state.allowedDirtyPlanPaths);
+  return filterAllowedDirtyPathStatus(
+    state.cwd,
+    statusOutput,
+    [...state.allowedDirtyPlanPaths, REPO_NEAL_CONFIG_PATH],
+  );
 }
 
 function getQueueItemOrThrow(state: PlanAndExecuteQueueState, itemIndex: number): PlanAndExecuteQueueItem {
