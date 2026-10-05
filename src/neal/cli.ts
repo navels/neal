@@ -42,6 +42,11 @@ export type ParsedUsageArgs = {
   all: boolean;
 };
 
+export type ParsedChangesArgs = {
+  runId: string | null;
+  json: boolean;
+};
+
 export type ParsedResumeArgs = {
   runId: string | null;
   message: string | null;
@@ -82,6 +87,7 @@ export function buildUsageLines(version: string) {
     '   or: neal status [--json] --all',
     '   or: neal usage [--json] [--run <run-id>]',
     '   or: neal usage [--json] --all',
+    '   or: neal changes [--json] [--run <run-id>]',
     '   or: neal version',
     '   or: neal --version',
     '   or: neal -V',
@@ -104,6 +110,8 @@ export function buildUsageLines(version: string) {
     '  neal status --all',
     '  neal usage',
     '  neal usage --all',
+    '  neal changes',
+    '  neal changes --run latest --json',
     '  neal check',
     '  neal compat --model deepseek/deepseek-chat --role all --reference openai-codex --json  # --model runs the slug on openai-compatible; reference roles run on the native adapter',
     '  neal setup',
@@ -442,6 +450,45 @@ export function parseUsageArgs(args: string[]): ParsedUsageArgs {
   }
 
   return { runId, json: sawJson, all };
+}
+
+export function parseChangesArgs(args: string[]): ParsedChangesArgs {
+  if (args[0] !== 'changes') {
+    throw new Error(`Unknown argument: ${args[0] ?? ''}`);
+  }
+
+  let sawJson = false;
+  let runId: string | null = null;
+  let index = 1;
+
+  while (index < args.length) {
+    const flag = args[index];
+    switch (flag) {
+      case '--json':
+        if (sawJson) {
+          throw new Error('neal changes accepts --json only once');
+        }
+        sawJson = true;
+        index += 1;
+        break;
+      case '--run': {
+        if (runId !== null) {
+          throw new Error('neal changes accepts --run only once');
+        }
+        const value = args[index + 1];
+        if (!value || value.startsWith('--')) {
+          throw new Error('neal changes --run requires a run id argument');
+        }
+        runId = value;
+        index += 2;
+        break;
+      }
+      default:
+        throw new Error(`Unknown argument: ${flag}`);
+    }
+  }
+
+  return { runId, json: sawJson };
 }
 
 export function parseResumeArgs(args: string[]): ParsedResumeArgs {
