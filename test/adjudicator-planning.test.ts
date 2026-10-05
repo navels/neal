@@ -10,8 +10,10 @@ import {
   runPlanningReviewerAdjudication,
 } from '../src/neal/adjudicator/planning.js';
 import { assertAdjudicationTransitionSignal, getAdjudicationSpec } from '../src/neal/adjudicator/specs.js';
+import { registerProviderDefinitionForTesting } from '../src/neal/providers/registry.js';
 import { createInitialState } from '../src/neal/state.js';
 import type { OrchestrationState } from '../src/neal/types.js';
+import { createFakeProviderDefinition, fakeProviderDefaultCapabilities } from './helpers/fake-provider.js';
 import { hermeticAgentConfig } from './helpers/hermetic-agent-config.js';
 
 async function createState(overrides: Partial<OrchestrationState> = {}) {
@@ -279,62 +281,74 @@ test('planning response adjudicator rejects legacy coder-only sessions without a
 });
 
 test('planning response adjudicator runs a fresh planner session for top-level plan refinement when the planner provider cannot resume sessions', async () => {
-  // Regression: a no-resume planner provider (openai-compatible; the planner inherits the coder
-  // provider) never persists plannerSessionHandle, so reviewer-requested top-level plan revisions
-  // must start a fresh planner session instead of throwing the missing-session invariant.
-  const agentConfig = hermeticAgentConfig();
-  const { state } = await createState({
-    topLevelMode: 'plan',
-    phase: 'coder_plan_response',
-    plannerSessionHandle: null,
-    plannerSessionProtocol: null,
-    agentConfig: {
-      ...agentConfig,
-      planner: { provider: 'openai-compatible', model: null, effort: null },
-    },
-  });
-
-  let responseArgs: any = null;
-  const responseResult = await runPlanningResponseAdjudication({
-    state,
-    openFindings: [
-      {
-        id: 'R1-F1',
-        source: 'reviewer',
-        claim: 'The plan needs an explicit verification command.',
-        requiredAction: 'Add a verification command to the plan.',
-        severity: 'blocking',
-        files: [],
-        roundSummary: 'Reviewer requested a plan revision.',
-      },
-    ],
-    runResponseRound: async (args) => {
-      responseArgs = args;
-      return {
-        // openai-compatible never persists a session handle; the round returns null.
-        sessionHandle: null,
-        payload: {
-          summary: 'Revised the plan to address the finding.',
-          outcome: 'responded',
-          responses: [
-            {
-              id: 'R1-F1',
-              decision: 'fixed',
-              summary: 'Added the verification command.',
-            },
-          ],
-          blocker: '',
-          derivedPlan: '',
+  const cleanup = registerProviderDefinitionForTesting(
+    createFakeProviderDefinition({
+      id: 'fake-no-resume-planner',
+      capabilities: {
+        ...fakeProviderDefaultCapabilities,
+        coder: {
+          ...fakeProviderDefaultCapabilities.coder,
+          supportsSessionResume: false,
         },
-      };
-    },
-  });
+      },
+    }),
+  );
 
-  assert.equal(responseResult.context.reviewMode, 'plan');
-  assert.equal(responseArgs?.reviewMode, 'plan');
-  // The round starts a fresh planner session: resumeHandle/sessionHandle is null.
-  assert.equal(responseArgs?.sessionHandle, null);
-  assert.equal(responseResult.response.sessionHandle, null);
+  try {
+    const agentConfig = hermeticAgentConfig();
+    const { state } = await createState({
+      topLevelMode: 'plan',
+      phase: 'coder_plan_response',
+      plannerSessionHandle: null,
+      plannerSessionProtocol: null,
+      agentConfig: {
+        ...agentConfig,
+        planner: { provider: 'fake-no-resume-planner', model: null, effort: null },
+      },
+    });
+
+    let responseArgs: any = null;
+    const responseResult = await runPlanningResponseAdjudication({
+      state,
+      openFindings: [
+        {
+          id: 'R1-F1',
+          source: 'reviewer',
+          claim: 'The plan needs an explicit verification command.',
+          requiredAction: 'Add a verification command to the plan.',
+          severity: 'blocking',
+          files: [],
+          roundSummary: 'Reviewer requested a plan revision.',
+        },
+      ],
+      runResponseRound: async (args) => {
+        responseArgs = args;
+        return {
+          sessionHandle: null,
+          payload: {
+            summary: 'Revised the plan to address the finding.',
+            outcome: 'responded',
+            responses: [
+              {
+                id: 'R1-F1',
+                decision: 'fixed',
+                summary: 'Added the verification command.',
+              },
+            ],
+            blocker: '',
+            derivedPlan: '',
+          },
+        };
+      },
+    });
+
+    assert.equal(responseResult.context.reviewMode, 'plan');
+    assert.equal(responseArgs?.reviewMode, 'plan');
+    assert.equal(responseArgs?.sessionHandle, null);
+    assert.equal(responseResult.response.sessionHandle, null);
+  } finally {
+    cleanup();
+  }
 });
 
 test('planning response adjudicator runs a fresh planner session for derived-plan revisions without a planner session', async () => {

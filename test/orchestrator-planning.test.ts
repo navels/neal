@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
+import {
+  clearProviderCapabilitiesOverridesForTesting,
+  registerProviderDefinitionForTesting,
+  setProviderCapabilitiesOverrideForTesting,
+} from '../src/neal/providers/registry.js';
 import { NealProviderError, type CoderRunPromptArgs, type CoderStructuredPromptArgs } from '../src/neal/providers/types.js';
 import { runCoderPlanPhase, runPlanReviewPhase, runPlanningResponsePhase } from '../src/neal/orchestrator/phases/planning.js';
 import { runPlanningResponseAdjudication } from '../src/neal/adjudicator/planning.js';
@@ -19,6 +23,7 @@ import { formatPublicRunStatus, getRunDisplayStatus } from '../src/neal/run-stat
 import { buildStatusSnapshot, renderHumanStatusSnapshot } from '../src/neal/status.js';
 import { getDefaultAgentConfig, loadState } from '../src/neal/state.js';
 import { getPlanReviewGuidanceOriginPhase } from '../src/neal/state-views.js';
+import { createFakeProviderDefinition, fakeProviderDefaultCapabilities } from './helpers/fake-provider.js';
 import { createResumeFixture, createOpenPlanReviewFinding, createPlanReviewGuidanceResponseFixture, readRunEvents, runGit } from './helpers/orchestrator-harness.js';
 
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator-planning');
@@ -646,11 +651,19 @@ test('resuming a derived-plan revision dispatches coder_plan_response and comple
 });
 
 test('runPlanningResponsePhase runs a fresh planner session for top-level plan refinement when the planner provider cannot resume sessions', async () => {
-  // Regression: a no-resume planner provider (openai-compatible; the planner inherits the coder
-  // provider) never persists plannerSessionHandle, so a reviewer-requested top-level plan
-  // revision previously crashed with "Cannot run coder_plan_response phase without an existing
-  // planner session". The phase must instead start a fresh planner session (resumeHandle null)
-  // and persist/complete normally.
+  const providerId = 'fake-no-resume-planner-phase';
+  const cleanup = registerProviderDefinitionForTesting(
+    createFakeProviderDefinition({
+      id: providerId,
+      capabilities: {
+        ...fakeProviderDefaultCapabilities,
+        coder: {
+          ...fakeProviderDefaultCapabilities.coder,
+          supportsSessionResume: false,
+        },
+      },
+    }),
+  );
   const { statePath, state } = await createResumeFixture({
     topLevelMode: 'plan',
     phase: 'coder_plan_response',
@@ -662,24 +675,22 @@ test('runPlanningResponsePhase runs a fresh planner session for top-level plan r
     coderSessionProtocol: null,
     agentConfig: {
       ...getDefaultAgentConfig(),
-      planner: { provider: 'openai-compatible', model: null, effort: null },
+      planner: { provider: providerId, model: null, effort: null },
     },
     interactiveBlockedRecovery: null,
     interactiveBlockedRecoveryHistory: [],
     findings: [createOpenPlanReviewFinding()],
   });
 
-  setProviderCapabilitiesOverrideForTesting('openai-compatible', {
+  setProviderCapabilitiesOverrideForTesting(providerId, {
     createCoderAdapter() {
       return {
         async runPrompt(args: CoderRunPromptArgs) {
           throw new Error(`unexpected text plan-response prompt: ${args.prompt}`);
         },
         async runStructuredPrompt<TStructured>(args: CoderStructuredPromptArgs) {
-          // A fresh planner session is started with a null resume handle.
           assert.equal(args.resumeHandle ?? null, null);
           return {
-            // openai-compatible never persists a session handle.
             sessionHandle: null,
             structured: {
               outcome: 'responded',
@@ -703,8 +714,6 @@ test('runPlanningResponsePhase runs a fresh planner session for top-level plan r
     const nextState = await runPlanningResponsePhase(state, statePath, 'coder_plan_response');
     const persisted = await loadState(statePath);
 
-    // The round completes without throwing; no planner handle or protocol is persisted because
-    // the provider returns none, satisfying the state invariant (both null together).
     assert.equal(nextState.plannerSessionHandle, null);
     assert.equal(nextState.plannerSessionProtocol, null);
     assert.equal(persisted.plannerSessionHandle, null);
@@ -716,6 +725,7 @@ test('runPlanningResponsePhase runs a fresh planner session for top-level plan r
     assert.equal(nextState.findings[0]?.status, 'fixed');
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
+    cleanup();
   }
 });
 
