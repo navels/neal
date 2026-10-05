@@ -306,6 +306,8 @@ neal review [message] (--last <n> | --since <base>)
 # Inspection and maintenance
 neal status [--json] [--run <run-id>]
 neal status [--json] --all
+neal usage [--json] [--run <run-id>]
+neal usage [--json] --all
 neal squash [plan.md]
 
 # CLI information
@@ -356,6 +358,14 @@ multi-model review of a PR.
 
 `neal status` shows the current run, or all runs with `--all`. Its `--json`
 forms are the stable automation interface.
+
+`neal usage` totals turns, tokens, and cost by provider and role for the
+current run, one run with `--run <run-id>`, or every run in the repo with
+`--all`. It reads each run's `events.ndjson`, so unlike `RUN_METRICS.json` it
+covers runs that haven't finished. `--json` gives the same data for scripts.
+Cost figures are estimates, either reported by the provider or computed from
+token rates. They aren't your bill, and subscription quota and actual charges
+only show up on the provider's side.
 
 `neal squash` rewrites a completed run into one commit. It previews the change
 and requires interactive confirmation before rewriting history.
