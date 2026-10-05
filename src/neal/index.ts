@@ -18,6 +18,7 @@ import { runReviewCommand } from './commands/review.js';
 import { runSetupCommand } from './commands/setup.js';
 import { runSquashCommand } from './commands/squash.js';
 import { runStatusCommand } from './commands/status.js';
+import { runUsageCommand } from './commands/usage.js';
 import {
   formatWriterProviderSetupRequiredLines,
   isWriterProvidersNotConfiguredError,
@@ -76,6 +77,11 @@ async function main() {
 
   if (args[0] === 'status') {
     await runStatusCommand(args);
+    return;
+  }
+
+  if (args[0] === 'usage') {
+    await runUsageCommand(args);
     return;
   }
 

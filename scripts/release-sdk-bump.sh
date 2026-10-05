@@ -233,6 +233,56 @@ fi
 
 echo "Running Publish (real)..."
 RUN_ID="$(start_publish_run false)"
+# npm runs an automated review on a freshly staged package and refuses
+# `npm stage approve` with E409 until it finishes. Nothing exposes that review
+# state (`npm stage view` only ever says "staged"), and the 409 only comes back
+# after the passkey step, so every attempt costs a 2FA prompt. Past releases
+# needed roughly one to four minutes. So: wait a grace period measured from the
+# moment npm staged the package, then approve, and on E409 wait and try again
+# instead of dying mid-release. Any other failure stops with instructions.
+REVIEW_GRACE_SECONDS=180
+APPROVE_RETRY_SECONDS=60
+STAGE_WINDOW_SECONDS=3600 # the Publish workflow waits this long for approval
+
+seconds_since() {
+  node -e '
+    const t = Date.parse(process.argv[1]);
+    console.log(Number.isFinite(t) ? Math.floor((Date.now() - t) / 1000) : -1);
+  ' "$1"
+}
+
+approve_stage() {
+  local stage_id="$1" staged_at="$2" elapsed attempt=0 log
+  log="$(mktemp "${TMPDIR:-/tmp}/neal-approve-XXXXXX")"
+  elapsed="$(seconds_since "$staged_at")"
+  if [ "$elapsed" -ge 0 ] && [ "$elapsed" -lt "$REVIEW_GRACE_SECONDS" ]; then
+    echo "Staged ${elapsed}s ago. npm's automated review usually needs a few minutes; waiting $((REVIEW_GRACE_SECONDS - elapsed))s before the first approve attempt."
+    sleep $((REVIEW_GRACE_SECONDS - elapsed))
+  fi
+  while :; do
+    attempt=$((attempt + 1))
+    echo "Approving stage ${stage_id} (attempt ${attempt}; npm will prompt for your passkey)..."
+    if npm stage approve "$stage_id" 2>&1 | tee "$log"; then
+      rm -f "$log"
+      return 0
+    fi
+    if ! grep -q "E409" "$log"; then
+      echo "release-sdk-bump: npm stage approve failed for a reason other than the pending review (see above)." >&2
+      echo "The workflow waits up to 60 minutes from staging. Approve by hand with: npm stage approve ${stage_id}" >&2
+      rm -f "$log"
+      exit 1
+    fi
+    elapsed="$(seconds_since "$staged_at")"
+    if [ "$elapsed" -ge 0 ] && [ "$elapsed" -ge $((STAGE_WINDOW_SECONDS - APPROVE_RETRY_SECONDS)) ]; then
+      echo "release-sdk-bump: the stage is ${elapsed}s old and the review still hasn't finished; the workflow's approval window is about to close." >&2
+      rm -f "$log"
+      exit 1
+    fi
+    echo "npm's automated review hasn't finished yet. Waiting ${APPROVE_RETRY_SECONDS}s, then trying again (another passkey prompt)."
+    sleep "$APPROVE_RETRY_SECONDS"
+  done
+}
+
 echo "Waiting for the Stage publish step on run ${RUN_ID}..."
 until [ -n "$(gh api "repos/{owner}/{repo}/actions/runs/${RUN_ID}/jobs" \
   --jq '.jobs[0].steps[] | select(.name == "Stage publish") | select(.status == "completed") | .name' 2>/dev/null)" ]; do
@@ -247,14 +297,17 @@ STAGE_ID="$(awk -v version="$VERSION" '
   $1 == "id:" { id = $2 }
   $1 == "version:" && $2 == version { print id; exit }
 ' <<<"$STAGE_LIST")"
+STAGED_AT="$(awk -v id="$STAGE_ID" '
+  $1 == "id:" { current = $2 }
+  $1 == "date" && $2 == "staged:" && current == id { print $3; exit }
+' <<<"$STAGE_LIST")"
 if [ -z "$STAGE_ID" ]; then
   echo "Could not extract the stage ID automatically. npm stage list output:"
   echo "$STAGE_LIST"
   read -r -p "Paste the stage ID (or leave empty to approve via npmjs.com yourself): " STAGE_ID
 fi
 if [ -n "$STAGE_ID" ]; then
-  echo "Approving stage ${STAGE_ID} (npm will prompt for 2FA)..."
-  npm stage approve "$STAGE_ID"
+  approve_stage "$STAGE_ID" "$STAGED_AT"
 else
   echo "Approve the stage at npmjs.com; the workflow waits up to 60 minutes."
 fi
