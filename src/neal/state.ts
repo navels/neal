@@ -15,6 +15,7 @@ import type {
   CoderSessionProtocol,
   ManualGateResumeCheck,
   ManualGateState,
+  ClosedManualGate,
   OrchestrationPhase,
   OrchestrationState,
   OrchestratorInit,
@@ -155,6 +156,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     currentScopeProgressJustification: null,
     currentScopeMeaningfulProgressVerdict: null,
     manualGate: null,
+    closedManualGates: [],
     finalCompletionSummary: null,
     finalCompletionReviewVerdict: null,
     finalCompletionResolvedAction: null,
@@ -671,6 +673,18 @@ function hydrateManualGateLastFailure(value: unknown, fieldPath: string): Manual
   };
 }
 
+function hydrateClosedManualGate(value: unknown, fieldPath: string): ClosedManualGate {
+  const gate = requireRecord(value, fieldPath);
+  return {
+    id: readString(gate, 'id', `${fieldPath}.id`),
+    title: readString(gate, 'title', `${fieldPath}.title`),
+    scope: readString(gate, 'scope', `${fieldPath}.scope`),
+    instructionsPath: readString(gate, 'instructionsPath', `${fieldPath}.instructionsPath`),
+    closedAt: readString(gate, 'closedAt', `${fieldPath}.closedAt`),
+    operatorMessage: readNullableString(gate, 'operatorMessage', `${fieldPath}.operatorMessage`),
+  };
+}
+
 function hydrateManualGate(record: StateRecord, fieldPath = 'manualGate'): ManualGateState | null {
   if (!hasOwn(record, fieldPath)) {
     return null;
@@ -1183,6 +1197,13 @@ function normalizeStateV1(parsed: unknown): OrchestrationState {
       readRequired(state, 'currentScopeMeaningfulProgressVerdict'),
     ),
     manualGate: hydrateManualGate(state),
+    // Legacy-tolerant: run states persisted before this field existed hydrate
+    // to an empty array.
+    closedManualGates: hasOwn(state, 'closedManualGates')
+      ? readArray(state, 'closedManualGates').map((record, index) =>
+        hydrateClosedManualGate(record, `closedManualGates[${index}]`),
+      )
+      : [],
     finalCompletionSummary: hydrateFinalCompletionSummary(readRequired(state, 'finalCompletionSummary')),
     finalCompletionReviewVerdict: hydrateFinalCompletionReviewerVerdict(
       readRequired(state, 'finalCompletionReviewVerdict'),

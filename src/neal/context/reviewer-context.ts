@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import { getFinalCompletionView } from '../state-views.js';
-import type { OrchestrationState, ReviewFinding } from '../types.js';
+import type { OrchestrationState, ClosedManualGate, ReviewFinding } from '../types.js';
 
 export const REVIEWER_CONTEXT_JSON = 'REVIEWER_CONTEXT.json';
 export const REVIEWER_CONTEXT_MARKDOWN = 'REVIEWER_CONTEXT.md';
@@ -67,6 +67,7 @@ export type ReviewerContextPacket = {
     claim: string;
     requiredAction: string;
   }[];
+  closedManualGates: ClosedManualGate[];
   finalCompletion: {
     state: string;
     effectiveAction: string | null;
@@ -154,6 +155,10 @@ export function buildReviewerContextPacket(args: {
     completedScopes,
     findings,
     inheritedPlanReviewDebt,
+    closedManualGates: state.closedManualGates.map((gate) => ({
+      ...gate,
+      instructionsPath: toDisplayPath(state.cwd, gate.instructionsPath),
+    })),
     finalCompletion,
     citations: buildReviewerContextCitations(state),
     limits: {
@@ -222,6 +227,20 @@ export function renderReviewerContextMarkdown(packet: Omit<ReviewerContextPacket
     )
     : ['- none'];
   const finalCompletion = packet.finalCompletion;
+  // Rendered only when a gate has closed, so runs without gates keep the same
+  // context bytes.
+  const manualGateLines = packet.closedManualGates.length
+    ? [
+      '## Manual Gates',
+      "Passing resume checks only show the operator did the work, not that it succeeded. A gate the operator closed with a message carries their report of the result. Before accepting a scope with a closed gate, or the run as a whole, read each gate's results and message. Do not accept the scope or the run when the latest run of a gate shows a failure, or when code the gate exercised changed after its latest run: the fix needs its own reviewed scope, and the gate needs to run again after it.",
+      ...packet.closedManualGates.map((gate) =>
+        gate.operatorMessage === null
+          ? `- Scope ${gate.scope}: ${gate.id} (${gate.title}) passed resume checks at ${gate.closedAt}; instructions=${gate.instructionsPath}`
+          : `- Scope ${gate.scope}: ${gate.id} (${gate.title}) closed by the operator at ${gate.closedAt}; instructions=${gate.instructionsPath}; operatorMessage=${gate.operatorMessage}`,
+      ),
+      '',
+    ]
+    : [];
 
   return [
     '# Reviewer Continuity Context',
@@ -252,6 +271,7 @@ export function renderReviewerContextMarkdown(packet: Omit<ReviewerContextPacket
     '## Inherited Plan-Review Debt',
     ...inheritedDebtLines,
     '',
+    ...manualGateLines,
     '## Final Completion',
     finalCompletion
       ? `- state=${finalCompletion.state}; effectiveAction=${finalCompletion.effectiveAction ?? 'none'}; hasSummary=${finalCompletion.hasSummary}; hasReviewVerdict=${finalCompletion.hasReviewVerdict}; continueExecutionCount=${finalCompletion.continueExecutionCount}; capReached=${finalCompletion.continueExecutionCapReached}`

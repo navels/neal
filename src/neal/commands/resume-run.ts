@@ -17,6 +17,8 @@ import { assertAgentConfigSupportsResume } from '../providers/registry.js';
 import { decideResumeAction, type ResumeDecision, type ResumeLockEvidence } from '../resume-decision.js';
 import { runManualGateResumeChecks, type ManualGateCheckFailure } from '../manual-gates.js';
 import { writeExecutionArtifacts } from '../orchestrator/artifacts.js';
+import { closeManualGateWithOperatorMessage } from '../orchestrator/phases/recovery.js';
+import { getCurrentScopeLabel } from '../scopes.js';
 import {
   ActiveRunLockError,
   acquireActiveRunLock,
@@ -70,16 +72,6 @@ export async function runResumeRunCommand(args: string[], deps: ResumeRunCommand
     queue: await inspectQueueChildResumeEvidence({ cwd: selection.state.cwd, runDir: selection.state.runDir }),
     retrospectivePath: await findLatestRetrospectiveMarkdownPath(selection.state.runDir),
   });
-
-  if (parsed.message !== null && isWaitingForManualGate(selection.state)) {
-    throw new Error(
-      [
-        `Run is waiting for manual gate ${selection.state.manualGate.id}: ${selection.state.manualGate.title}`,
-        `Complete the manual work and resume without --message: neal resume --run ${selection.selectedRunId}`,
-        `Instructions: ${selection.state.manualGate.instructionsPath}`,
-      ].join('\n'),
-    );
-  }
 
   const result = parsed.message === null
     ? await runPlainResume({ selection, decision, lock })
@@ -160,6 +152,9 @@ async function runMessageResume(args: {
         ].join('\n'),
       );
     case 'continue':
+      if (isWaitingForManualGate(args.selection.state)) {
+        return resumeManualGateWithMessage(args.selection, args.lock, args.message);
+      }
       throw new Error(`Run does not need --message. Resume it with: ${args.decision.resumeCommand}`);
     case 'already_running':
       throw new Error(formatAlreadyRunningMessage(args.decision).trimEnd());
@@ -168,6 +163,35 @@ async function runMessageResume(args: {
     case 'cannot_resume':
       throw new Error(formatCannotResumeMessage(args.decision));
   }
+}
+
+// The operator reports the gate's result (usually a failure) instead of
+// passing its checks; the coder gets the message as recovery guidance.
+async function resumeManualGateWithMessage(
+  selection: ResolvedWriterRunSelection,
+  lock: ResumeLockEvidence,
+  message: string,
+): Promise<ResumeRunOutcome> {
+  return withResumeWriterLock(selection, lock, async () => {
+    const loaded = await loadOrInitialize(
+      null,
+      selection.state.cwd,
+      getDefaultAgentConfig(selection.state.cwd),
+      selection.statePath,
+      selection.state.topLevelMode,
+    );
+    if (!isWaitingForManualGate(loaded.state)) {
+      throw new Error(`Run is no longer waiting for a manual gate. Resume it with: neal resume --run ${selection.selectedRunId}`);
+    }
+    assertAgentConfigSupportsResume(loaded.state.agentConfig, loaded.state, {
+      context: 'resume after closing a manual gate with a message',
+    });
+    const nextState = await closeManualGateWithOperatorMessage(loaded.state, loaded.statePath, message, loaded.logger);
+    return {
+      kind: 'resumed_child',
+      result: await executeResumedRun(nextState, loaded.statePath, loaded.logger),
+    } satisfies ResumeRunOutcome;
+  });
 }
 
 async function resumeAfterRecordingGuidance(
@@ -290,6 +314,17 @@ async function resumeManualGateRun(
       status: 'running',
       blockedFromPhase: null,
       manualGate: null,
+      closedManualGates: [
+        ...loaded.state.closedManualGates,
+        {
+          id: gate.id,
+          title: gate.title,
+          scope: getCurrentScopeLabel(loaded.state),
+          instructionsPath: gate.instructionsPath,
+          closedAt: new Date().toISOString(),
+          operatorMessage: null,
+        },
+      ],
     });
     await writeExecutionArtifacts(resumedState);
     await loaded.logger.event('manual_gate.checks_passed', {

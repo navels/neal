@@ -183,6 +183,21 @@ or more resume checks, neal saves the instructions to a run-local `GATE-<id>.md`
 file and stops, and `neal resume --run <run-id>` re-runs the checks and hands the
 scope back to the coder when they pass.
 
+Passing checks only prove the operator did the work, not that it worked. So
+neal keeps a record of each gate, and the coder and both reviewers are told to
+read the gate's results before moving on.
+
+If the manual step failed and the checks can't pass, don't keep resuming. Run
+`neal resume --run <run-id> --message "..."` to close the gate and tell the
+coder what happened.
+
+Either way, a failed result means the scope isn't done. If nothing in the code
+needs to change (say the operator ran a step wrong), the coder opens a new gate
+that says what to redo. If the code does need to change, the coder splits the
+plan so the fix gets its own reviewed scope, and the gate runs again at the
+start of the next one. Reviewers won't accept a scope or a run whose latest gate
+result is a failure.
+
 A gate opens during the coder's first pass on a scope, before any review. The
 reviewer sees nothing from that scope until the coder says the scope is done. So
 anything the operator is asked to use at the gate has to come from a scope that

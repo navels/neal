@@ -286,6 +286,38 @@ async function writeStaleActiveRunLock(cwd: string, runId: string, planDoc: stri
   );
 }
 
+function coderManualGateStructuredResponse() {
+  return {
+    action: 'manual_gate',
+    message: 'Waiting for explicit approval before continuing.',
+    progress: {
+      milestoneTargeted: 'Approval gate',
+      newEvidence: 'The fake coder reached the approval point.',
+      whyNotRedundant: 'The lifecycle test must prove gate creation comes from structured coder output.',
+      nextStepUnlocked: 'Neal can wait for approval and run deterministic checks on resume.',
+    },
+    manualGate: {
+      id: 'approval',
+      title: 'Approval required',
+      reason: 'The user must create the approval file before the scope can continue.',
+      instructionsMarkdown: 'Create `approved.txt` in the repository root.',
+      resumeChecks: [
+        {
+          type: 'command',
+          name: 'approval file',
+          command: [
+            process.execPath,
+            '-e',
+            'const fs = require("node:fs"); if (!fs.existsSync("approved.txt")) { process.stdout.write("missing approval file"); process.exit(7); }',
+          ],
+        },
+      ],
+    },
+    derivedPlan: '',
+    blockedReason: '',
+  };
+}
+
 function coderBlockedStructuredResponse() {
   return {
     action: 'blocked' as const,
@@ -1670,43 +1702,17 @@ test('manual gate lifecycle opens from structured coder output and resumes only 
     await runGit(cwd, 'commit', '-m', 'base commit');
 
     let structuredCoderCalls = 0;
+    let lastCoderPrompt = '';
     registerProviderDefinitionForTesting(
       createFakeProviderDefinition({
         id: 'fake-manual-gate-provider',
         coderStructuredResponses: [
-          {
-            action: 'manual_gate',
-            message: 'Waiting for explicit approval before continuing.',
-            progress: {
-              milestoneTargeted: 'Approval gate',
-              newEvidence: 'The fake coder reached the approval point.',
-              whyNotRedundant: 'The lifecycle test must prove gate creation comes from structured coder output.',
-              nextStepUnlocked: 'Neal can wait for approval and run deterministic checks on resume.',
-            },
-            manualGate: {
-              id: 'approval',
-              title: 'Approval required',
-              reason: 'The user must create the approval file before the scope can continue.',
-              instructionsMarkdown: 'Create `approved.txt` in the repository root.',
-              resumeChecks: [
-                {
-                  type: 'command',
-                  name: 'approval file',
-                  command: [
-                    process.execPath,
-                    '-e',
-                    'const fs = require("node:fs"); if (!fs.existsSync("approved.txt")) { process.stdout.write("missing approval file"); process.exit(7); }',
-                  ],
-                },
-              ],
-            },
-            derivedPlan: '',
-            blockedReason: '',
-          },
+          coderManualGateStructuredResponse(),
           coderBlockedStructuredResponse(),
         ],
-        onCoderStructuredRun() {
+        onCoderStructuredRun({ prompt }) {
           structuredCoderCalls += 1;
+          lastCoderPrompt = prompt;
         },
       }),
     );
@@ -1775,6 +1781,13 @@ test('manual gate lifecycle opens from structured coder output and resumes only 
       const resumedState = await loadState(statePath);
       assert.equal(resumedState.manualGate, null);
       assert.notEqual(resumedState.phase, 'manual_gate');
+      // The checks only prove the work was done, so the resumed coder is told
+      // which gate passed and where to find it (#87).
+      assert.deepEqual(
+        resumedState.closedManualGates.map(({ id, scope, operatorMessage }) => ({ id, scope, operatorMessage })),
+        [{ id: 'approval', scope: '1', operatorMessage: null }],
+      );
+      assert.match(lastCoderPrompt, /## Manual Gates Closed In This Scope\n- approval: Approval required; resume checks passed at /);
     } finally {
       clearProviderDefinitionRegistrationsForTesting();
       clearConfigCache(cwd);
@@ -2292,41 +2305,88 @@ test('neal resume clears a stale same-run lock before mechanical recovery', asyn
   await assert.rejects(access(getActiveRunLockPath(cwd)), /ENOENT/);
 });
 
-test('neal resume rejects manual-gate messages without mutating state', async () => {
-  const { cwd, loaded } = await createRepoRunFixture('neal-resume-manual-gate-message-cli-');
-  const now = new Date().toISOString();
-  const manualGateState = await saveState(loaded.statePath, {
-    ...loaded.state,
-    phase: 'manual_gate',
-    status: 'running',
-    manualGate: {
-      id: 'approval',
-      title: 'Approval required',
-      reason: 'The user must approve deployment.',
-      instructionsPath: join(loaded.state.runDir, 'GATE-approval.md'),
-      resumeChecks: [
-        {
-          type: 'command',
-          name: 'approval file',
-          command: [process.execPath, '-e', 'process.exit(0)'],
+test('neal resume --message closes a waiting manual gate and hands the report to the coder', async () => {
+  await withIsolatedHome(async () => {
+    const root = await mkdtemp(join(tmpdir(), 'neal-manual-gate-message-'));
+    const cwd = join(root, 'repo');
+    await runGit(root, 'init', 'repo');
+    await runGit(cwd, 'config', 'user.name', 'Neal Test');
+    await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+    await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+    await writeFile(join(cwd, 'README.md'), 'bootstrap\n', 'utf8');
+    const planDoc = join(cwd, 'PLAN.md');
+    await writeFile(planDoc, '# Plan\n\nRequire approval before continuing.\n', 'utf8');
+    await writeFile(
+      join(cwd, 'neal.yml'),
+      ['agent:', '  coder:', '    provider: fake-manual-gate-provider', '  reviewer:', '    provider: fake-manual-gate-provider', ''].join('\n'),
+      'utf8',
+    );
+    await runGit(cwd, 'add', 'README.md', 'PLAN.md', 'neal.yml');
+    await runGit(cwd, 'commit', '-m', 'base commit');
+
+    const coderPrompts: string[] = [];
+    registerProviderDefinitionForTesting(
+      createFakeProviderDefinition({
+        id: 'fake-manual-gate-provider',
+        coderStructuredResponses: [
+          coderManualGateStructuredResponse(),
+          {
+            action: 'resume_current_scope',
+            summary: 'The operator reported the approval was refused.',
+            rationale: 'The scope can continue with that report.',
+            blocker: '',
+            replacementPlan: '',
+            laterScopeNumber: 0,
+            laterScopeBody: '',
+          },
+          coderBlockedStructuredResponse(),
+        ],
+        onCoderStructuredRun({ prompt }) {
+          coderPrompts.push(prompt);
         },
-      ],
-      resumePhase: 'coder_scope',
-      createdAt: now,
-      updatedAt: now,
-      lastCheckedAt: null,
-      lastFailure: null,
-    },
+      }),
+    );
+    clearConfigCache(cwd);
+
+    try {
+      const execute = await captureProcessExitCode(() =>
+        withProcessCwd(cwd, () => captureProcessOutput(() => runNewRunCommand(['execute', planDoc]))),
+      );
+      assert.equal(execute.exitCode, 2);
+      const pointer = JSON.parse(await readFile(getCurrentRunPointerPath(cwd), 'utf8')) as {
+        runId: string;
+        runStatePath: string;
+      };
+      const statePath = join(cwd, pointer.runStatePath);
+      assert.equal((await loadState(statePath)).phase, 'manual_gate');
+
+      // The gate's check would fail (no approved.txt), so --message is the
+      // operator's only way to report what happened.
+      const report = 'Approval was refused: the deploy window is closed until Monday.';
+      const resume = await captureProcessExitCode(() =>
+        withProcessCwd(cwd, () =>
+          captureProcessOutput(() => runResumeRunCommand(['resume', '--run', pointer.runId, '--message', report])),
+        ),
+      );
+      assert.equal(resume.exitCode, 2);
+
+      assert.equal(coderPrompts.length, 3);
+      assert.match(coderPrompts[1] ?? '', new RegExp(escapeRegExp(report)));
+      assert.match(
+        coderPrompts[2] ?? '',
+        new RegExp(`## Manual Gates Closed In This Scope\\n- approval: Approval required; closed by the operator at \\S+ with this message: ${escapeRegExp(report)}`),
+      );
+      const state = await loadState(statePath);
+      assert.equal(state.manualGate, null);
+      assert.deepEqual(
+        state.closedManualGates.map(({ id, operatorMessage }) => ({ id, operatorMessage })),
+        [{ id: 'approval', operatorMessage: report }],
+      );
+    } finally {
+      clearProviderDefinitionRegistrationsForTesting();
+      clearConfigCache(cwd);
+    }
   });
-  const runId = basename(manualGateState.runDir);
-  const before = await readFile(getRunStatePath(manualGateState.runDir), 'utf8');
-
-  await assert.rejects(
-    () => withProcessCwd(cwd, () => runResumeRunCommand(['resume', '--run', runId, '--message', 'Approved.'])),
-    /waiting for manual gate approval/,
-  );
-
-  assert.equal(await readFile(getRunStatePath(manualGateState.runDir), 'utf8'), before);
 });
 
 test('neal resume keeps failed manual gates open without provider execution', async () => {
