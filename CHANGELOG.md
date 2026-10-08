@@ -10,6 +10,12 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-10-08
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.287` to `0.3.293` and `@openai/codex-sdk` from `0.160.0` to `0.161.0`. Re-qualified both native adapters with `neal compat`; no behavior change.
+
 ### Added
 
 - `providers.openai_compatible.structured_output_mode` (`json_schema` or
