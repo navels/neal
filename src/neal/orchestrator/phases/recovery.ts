@@ -16,7 +16,7 @@ import { EXECUTE_FINALIZATION_PHASE } from '../../execute-finalization.js';
 import type { RunLogger } from '../../logger.js';
 import { getLaterScopeRevisionEligibility, reviseLaterScope } from '../../plan-scope-revision.js';
 import { hasPendingOperatorGuidance } from '../../run-status.js';
-import { getExecutionPlanPath } from '../../scopes.js';
+import { getCurrentScopeLabel, getExecutionPlanPath } from '../../scopes.js';
 import { loadState, saveState } from '../../state.js';
 import { getInteractiveRecoveryView, isActivePendingDerivedPlanReview } from '../../state-views.js';
 import { getCoderBlockedRecoveryLaterScopeErrors } from '../../agents/schemas.js';
@@ -315,6 +315,67 @@ export async function enterInteractiveBlockedRecovery(
     blockedReason: reason,
   });
   return nextState;
+}
+
+// `neal resume --message` at a waiting manual gate: the operator reports the
+// gate's result instead of passing its checks, usually because the external
+// work failed. Close the gate, record it with the message, and hand the message
+// to the coder as recovery guidance. The consultant is skipped because the
+// operator already said what happened (#87).
+export async function closeManualGateWithOperatorMessage(
+  state: OrchestrationState,
+  statePath: string,
+  operatorMessage: string,
+  logger?: RunLogger,
+) {
+  const gate = state.manualGate;
+  if (state.phase !== 'manual_gate' || !gate) {
+    throw new Error(`Run is not waiting for a manual gate: ${statePath}`);
+  }
+  const message = operatorMessage.trim();
+  if (!message) {
+    throw new Error('Recovery guidance must not be empty');
+  }
+
+  const now = new Date().toISOString();
+  const blockedReason = `The operator closed manual gate ${gate.id} (${gate.title}) with a message instead of passing its resume checks. Instructions: ${gate.instructionsPath}`;
+  const closedState = await saveState(statePath, {
+    ...state,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: gate.resumePhase,
+    manualGate: null,
+    closedManualGates: [
+      ...state.closedManualGates,
+      {
+        id: gate.id,
+        title: gate.title,
+        scope: getCurrentScopeLabel(state),
+        instructionsPath: gate.instructionsPath,
+        closedAt: now,
+        operatorMessage: message,
+      },
+    ],
+    interactiveBlockedRecovery: {
+      enteredAt: now,
+      sourcePhase: getInteractiveBlockedRecoverySourcePhase(gate.resumePhase),
+      blockedReason,
+      maxTurns: getInteractiveBlockedRecoveryMaxTurns(state.cwd),
+      lastHandledTurn: 0,
+      pendingDirective: null,
+      turns: [],
+    },
+  });
+  await logger?.event('manual_gate.closed_by_operator', {
+    gateId: gate.id,
+    scopeNumber: closedState.currentScopeNumber,
+  });
+  await logger?.event('interactive_blocked_recovery.entered', {
+    scopeNumber: closedState.currentScopeNumber,
+    sourcePhase: closedState.interactiveBlockedRecovery?.sourcePhase,
+    blockedReason,
+  });
+  return recordInteractiveBlockedRecoveryGuidance(statePath, message, logger);
 }
 
 // Whether a caller of `enterInteractiveBlockedRecovery` should emit a blocked /

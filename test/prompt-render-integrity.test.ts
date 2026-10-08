@@ -190,6 +190,7 @@ const CANNED_REVIEWER_PACKET_WITHOUT_MARKDOWN: Omit<ReviewerContextPacket, 'prom
   completedScopes: [],
   findings: [],
   inheritedPlanReviewDebt: [],
+  closedManualGates: [],
   finalCompletion: null,
   citations: [
     { label: 'RUN_STATE.json', path: '.neal/runs/run-000/RUN_STATE.json' },
@@ -640,10 +641,10 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
 
 const EXPECTED_MODULE_SHAS: Record<(typeof MATRIX_BUILDER_MODULES)[number], string> = {
   'src/neal/prompts/planning.ts': '602857121d8b3c1dea023ef1156b7f7259c298a378ab7f4b74503b675b91b1fe',
-  'src/neal/prompts/execute.ts': 'c95f55c42f5571204f6e795a575ea97a57375b064772c8e1f2421fbe6978ca98',
+  'src/neal/prompts/execute.ts': '0b160d5510ffd1dda9916067337ecee04f758f3325cc2057468627a154744886',
   'src/neal/prompts/specialized.ts': '396c46ab85aa4e41ef0bf5cbce5c84d0dd11210d07b25a4c58327fd615ca8683',
   'src/neal/agents/prompts.ts': 'c9b8b6bd135206ec8c7055aa887d65003490b8fdef95c3a662797018d01a667e',
-  'src/neal/context/reviewer-context.ts': '7168f61b26ff2c9fb9fa67ce7c608f452722fcfc5187f8c346910264a4c00674',
+  'src/neal/context/reviewer-context.ts': '93c3aff16ed614f96e626c296b3984c8efcded5f4db1e333774d69f4c015faad',
   'src/neal/context/inline-review-context.ts': '707a75dec9712158b14c9b15ccac19491a6b0d3221089545b4b2c3431458bbe7',
 };
 

@@ -34,6 +34,16 @@ dependency-update policy.
   about 3.6 times too high. Run metrics now also count
   cache writes and reasoning tokens from the same shape. Costs already recorded
   in old runs aren't recomputed.
+- A run could finish even though a manual gate's results showed a failure. A
+  gate's checks usually only prove the operator did the work, and once they
+  passed, neal forgot the gate. Now the run keeps a record of each gate and
+  shows it to the coder and both reviewers, who are told to read the results.
+  On a failure, the coder either opens a new gate or splits the plan so the fix
+  gets reviewed and the gate runs again (#87).
+- When a gate's checks required success and the manual step failed, the run
+  was stuck: the checks kept failing, and `neal resume --message` was refused
+  while the gate was open. `--message` now closes the gate and passes the
+  message to the coder (#87).
 
 ## [0.6.11] - 2026-10-02
 

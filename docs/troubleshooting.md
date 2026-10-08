@@ -128,7 +128,10 @@ directly.
 **Cause:** the scope reached expected human work. Instructions are in the
 run-local `GATE-<id>.md` file shown by `neal status`.
 **Fix:** do the manual step, then `neal resume --run <run-id>`, which re-runs
-the gate's checks and resumes the scope when they pass. No `--message` here.
+the gate's checks and resumes the scope when they pass. If the manual step
+failed and the checks can't pass, report what happened instead:
+`neal resume --run <run-id> --message "..."` closes the gate and hands your
+message to the coder.
 
 **Symptom:** the same gate keeps reopening: you do the step, resume, the coder
 patches the script or procedure it handed you, and the gate opens again.
