@@ -531,13 +531,17 @@ Role support and behavior:
   in a single dedicated finalization turn that carries no tools. The same
   adapter also serves the final-completion summary gate when
   `openai-compatible` is the coder.
-- No session resume (`supportsSessionResume: false` on both roles). The
-  adapter never persists a provider session handle, so `neal resume` after an
-  interruption or failure restarts the interrupted scope from scratch in a
-  fresh session rather than resuming mid-conversation. Already-accepted
-  scopes stay committed. Only the in-flight scope is redone. Top-level
-  plan-refinement revision rounds likewise start a fresh planner session per
-  round instead of resuming the planning conversation.
+- Coder/planner session resume. The coder capability declares
+  `supportsSessionResume: true`. Neal persists the adapter-owned message
+  history under `.neal/provider-sessions/openai-compatible/` and stores the
+  opaque handle in the normal writer-run session fields. `neal resume`
+  therefore continues an interrupted coder or planner conversation, including
+  a partially completed tool loop or structured-finalization turn. The turn
+  cap is per adapter invocation, so a resumed invocation receives a fresh turn
+  budget while preserving prior context. Existing scope-boundary resets still
+  clear the coder handle, so each new scope starts with fresh context. The
+  structured-advisor/reviewer role remains sessionless
+  (`supportsSessionResume: false`).
 - Step caps: each coder prompt's tool loop is bounded by the exported
   `OPENAI_COMPATIBLE_MAX_STEPS` constant (currently `48` model turns per
   prompt). Structured-advisor/reviewer rounds use the smaller exported
