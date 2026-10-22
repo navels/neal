@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import YAML from 'yaml';
+
 import { writeJsonAtomic, writeTextAtomic } from '../src/neal/atomic-write.js';
 import {
   continuePlanAndExecuteQueueFromChildRun,
@@ -107,6 +109,7 @@ function createFakeQueueRunner(
   cwd: string,
   outcomes: FakeChildOutcome[],
   worktreeStatusOutputs: string[] = [],
+  onRunFreshChild?: (args: RunFreshPlanAndExecuteChildArgs) => Promise<void>,
 ): {
   calls: Array<{
     stage: string;
@@ -198,6 +201,7 @@ function createFakeQueueRunner(
           statePath: runStatePath,
           planDoc: savedState.planDoc,
         });
+        await onRunFreshChild?.(args);
 
         const outcome = pendingOutcomes.shift() ?? {};
         const status = outcome.status ?? 'done';
@@ -731,6 +735,82 @@ test('runPlanAndExecuteQueue cleans plan-stage side effects before execution', a
   assert.deepEqual(calls.map((call) => call.stage), ['planning', 'execution']);
   assert.deepEqual(restoreCalls, [{ cwd, paths: ['go.work.sum'] }]);
   assert.deepEqual(cleanCalls, [{ cwd, paths: ['planner.tmp'] }]);
+});
+
+test('runPlanAndExecuteQueue preserves repo-local OpenAI-compatible step limits across planning cleanup', async () => {
+  const { cwd } = await createQueueFixture('neal-queue-preserve-step-limits-', ['A.md']);
+  const configPath = join(cwd, 'neal.yml');
+  await writeFile(
+    configPath,
+    [
+      'neal:',
+      '  openai_compatible_max_steps: 200',
+      '  openai_compatible_advisor_max_steps: 24',
+      '',
+      'providers:',
+      '  openai_compatible:',
+      '    base_url: https://api.deepseek.com',
+      '    api_key_env: DEEPSEEK_API_KEY',
+      '    default_model: deepseek-flash',
+      '    structured_output_mode: json_object',
+      '',
+      'agent:',
+      '  coder:',
+      '    provider: openai-compatible',
+      '    model: deepseek-flash',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const { deps } = createFakeQueueRunner(
+    cwd,
+    [{ status: 'done' }, { status: 'done' }],
+    [
+      ' M neal.yml',
+      ' M plans/A.md',
+      [' M plans/A.md', ' M neal.yml'].join('\n'),
+    ],
+    async (args) => {
+      if (args.stage !== 'planning') {
+        return;
+      }
+      await writeFile(
+        configPath,
+        [
+          'providers:',
+          '  openai_compatible:',
+          '    base_url: https://api.deepseek.com',
+          '    api_key_env: DEEPSEEK_API_KEY',
+          '    default_model: deepseek-flash',
+          '    structured_output_mode: json_object',
+          '',
+          'agent:',
+          '  coder:',
+          '    provider: openai-compatible',
+          '    model: deepseek-flash',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+    },
+  );
+
+  const queue = await runPlanAndExecuteQueue({
+    cwd,
+    planDocs: ['plans/A.md'],
+    agentConfig: getDefaultAgentConfig(),
+    deps,
+  });
+
+  assert.equal(queue.status, 'completed');
+  const restored = YAML.parse(await readFile(configPath, 'utf8')) as {
+    neal?: Record<string, unknown>;
+    providers?: { openai_compatible?: Record<string, unknown> };
+  };
+  assert.equal(restored.neal?.openai_compatible_max_steps, 200);
+  assert.equal(restored.neal?.openai_compatible_advisor_max_steps, 24);
+  assert.equal(restored.providers?.openai_compatible?.default_model, 'deepseek-flash');
 });
 
 test('runPlanAndExecuteQueue allows repo-root plan surrogate for external queued plans', async () => {

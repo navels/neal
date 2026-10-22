@@ -13,6 +13,8 @@ import {
   getConfigSourceInfo,
   getExplicitAgentConfig,
   getNotifyBin,
+  getOpenAICompatibleAdvisorMaxSteps,
+  getOpenAICompatibleMaxSteps,
   getOpenAICompatibleSettings,
   getPlanReviewDebtRoundThreshold,
   getRawMergedConfig,
@@ -106,6 +108,66 @@ test('getReviewStuckWindow defaults to 5 and honors config overrides', async () 
     await writeFile(join(cwd, 'neal.yml'), 'neal:\n  review_stuck_window: 7\n', 'utf8');
     clearConfigCache(cwd);
     assert.equal(getReviewStuckWindow(cwd), 7);
+  });
+});
+
+test('OpenAI-compatible step limits default to 48/24 and honor config precedence', async () => {
+  await withIsolatedHome(async (home) => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-openai-compatible-step-limits-'));
+
+    assert.equal(getOpenAICompatibleMaxSteps(cwd), 48);
+    assert.equal(getOpenAICompatibleAdvisorMaxSteps(cwd), 24);
+
+    await writeUserConfig(
+      home,
+      [
+        'neal:',
+        '  openai_compatible_max_steps: 96',
+        '  openai_compatible_advisor_max_steps: 36',
+        '',
+      ].join('\n'),
+    );
+    clearConfigCache(cwd);
+    assert.equal(getOpenAICompatibleMaxSteps(cwd), 96);
+    assert.equal(getOpenAICompatibleAdvisorMaxSteps(cwd), 36);
+
+    await writeFile(
+      join(cwd, 'neal.yml'),
+      [
+        'neal:',
+        '  openai_compatible_max_steps: 200',
+        '  openai_compatible_advisor_max_steps: 60',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    clearConfigCache(cwd);
+    assert.equal(getOpenAICompatibleMaxSteps(cwd), 200);
+    assert.equal(getOpenAICompatibleAdvisorMaxSteps(cwd), 60);
+  });
+});
+
+test('OpenAI-compatible step limits reject non-positive or fractional values', async () => {
+  await withIsolatedHome(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'neal-config-openai-compatible-step-limits-invalid-'));
+
+    await writeFile(join(cwd, 'neal.yml'), 'neal:\n  openai_compatible_max_steps: 0\n', 'utf8');
+    clearConfigCache(cwd);
+    assert.throws(
+      () => getOpenAICompatibleMaxSteps(cwd),
+      /Invalid neal\.openai_compatible_max_steps: expected a positive integer/,
+    );
+
+    await writeFile(
+      join(cwd, 'neal.yml'),
+      'neal:\n  openai_compatible_advisor_max_steps: 2.5\n',
+      'utf8',
+    );
+    clearConfigCache(cwd);
+    assert.throws(
+      () => getOpenAICompatibleAdvisorMaxSteps(cwd),
+      /Invalid neal\.openai_compatible_advisor_max_steps: expected a positive integer/,
+    );
   });
 });
 
