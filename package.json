@@ -8,7 +8,7 @@
   },
   "author": "Lee Nave",
   "type": "module",
-  "packageManager": "pnpm@11.28.6",
+  "packageManager": "pnpm@11.28.8",
   "homepage": "https://github.com/navels/neal#readme",
   "repository": {
     "type": "git",
@@ -40,8 +40,8 @@
     "examples"
   ],
   "engines": {
-    "node": ">=24.22.0",
-    "pnpm": ">=11.28.6"
+    "node": ">=24.22.1",
+    "pnpm": ">=11.28.8"
   },
   "scripts": {
     "build": "rm -rf dist && node node_modules/typescript-7/bin/tsc -p tsconfig.json && chmod +x dist/neal/index.js",
@@ -55,10 +55,10 @@
     "typecheck": "node node_modules/typescript-7/bin/tsc --noEmit -p tsconfig.json && node node_modules/typescript-7/bin/tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.70",
+    "@ai-sdk/openai-compatible": "3.0.78",
     "@anthropic-ai/claude-agent-sdk": "0.3.293",
     "@openai/codex-sdk": "0.161.0",
-    "ai": "7.0.142",
+    "ai": "7.0.153",
     "dotenv": "^17.4.2",
     "yaml": "^2.9.1",
     "zod": "4.6.7"
@@ -66,10 +66,10 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
-    "eslint": "^10.12.0",
+    "eslint": "^10.13.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-7": "npm:typescript@^7.0.2",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.72.0"
   }
 }
