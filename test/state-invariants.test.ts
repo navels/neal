@@ -223,6 +223,22 @@ test('coder session protocol rejects non-null protocol without active handle', a
   }, /coderSessionProtocol.*must be null when coderSessionHandle is null/);
 });
 
+// Checked at save time: on load, hydration heals this combination to the
+// structured protocol before the invariants run (see state.test.ts), so only
+// a save can present it.
+test('coder session protocol rejects active handle without protocol at save time', async () => {
+  const { state, statePath } = await createStateFixture();
+  await assert.rejects(
+    () =>
+      saveState(statePath, {
+        ...state,
+        coderSessionHandle: 'coder-session-1',
+        coderSessionProtocol: null,
+      }),
+    /coderSessionProtocol.*must not be null when coderSessionHandle is present/,
+  );
+});
+
 test('planner session protocol accepts valid active handle pairings', async () => {
   const loadedState = await loadMutatedState((state) => {
     state.plannerSessionHandle = 'planner-session-1';

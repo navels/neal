@@ -1613,6 +1613,44 @@ test('Codex ordinary stream errors remain fatal', async () => {
   );
 });
 
+test('Codex SDK stream parse failures classify as retryable api_error with a truncated message', async () => {
+  // Issue #105: the SDK throws `Failed to parse item: <raw line>` when a
+  // `codex exec` stdout line is not valid JSON. The embedded line carries
+  // arbitrary command output — here deliberately containing keywords that
+  // would otherwise classify as permission_denied or timeout — plus enough
+  // bulk to exercise message truncation.
+  const corruptItem =
+    '{"type":"item.completed","item":{"id":"item_13","type":"command_execution",' +
+    '"aggregated_output":"permission denied; timed out after everything; ' +
+    'x'.repeat(2_000);
+  await assert.rejects(
+    () =>
+      openAICodexProviderTestHooks.consumeCodexTurn(
+        codexTurnFromStream(
+          eventStreamThenThrow(
+            [{ type: 'thread.started', thread_id: 'codex-parse-failure-thread' }],
+            new Error(`Failed to parse item: ${corruptItem}`),
+          ),
+        ),
+        process.cwd(),
+        600_000,
+      ),
+    (error) => {
+      assert.equal(error instanceof NealProviderError, true);
+      const providerError = error as NealProviderError;
+      assert.equal(providerError.provider, 'openai-codex');
+      assert.equal(providerError.role, 'coder');
+      assert.equal(providerError.kind, 'api_error');
+      assert.equal(providerError.retryable, true);
+      assert.equal(providerError.sessionHandle, 'codex-parse-failure-thread');
+      assert.match(providerError.message, /^Failed to parse item:/);
+      assert.match(providerError.message, /more characters omitted\)$/);
+      assert.equal(providerError.message.length < 500, true);
+      return true;
+    },
+  );
+});
+
 test('Codex model-selection guidance without capacity wording is not retryable', async () => {
   await assert.rejects(
     () =>

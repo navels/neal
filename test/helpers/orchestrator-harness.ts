@@ -38,6 +38,15 @@ export async function writeRepoConfig(
   clearConfigCache(cwd);
 }
 
+// The state invariants require an active coder session handle to carry its
+// protocol; fixtures that seed only a handle get the structured default.
+function withDefaultCoderSessionProtocol(state: OrchestrationState): OrchestrationState {
+  if (state.coderSessionHandle && !state.coderSessionProtocol) {
+    return { ...state, coderSessionProtocol: 'structured_json_v1' };
+  }
+  return state;
+}
+
 export async function createResumeFixture(overrides: Partial<OrchestrationState>) {
   const root = await mkdtemp(join(tmpdir(), 'neal-scope4-'));
   const cwd = join(root, 'repo');
@@ -74,10 +83,10 @@ export async function createResumeFixture(overrides: Partial<OrchestrationState>
   );
 
   const statePath = getRunStatePath(runDir);
-  const mergedState: OrchestrationState = {
+  const mergedState: OrchestrationState = withDefaultCoderSessionProtocol({
     ...initialState,
     ...overrides,
-  };
+  });
 
   const state = await saveState(statePath, mergedState);
 
@@ -344,7 +353,7 @@ export async function createExecuteFinalizationFixture(
   const createdCommitsOverride = overrides.createdCommits;
 
   const statePath = getRunStatePath(runDir);
-  const state = await saveState(statePath, {
+  const state = await saveState(statePath, withDefaultCoderSessionProtocol({
     ...initialState,
     currentScopeNumber: 5,
     phase: 'execute_finalization',
@@ -355,7 +364,7 @@ export async function createExecuteFinalizationFixture(
     splitPlanBlockedNotified: false,
     ...overrides,
     createdCommits: createdCommitsOverride ?? [createdCommit],
-  });
+  }));
 
   return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
 }
@@ -405,7 +414,7 @@ export async function createEmptyExecuteFinalizationFixture(overrides: Partial<O
   const createdCommitsOverride = overrides.createdCommits;
 
   const statePath = getRunStatePath(runDir);
-  const state = await saveState(statePath, {
+  const state = await saveState(statePath, withDefaultCoderSessionProtocol({
     ...initialState,
     currentScopeNumber: 5,
     phase: 'execute_finalization',
@@ -416,7 +425,7 @@ export async function createEmptyExecuteFinalizationFixture(overrides: Partial<O
     splitPlanBlockedNotified: false,
     ...overrides,
     createdCommits: createdCommitsOverride ?? [createdCommit],
-  });
+  }));
 
   return { cwd, statePath, state, baseCommit, createdCommit, notifyLogPath, notifyScriptPath };
 }
@@ -572,6 +581,7 @@ export async function createDerivedPlanExecutionFixture(overrides: Partial<Orche
     phase: 'awaiting_derived_plan_execution',
     status: 'running',
     coderSessionHandle: 'stale-coder-session',
+    coderSessionProtocol: 'structured_json_v1',
     reviewerSessionHandle: 'reviewer-session-derived-pass',
     derivedPlanPath,
     derivedPlanStatus: 'accepted',

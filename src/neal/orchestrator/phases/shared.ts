@@ -34,6 +34,19 @@ function getWriterSessionRoleForPhase(phase: CoderFailurePhase): WriterSessionRo
     : 'coder';
 }
 
+// The coder session handle+protocol pair every persist site must write
+// together: a resumed session keeps its stored protocol, and a fresh one
+// speaks 'structured_json_v1' — every round that can start a fresh coder
+// session runs the structured protocol. Persisting a handle with a null
+// protocol made later resumes throw (#104); state-invariants rejects that
+// combination at save time.
+export function coderSessionFields(sessionHandle: string | null, state: OrchestrationState) {
+  return {
+    coderSessionHandle: sessionHandle,
+    coderSessionProtocol: sessionHandle ? state.coderSessionProtocol ?? 'structured_json_v1' : null,
+  };
+}
+
 function getWriterSessionState(args: {
   state: OrchestrationState;
   phase: CoderFailurePhase;
@@ -53,7 +66,7 @@ function getWriterSessionState(args: {
   return {
     role,
     sessionHandle,
-    protocol: sessionHandle ? args.state.coderSessionProtocol ?? 'structured_json_v1' : null,
+    protocol: coderSessionFields(sessionHandle, args.state).coderSessionProtocol,
   };
 }
 

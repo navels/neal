@@ -34,6 +34,7 @@ import { flushDerivedPlanNotifications, notifyBlocked } from '../notifications.j
 import { persistSplitPlanRecovery } from '../split-plan.js';
 import {
   bestEffortCleanupTimedOutCoder,
+  coderSessionFields,
   persistBlockedScope,
   persistCoderFailureState,
   scheduleCoderFreshSessionRetry,
@@ -759,8 +760,7 @@ export async function applyInteractiveBlockedRecoveryDisposition(
     const persistedState = await persistSplitPlanRecovery(
       {
         ...state,
-        coderSessionHandle: sessionHandle,
-        coderSessionProtocol: sessionHandle ? state.coderSessionProtocol : null,
+        ...coderSessionFields(sessionHandle, state),
         status: 'running',
         coderRetryCount: 0,
       },
@@ -801,8 +801,7 @@ export async function applyInteractiveBlockedRecoveryDisposition(
     );
     const nextState = await saveState(statePath, {
       ...finalizedState,
-      coderSessionHandle: sessionHandle,
-      coderSessionProtocol: sessionHandle ? state.coderSessionProtocol : null,
+      ...coderSessionFields(sessionHandle, state),
       phase: resumedPhase,
       status: 'running',
       blockedFromPhase: null,
@@ -824,8 +823,7 @@ export async function applyInteractiveBlockedRecoveryDisposition(
     }
     const nextState = await saveState(statePath, {
       ...recordedState,
-      coderSessionHandle: sessionHandle,
-      coderSessionProtocol: sessionHandle ? state.coderSessionProtocol : null,
+      ...coderSessionFields(sessionHandle, state),
       phase: 'interactive_blocked_recovery',
       status: 'running',
       blockedFromPhase: state.interactiveBlockedRecovery.sourcePhase,
@@ -858,8 +856,7 @@ export async function applyInteractiveBlockedRecoveryDisposition(
   );
   const blockedState = await saveState(statePath, {
     ...finalizedBlockedState,
-    coderSessionHandle: sessionHandle,
-    coderSessionProtocol: sessionHandle ? state.coderSessionProtocol : null,
+    ...coderSessionFields(sessionHandle, state),
     phase: 'blocked',
     status: 'blocked',
     lastScopeMarker: state.lastScopeMarker ?? 'AUTONOMY_BLOCKED',
