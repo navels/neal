@@ -29,7 +29,7 @@ is gated on it as a whole.
    `needs-qualification`), and, monthly, separate library-majors and
    GitHub-Actions-majors buckets (both labelled `needs-review`).
 2. **Verify (automatic).** CI (`.github/workflows/ci.yml`) runs typecheck + lint
-   + unit tests + package verification on Node 24.18.0, which catches
+   + unit tests + package verification on Node 26.13.0, which catches
    **API-shape / contract** breaks. The live smoke
    (`.github/workflows/smoke.yml`) runs on package.json / lockfile PRs that change something it exercises (a version bump or a native-SDK pin bump skips it): a
    real `neal compat` run against a cheap OpenRouter model through

@@ -15,6 +15,7 @@ import type {
   CoderSessionProtocol,
   ManualGateResumeCheck,
   ManualGateState,
+  ClosedManualGate,
   OrchestrationPhase,
   OrchestrationState,
   OrchestratorInit,
@@ -155,6 +156,7 @@ export async function createInitialState(init: OrchestratorInit, baseCommit: str
     currentScopeProgressJustification: null,
     currentScopeMeaningfulProgressVerdict: null,
     manualGate: null,
+    closedManualGates: [],
     finalCompletionSummary: null,
     finalCompletionReviewVerdict: null,
     finalCompletionResolvedAction: null,
@@ -361,7 +363,14 @@ function hydrateCoderSessionProtocol(state: StateRecord, coderSessionHandle: str
     return coderSessionHandle ? 'legacy_marker_v1' : null;
   }
   if (value === null) {
-    return null;
+    // An explicit null alongside an active handle is a corrupt combination
+    // only pre-fix recovery-disposition and coder-response persists could
+    // write, and both took the handle from a round that always runs the
+    // structured protocol — so healing to structured is exact, and it keeps
+    // those runs resumable (#104). Current writers go through
+    // coderSessionFields and the save-time invariant, which forbid the
+    // combination.
+    return coderSessionHandle ? 'structured_json_v1' : null;
   }
   if ((CODER_SESSION_PROTOCOLS as readonly string[]).includes(value)) {
     return value as CoderSessionProtocol;
@@ -668,6 +677,18 @@ function hydrateManualGateLastFailure(value: unknown, fieldPath: string): Manual
     signal: readNullableString(failure, 'signal', `${fieldPath}.signal`),
     stdoutTail: readString(failure, 'stdoutTail', `${fieldPath}.stdoutTail`),
     stderrTail: readString(failure, 'stderrTail', `${fieldPath}.stderrTail`),
+  };
+}
+
+function hydrateClosedManualGate(value: unknown, fieldPath: string): ClosedManualGate {
+  const gate = requireRecord(value, fieldPath);
+  return {
+    id: readString(gate, 'id', `${fieldPath}.id`),
+    title: readString(gate, 'title', `${fieldPath}.title`),
+    scope: readString(gate, 'scope', `${fieldPath}.scope`),
+    instructionsPath: readString(gate, 'instructionsPath', `${fieldPath}.instructionsPath`),
+    closedAt: readString(gate, 'closedAt', `${fieldPath}.closedAt`),
+    operatorMessage: readNullableString(gate, 'operatorMessage', `${fieldPath}.operatorMessage`),
   };
 }
 
@@ -1183,6 +1204,13 @@ function normalizeStateV1(parsed: unknown): OrchestrationState {
       readRequired(state, 'currentScopeMeaningfulProgressVerdict'),
     ),
     manualGate: hydrateManualGate(state),
+    // Legacy-tolerant: run states persisted before this field existed hydrate
+    // to an empty array.
+    closedManualGates: hasOwn(state, 'closedManualGates')
+      ? readArray(state, 'closedManualGates').map((record, index) =>
+        hydrateClosedManualGate(record, `closedManualGates[${index}]`),
+      )
+      : [],
     finalCompletionSummary: hydrateFinalCompletionSummary(readRequired(state, 'finalCompletionSummary')),
     finalCompletionReviewVerdict: hydrateFinalCompletionReviewerVerdict(
       readRequired(state, 'finalCompletionReviewVerdict'),

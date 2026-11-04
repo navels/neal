@@ -24,7 +24,7 @@ set -euo pipefail
 
 PR="${1:?usage: scripts/release-sdk-bump.sh <dep-pr-number>}"
 
-for tool in gh git node pnpm npm; do
+for tool in gh git node pnpm npm script; do
   command -v "$tool" >/dev/null 2>&1 || { echo "release-sdk-bump: missing required tool: $tool" >&2; exit 1; }
 done
 
@@ -262,7 +262,10 @@ approve_stage() {
   while :; do
     attempt=$((attempt + 1))
     echo "Approving stage ${stage_id} (attempt ${attempt}; npm will prompt for your passkey)..."
-    if npm stage approve "$stage_id" 2>&1 | tee "$log"; then
+    # Run npm under `script` so it keeps the terminal and can prompt for the
+    # passkey; piped output makes npm print a login URL and fail with EOTP.
+    # `script` still writes npm's output to the log for the E409 check.
+    if script -q "$log" npm stage approve "$stage_id"; then
       rm -f "$log"
       return 0
     fi

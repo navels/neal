@@ -15,7 +15,7 @@ behavior from folder structure or naming alone.
 ## Setup and verification
 
 ```bash
-corepack enable && corepack prepare pnpm@11 --activate && pnpm install
+corepack enable && corepack prepare pnpm@12 --activate && pnpm install
 pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm run verify:package
 ```
 

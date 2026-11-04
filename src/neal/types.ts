@@ -51,6 +51,19 @@ export type ManualGateState = {
   } | null;
 };
 
+// A manual gate that closed: its resume checks passed (operatorMessage null),
+// or the operator closed it with `neal resume --message` to report the result.
+// Passing checks only prove the operator did the work, so the coder and
+// reviewers use this record to go read the gate's results (#87).
+export type ClosedManualGate = {
+  id: string;
+  title: string;
+  scope: string;
+  instructionsPath: string;
+  closedAt: string;
+  operatorMessage: string | null;
+};
+
 export type AgentRoleConfig = {
   provider: AgentProvider;
   model: string | null;
@@ -467,6 +480,7 @@ export type OrchestrationState = {
   currentScopeProgressJustification: ExecuteScopeProgressJustification | null;
   currentScopeMeaningfulProgressVerdict: ReviewerMeaningfulProgressVerdict | null;
   manualGate: ManualGateState | null;
+  closedManualGates: ClosedManualGate[];
   finalCompletionSummary: FinalCompletionSummary | null;
   finalCompletionReviewVerdict: FinalCompletionReviewerVerdict | null;
   finalCompletionResolvedAction: FinalCompletionReviewerAction | null;

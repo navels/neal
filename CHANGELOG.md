@@ -12,6 +12,49 @@ dependency-update policy.
 
 ### Added
 
+- `neal changes` shows what a selected run changed without hand-built Git
+  ranges: committed changes since the current scope's recorded base,
+  uncommitted worktree changes (neal-owned and admitted dirty paths filtered
+  out), and a whole-run summary from `initialBaseCommit`, with `--run` and
+  `--json`. When `HEAD` is not descended from the recorded base the range is
+  reported as unknown instead of being attributed to neal. Contributed by
+  @seytar (#83).
+
+## [0.6.13] - 2026-11-04
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.293` to `0.3.316` and `@openai/codex-sdk` from `0.161.0` to `0.166.0`. Re-qualified both native adapters with `neal compat`; no behavior change.
+
+### Fixed
+
+- A run could become permanently unresumable after a round that followed a
+  fresh-session retry. The retry nulls both coder session fields, the next
+  round then starts a fresh structured session, and the
+  interactive-blocked-recovery dispositions and the coder-response persist
+  wrote that new handle with a null `coderSessionProtocol`; every later
+  coder-scope resume then exited with `Cannot resume coder scope session
+  without coderSessionProtocol.` A shared `coderSessionFields` helper now
+  owns the handle+protocol pair at every persist site, a save-time state
+  invariant rejects an active handle without a protocol (matching the
+  planner-side invariant), and state hydration heals already-corrupted run
+  states so stuck runs resume again (#104).
+- A Codex SDK stream parse failure (`Failed to parse item: ...`, seen when a
+  command's output corrupts a `codex exec` event line) was classified by
+  keyword-sniffing the embedded raw line — arbitrary command output could make
+  it look like a permission or timeout error — and was never retried, failing
+  the round even though a rerun usually succeeds. It now classifies as a
+  retryable `api_error`, burns the normal in-round retry budget, and the
+  embedded line is truncated to 400 characters in the error message (#105).
+
+## [0.6.12] - 2026-10-08
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.287` to `0.3.293` and `@openai/codex-sdk` from `0.160.0` to `0.161.0`. Re-qualified both native adapters with `neal compat`; no behavior change.
+
+### Added
+
 - `providers.openai_compatible.structured_output_mode` (`json_schema` or
   `json_object`, default `json_schema`) for OpenAI-compatible endpoints that
   support JSON mode but not schema-enforced output, such as direct DeepSeek.
@@ -34,6 +77,16 @@ dependency-update policy.
   about 3.6 times too high. Run metrics now also count
   cache writes and reasoning tokens from the same shape. Costs already recorded
   in old runs aren't recomputed.
+- A run could finish even though a manual gate's results showed a failure. A
+  gate's checks usually only prove the operator did the work, and once they
+  passed, neal forgot the gate. Now the run keeps a record of each gate and
+  shows it to the coder and both reviewers, who are told to read the results.
+  On a failure, the coder either opens a new gate or splits the plan so the fix
+  gets reviewed and the gate runs again (#87).
+- When a gate's checks required success and the manual step failed, the run
+  was stuck: the checks kept failing, and `neal resume --message` was refused
+  while the gate was open. `--message` now closes the gate and passes the
+  message to the coder (#87).
 
 ## [0.6.11] - 2026-10-02
 

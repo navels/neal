@@ -468,7 +468,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_coder',
-    version: 4,
+    version: 5,
     changelog: [
       {
         version: 1,
@@ -485,6 +485,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
       {
         version: 4,
         renderSha: '7c413f0bd9a71f77cc2dc93c44af6f672717324d8e4071bde93ecc25756b2841',
+      },
+      {
+        version: 5,
+        renderSha: 'ca06153d6ac9a383de5831b6db07faae49b4f1e0e2b44290334696ae3efa9175',
       },
     ],
     role: 'coder',

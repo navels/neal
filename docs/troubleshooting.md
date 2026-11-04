@@ -6,12 +6,12 @@ prints. When in doubt: `neal check`, then `.neal/runs/<run-id>/stderr.log`.
 ## Install and first run
 
 **Symptom:** install or startup fails on an old Node.
-**Cause:** neal requires Node.js >= 24.18.0 (`engines`). `.nvmrc` pins `24.18.0`.
+**Cause:** neal requires Node.js >= 26.13.0 (`engines`). `.nvmrc` pins `26.13.0`.
 **Fix:** `nvm use` in this repo, or upgrade Node before `npm install -g @navels/neal`.
 
 **Symptom:** `pnpm: command not found` when running from source.
-**Cause:** the source path uses pnpm >= 11 via corepack.
-**Fix:** `corepack enable && corepack prepare pnpm@11 --activate`, then `pnpm install`.
+**Cause:** the source path uses pnpm >= 12 via corepack.
+**Fix:** `corepack enable && corepack prepare pnpm@12 --activate`, then `pnpm install`.
 
 **Symptom:** `neal` not found after `pnpm run dev:link`.
 **Cause:** the dev link registers `bin.neal` with the active Node installation only.
@@ -128,7 +128,10 @@ directly.
 **Cause:** the scope reached expected human work. Instructions are in the
 run-local `GATE-<id>.md` file shown by `neal status`.
 **Fix:** do the manual step, then `neal resume --run <run-id>`, which re-runs
-the gate's checks and resumes the scope when they pass. No `--message` here.
+the gate's checks and resumes the scope when they pass. If the manual step
+failed and the checks can't pass, report what happened instead:
+`neal resume --run <run-id> --message "..."` closes the gate and hands your
+message to the coder.
 
 **Symptom:** the same gate keeps reopening: you do the step, resume, the coder
 patches the script or procedure it handed you, and the gate opens again.

@@ -55,8 +55,11 @@ ADAPTERS=()
 if grep -q '"@openai/codex-sdk"' <<<"$DIFF"; then
   # Pin the reference effort too. Codex otherwise inherits model_reasoning_effort
   # from ~/.codex/config.toml, and a value that suits the operator's everyday
-  # model (e.g. max) can be one gpt-5.5 rejects, failing every cell up front.
-  ADAPTERS+=("@openai/codex-sdk|openai-codex|gpt-5.5|high")
+  # model (e.g. ultra) can be one the reference model rejects, failing every
+  # cell up front. ChatGPT-account Codex auth dropped gpt-5.5 in late 2026, so
+  # the reference model is gpt-6-astra now; if every cell fails with "model is
+  # not supported", this pin has gone stale again.
+  ADAPTERS+=("@openai/codex-sdk|openai-codex|gpt-6-astra|high")
 fi
 if grep -q '"@anthropic-ai/claude-agent-sdk"' <<<"$DIFF"; then
   ADAPTERS+=("@anthropic-ai/claude-agent-sdk|anthropic-claude|claude-opus-4-8|")

@@ -123,11 +123,41 @@ function isTransientCodexApiFailure(message: string) {
   );
 }
 
+// The Codex SDK throws `Failed to parse item: <raw JSONL line>` when the
+// `codex exec` stdout stream yields a line that is not valid JSON (observed
+// in the wild when a command's aggregated output corrupts the event line).
+// The embedded line is arbitrary command output, so this must be matched by
+// its stable prefix and classified before any keyword sniffing below — the
+// payload could otherwise match "denied", "timed out after", etc.
+function isCodexStreamParseFailureMessage(message: string) {
+  return message.startsWith('Failed to parse item:');
+}
+
+const CODEX_STREAM_PARSE_FAILURE_MESSAGE_LIMIT = 400;
+
+// The raw event line embedded in a stream parse failure can be arbitrarily
+// large (it carries a command's full aggregated output); cap it so telemetry,
+// notifications, and terminal detail lines stay readable. Any other message
+// passes through unchanged.
+function truncateCodexStreamParseFailureMessage(message: string) {
+  if (!isCodexStreamParseFailureMessage(message) || message.length <= CODEX_STREAM_PARSE_FAILURE_MESSAGE_LIMIT) {
+    return message;
+  }
+  const omitted = message.length - CODEX_STREAM_PARSE_FAILURE_MESSAGE_LIMIT;
+  return `${message.slice(0, CODEX_STREAM_PARSE_FAILURE_MESSAGE_LIMIT)}… (${omitted} more characters omitted)`;
+}
+
 function inferCodexErrorKind(error: unknown, message: string, fallback: NealProviderErrorKind): NealProviderErrorKind {
-  const text = message.toLowerCase();
+  // Checked first: the message embeds a raw stream line whose content could
+  // match any of the keyword heuristics below (and the line can be large, so
+  // this also skips lowercasing it).
+  if (isCodexStreamParseFailureMessage(message)) {
+    return 'api_error';
+  }
   if (error instanceof CodexInactivityTimeoutError || /\btimed out after\b/i.test(message)) {
     return 'timeout';
   }
+  const text = message.toLowerCase();
   // Placed before the permission check so a content-safety refusal is never
   // misread as permission_denied when OpenAI phrases it with the word
   // "authorized".
@@ -160,7 +190,11 @@ function inferCodexErrorKind(error: unknown, message: string, fallback: NealProv
 }
 
 function isRetryableCodexError(kind: NealProviderErrorKind, message: string) {
-  return kind === 'timeout' || kind === 'session_unavailable' || (kind === 'api_error' && isTransientCodexApiFailure(message));
+  return (
+    kind === 'timeout' ||
+    kind === 'session_unavailable' ||
+    (kind === 'api_error' && (isCodexStreamParseFailureMessage(message) || isTransientCodexApiFailure(message)))
+  );
 }
 
 function isCodexReconnectProgressMessage(message: string) {
@@ -176,8 +210,11 @@ function createCodexProviderError(args: {
   cause?: unknown;
 }) {
   const kind = args.kind ?? inferCodexErrorKind(args.cause, args.message, 'provider_failed');
+  // Truncation preserves the `Failed to parse item:` prefix, so kind and
+  // retryability classify identically on the truncated message.
+  const message = truncateCodexStreamParseFailureMessage(args.message);
   return new NealProviderError({
-    message: args.message,
+    message,
     provider: OPENAI_CODEX_PROVIDER_ID,
     role: args.role,
     sessionHandle: args.sessionHandle,

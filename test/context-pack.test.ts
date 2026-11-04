@@ -411,3 +411,61 @@ test('an execution child seeded with inheritedPlanReviewDebt surfaces the exact 
     /- C3: findingClass=verification_hardening; originRound=3; claim=Verification should pin the retry-count behavior\.; requiredAction=Add an executable oracle for retry counting\./,
   );
 });
+
+test('closed manual gates survive a state round-trip and reach the reviewer context', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-closed-gate-context-'));
+  const stateDir = join(cwd, '.neal');
+  const runDir = join(stateDir, 'runs', '2026-10-07T18-00-00.000Z-test');
+  await mkdir(runDir, { recursive: true });
+  const planDoc = join(cwd, 'PLAN.md');
+  await writeFile(planDoc, '# Plan\n', 'utf8');
+
+  const initialState = await createInitialState(
+    {
+      cwd,
+      planDoc,
+      stateDir,
+      runDir,
+      topLevelMode: 'execute',
+      allowedDirtyPaths: [],
+      agentConfig: getDefaultAgentConfig(cwd),
+      progressJsonPath: join(runDir, 'plan-progress.json'),
+      progressMarkdownPath: join(runDir, 'PLAN_PROGRESS.md'),
+      reviewMarkdownPath: join(runDir, 'REVIEW.md'),
+      recoveryMarkdownPath: join(runDir, 'RECOVERY.md'),
+      maxRounds: 3,
+    },
+    'base',
+  );
+  const closedManualGates: OrchestrationState['closedManualGates'] = [
+    {
+      id: 'bench-run',
+      title: 'Run the harness on the bench board',
+      scope: '2',
+      instructionsPath: join(runDir, 'GATE-bench-run.md'),
+      closedAt: '2026-10-07T18:30:00.000Z',
+      operatorMessage: 'Channel 2 saturated at gain 8.',
+    },
+    {
+      id: 'bench-rerun',
+      title: 'Rerun the harness at gain 4',
+      scope: '2.2',
+      instructionsPath: join(runDir, 'GATE-bench-rerun.md'),
+      closedAt: '2026-10-07T19:30:00.000Z',
+      operatorMessage: null,
+    },
+  ];
+  const statePath = getRunStatePath(runDir);
+  await saveState(statePath, { ...initialState, currentScopeNumber: 3, closedManualGates });
+
+  const reloaded = await loadState(statePath);
+  assert.deepStrictEqual(reloaded.closedManualGates, closedManualGates);
+
+  const packet = await buildAndPersistReviewerContextPacket({ state: reloaded });
+  assert.match(packet.promptMarkdown, /## Manual Gates\nPassing resume checks only show the operator did the work, not that it succeeded\./);
+  assert.match(
+    packet.promptMarkdown,
+    /- Scope 2: bench-run \(Run the harness on the bench board\) closed by the operator at 2026-10-07T18:30:00\.000Z; instructions=\.neal\/runs\/2026-10-07T18-00-00\.000Z-test\/GATE-bench-run\.md; operatorMessage=Channel 2 saturated at gain 8\./,
+  );
+  assert.match(packet.promptMarkdown, /- Scope 2\.2: bench-rerun \(Rerun the harness at gain 4\) passed resume checks at 2026-10-07T19:30:00\.000Z;/);
+});

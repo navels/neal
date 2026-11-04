@@ -35,6 +35,7 @@ import {
 } from '../git.js';
 import type { RunLogger } from '../logger.js';
 import { notifyBlocked, notifyComplete, notifyScopeAccepted } from './notifications.js';
+import { coderSessionFields } from './phases/shared.js';
 import { inspectPlanDocDisposition, withPlanDocPreserved } from '../plan-doc.js';
 import {
   appendDerivedSubScopeAndParentCompletion,
@@ -476,14 +477,7 @@ async function persistExecuteFinalizationFailure(args: {
     finalCommit: args.finalCommit,
     archivedReviewPath: args.archivedReviewPath,
     completedScopes: args.completedScopes,
-    ...(coderRoundExtras
-      ? {
-          coderSessionHandle: coderRoundExtras.sessionHandleOverride,
-          coderSessionProtocol: coderRoundExtras.sessionHandleOverride
-            ? state.coderSessionProtocol ?? 'structured_json_v1'
-            : null,
-        }
-      : {}),
+    ...(coderRoundExtras ? coderSessionFields(coderRoundExtras.sessionHandleOverride, state) : {}),
     status: 'failed',
   });
   await args.runtime.writeExecutionArtifacts(failedState);

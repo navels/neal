@@ -774,6 +774,9 @@ export function assertValidOrchestrationState(
   if (state.coderSessionHandle === null && state.coderSessionProtocol !== null) {
     throwStateInvariant(context, 'coderSessionProtocol', 'must be null when coderSessionHandle is null');
   }
+  if (state.coderSessionHandle !== null && state.coderSessionProtocol === null) {
+    throwStateInvariant(context, 'coderSessionProtocol', 'must not be null when coderSessionHandle is present');
+  }
 
   if (state.phase === 'done' && state.status !== 'done') {
     throwStateInvariant(

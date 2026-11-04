@@ -15,7 +15,7 @@ import {
   renderRecentAcceptedScopesSummary,
 } from './scopes.js';
 import { getDerivedPlanCountersView, getDerivedPlanView, getFinalCompletionView } from './state-views.js';
-import type { OrchestrationState, ProgressScope, ResidualReviewDebtItem, ScopeAccountingSummary } from './types.js';
+import type { ClosedManualGate, OrchestrationState, ProgressScope, ResidualReviewDebtItem, ScopeAccountingSummary } from './types.js';
 
 type InteractiveBlockedRecoverySummary = {
   sourcePhase: NonNullable<OrchestrationState['interactiveBlockedRecovery']>['sourcePhase'];
@@ -237,6 +237,12 @@ function pushResidualReviewDebtLines(lines: string[], debt: ResidualReviewDebtSu
   }
 }
 
+function describeClosedManualGate(gate: ClosedManualGate) {
+  return gate.operatorMessage === null
+    ? `resume checks passed at ${gate.closedAt}`
+    : `closed by the operator at ${gate.closedAt} with this message: ${gate.operatorMessage}`;
+}
+
 export function renderPlanProgressMarkdown(state: OrchestrationState) {
   const progress = buildPlanProgressState(state);
   const lines = [
@@ -410,6 +416,15 @@ export function renderPlanProgressMarkdown(state: OrchestrationState) {
       );
     } else {
       lines.push('- Last failure: none');
+    }
+  }
+
+  const scopeLabel = getCurrentScopeLabel(state);
+  const closedGates = state.closedManualGates.filter((gate) => gate.scope === scopeLabel);
+  if (closedGates.length > 0) {
+    lines.push('', '## Manual Gates Closed In This Scope');
+    for (const gate of closedGates) {
+      lines.push(`- ${gate.id}: ${gate.title}; ${describeClosedManualGate(gate)}; instructions: ${gate.instructionsPath}`);
     }
   }
 

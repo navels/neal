@@ -311,6 +311,7 @@ function createSeededTransitionState(overrides: Partial<OrchestrationState>): Or
     currentScopeProgressJustification: seedProgressJustification(),
     currentScopeMeaningfulProgressVerdict: seedMeaningfulProgressVerdict(),
     manualGate: seedManualGate(),
+    closedManualGates: [{ id: 'seed-gate', title: 'Seed gate', scope: '7', instructionsPath: '/seed/repo/.neal/runs/seed-run/GATE-seed-gate.md', closedAt: '2026-01-01T00:00:00.000Z', operatorMessage: null }],
     finalCompletionSummary: seedFinalCompletionSummary(),
     finalCompletionReviewVerdict: seedFinalCompletionReviewVerdict(),
     finalCompletionResolvedAction: 'continue_execution',
