@@ -31,6 +31,7 @@ import { persistSplitPlanRecovery } from '../split-plan.js';
 import { enterInteractiveBlockedRecovery, shouldNotifyInteractiveBlockedRecoveryEntry } from './recovery.js';
 import {
   bestEffortCleanupTimedOutCoder,
+  coderSessionFields,
   persistBlockedScope,
   persistCoderFailureState,
   scheduleCoderFreshSessionRetry,
@@ -488,8 +489,7 @@ export async function runExecuteResponsePhase(
 
   const nextState = await saveState(statePath, {
     ...state,
-    coderSessionHandle: codex.sessionHandle,
-    coderSessionProtocol: codex.sessionHandle ? state.coderSessionProtocol : null,
+    ...coderSessionFields(codex.sessionHandle, state),
     findings: responseState.findings,
     createdCommits: [...state.createdCommits, ...createdCommits],
     phase: responseState.nextPhase,

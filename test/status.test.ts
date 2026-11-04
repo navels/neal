@@ -329,6 +329,7 @@ test('buildStatusSnapshot reports healthy recent coder activity and artifacts', 
       ...state,
       currentScopeNumber: 4,
       coderSessionHandle: 'coder-session',
+      coderSessionProtocol: 'structured_json_v1',
       reviewerSessionHandle: 'reviewer-session',
       createdCommits: ['commit-one'],
       completedScopes: [

@@ -1093,6 +1093,81 @@ test('interactive blocked recovery resumes through the next ordinary coder path'
   assert.equal(nextState.interactiveBlockedRecoveryHistory[0]?.resultPhase, 'coder_response');
 });
 
+// Shared driver for the session-protocol persistence tests below: seeds a
+// blocked-recovery run with the given coder session fields and applies a
+// resume_current_scope disposition that returned `nextSessionHandle`.
+async function applyResumeDispositionWithSession(args: {
+  coderSessionHandle: string | null;
+  coderSessionProtocol: OrchestrationState['coderSessionProtocol'];
+  nextSessionHandle: string;
+}) {
+  const { statePath, state } = await createResumeFixture({
+    currentScopeNumber: 5,
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+    coderSessionHandle: args.coderSessionHandle,
+    coderSessionProtocol: args.coderSessionProtocol,
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-04-16T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Coder needs operator input.',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      pendingDirective: null,
+      turns: [
+        {
+          number: 1,
+          recordedAt: '2026-04-16T00:01:00.000Z',
+          operatorGuidance: 'Use the fallback approach and continue.',
+          origin: 'operator',
+          disposition: null,
+        },
+      ],
+    },
+  });
+
+  return applyInteractiveBlockedRecoveryDisposition(
+    state,
+    statePath,
+    {
+      action: 'resume_current_scope',
+      summary: 'The scope can continue.',
+      rationale: 'The operator clarified how to proceed.',
+      blocker: '',
+      replacementPlan: '',
+      laterScopeNumber: 0,
+      laterScopeBody: '',
+    },
+    args.nextSessionHandle,
+  );
+}
+
+test('interactive blocked recovery persists the structured protocol for a fresh recovery session', async () => {
+  // Issue #104: after a fresh-session retry nulls both coder session fields,
+  // the recovery round starts a fresh structured session; persisting its
+  // handle with a null protocol made every later coder-scope resume throw.
+  const nextState = await applyResumeDispositionWithSession({
+    coderSessionHandle: null,
+    coderSessionProtocol: null,
+    nextSessionHandle: 'coder-session-fresh-recovery',
+  });
+
+  assert.equal(nextState.coderSessionHandle, 'coder-session-fresh-recovery');
+  assert.equal(nextState.coderSessionProtocol, 'structured_json_v1');
+});
+
+test('interactive blocked recovery keeps a resumed legacy session protocol', async () => {
+  const nextState = await applyResumeDispositionWithSession({
+    coderSessionHandle: 'coder-session-legacy',
+    coderSessionProtocol: 'legacy_marker_v1',
+    nextSessionHandle: 'coder-session-legacy',
+  });
+
+  assert.equal(nextState.coderSessionHandle, 'coder-session-legacy');
+  assert.equal(nextState.coderSessionProtocol, 'legacy_marker_v1');
+});
+
 test('interactive blocked recovery can route replacement through split-plan machinery', async () => {
   const { statePath, state } = await createExecuteFinalizationFixture({
     currentScopeNumber: 6,

@@ -363,7 +363,14 @@ function hydrateCoderSessionProtocol(state: StateRecord, coderSessionHandle: str
     return coderSessionHandle ? 'legacy_marker_v1' : null;
   }
   if (value === null) {
-    return null;
+    // An explicit null alongside an active handle is a corrupt combination
+    // only pre-fix recovery-disposition and coder-response persists could
+    // write, and both took the handle from a round that always runs the
+    // structured protocol — so healing to structured is exact, and it keeps
+    // those runs resumable (#104). Current writers go through
+    // coderSessionFields and the save-time invariant, which forbid the
+    // combination.
+    return coderSessionHandle ? 'structured_json_v1' : null;
   }
   if ((CODER_SESSION_PROTOCOLS as readonly string[]).includes(value)) {
     return value as CoderSessionProtocol;

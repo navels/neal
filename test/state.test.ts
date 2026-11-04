@@ -620,6 +620,27 @@ test('state hydration treats missing coderSessionProtocol without an active hand
   assert.equal(loadedState.coderSessionProtocol, null);
 });
 
+test('state hydration heals an explicit null coderSessionProtocol with an active handle to structured', async () => {
+  // Issue #104: a pre-fix interactive-blocked-recovery disposition could
+  // persist a fresh (structured) session handle with coderSessionProtocol
+  // null, which made every later resume fail. Hydration heals the combination
+  // so those runs stay resumable.
+  const { state, statePath } = await createMinimalStateFixture('neal-state-corrupt-null-protocol-');
+  await saveState(statePath, {
+    ...state,
+    coderSessionHandle: 'coder-session-recovered-1',
+    coderSessionProtocol: 'structured_json_v1',
+  });
+  const persisted = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, unknown>;
+  persisted.coderSessionProtocol = null;
+  await writeFile(statePath, JSON.stringify(persisted, null, 2) + '\n', 'utf8');
+
+  const loadedState = await loadState(statePath);
+
+  assert.equal(loadedState.coderSessionHandle, 'coder-session-recovered-1');
+  assert.equal(loadedState.coderSessionProtocol, 'structured_json_v1');
+});
+
 test('state hydration migrates pre-upgrade plan-review sessions from coder to planner fields', async () => {
   const { state, statePath } = await createMinimalStateFixture('neal-state-legacy-planner-session-');
   await saveState(statePath, {
