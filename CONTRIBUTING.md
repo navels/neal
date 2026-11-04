@@ -79,6 +79,13 @@ with nearby source matters.
 
 ## Change Scope
 
+neal is deliberately small. It exists to deliver two things: adversarial
+review from a different model provider than the coder, and plan scoping with
+a fresh coder context per scope. PRs that grow the surface area — new
+features, commands, flags, or config keys — will usually be declined, even
+well-built ones. Cost and friction problems get fixed with better defaults
+and by fixing waste in the existing machinery, not with options.
+
 Focused fixes and improvements to neal's core loop, validation, storage,
 provider adapters, terminal output, and documentation are good fits for pull
 requests.
