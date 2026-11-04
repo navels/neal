@@ -10,6 +10,12 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.6.13] - 2026-11-04
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.293` to `0.3.316` and `@openai/codex-sdk` from `0.161.0` to `0.166.0`. Re-qualified both native adapters with `neal compat`; no behavior change.
+
 ### Fixed
 
 - A run could become permanently unresumable after a round that followed a
