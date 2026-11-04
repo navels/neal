@@ -36,7 +36,7 @@
  *   relying on Neal-inlined context.
  */
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
@@ -240,12 +240,49 @@ function buildSyntheticSessionHandle() {
   return `${OPENAI_COMPATIBLE_PROVIDER_ID}:${new Date().toISOString()}:${randomBytes(4).toString('hex')}`;
 }
 
+function getPersistentCoderSessionDir(cwd: string) {
+  return join(cwd, '.neal', 'provider-sessions', 'openai-compatible');
+}
+
 function getPersistentCoderSessionPath(cwd: string, sessionHandle: string) {
   const match = OPENAI_COMPATIBLE_CODER_SESSION_HANDLE_PATTERN.exec(sessionHandle);
   if (!match) {
     throw new Error(`invalid OpenAI-compatible coder session handle: ${JSON.stringify(sessionHandle)}`);
   }
-  return join(cwd, '.neal', 'provider-sessions', 'openai-compatible', `${match[1]}.json`);
+  return join(getPersistentCoderSessionDir(cwd), `${match[1]}.json`);
+}
+
+// Session mirrors are abandoned in place: scope boundaries and fresh-session
+// retries clear the persisted handle without telling the adapter, so nothing
+// else ever deletes the files. Each new session sweeps mirrors this stale
+// best-effort. 30 days comfortably outlives any resumable pause (manual
+// gates, operator guidance waits) while bounding accumulation.
+const PERSISTENT_CODER_SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function cleanupStalePersistentCoderSessions(cwd: string, keepPath: string) {
+  const dir = getPersistentCoderSessionDir(cwd);
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - PERSISTENT_CODER_SESSION_RETENTION_MS;
+  for (const entry of entries) {
+    const path = join(dir, entry);
+    if (!entry.endsWith('.json') || path === keepPath) {
+      continue;
+    }
+    try {
+      const info = await stat(path);
+      if (info.mtimeMs < cutoff) {
+        await rm(path, { force: true });
+      }
+    } catch {
+      // Best-effort: a mirror that cannot be inspected or removed is left
+      // for the next sweep.
+    }
+  }
 }
 
 function parsePersistentCoderSessionRecord(value: unknown): OpenAICompatibleCoderSessionRecord {
@@ -1643,6 +1680,10 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
 
     if (isNewSession) {
       await persistAgentLoopSession(state);
+      await cleanupStalePersistentCoderSessions(
+        args.cwd,
+        getPersistentCoderSessionPath(args.cwd, sessionHandle),
+      );
     }
 
     return {

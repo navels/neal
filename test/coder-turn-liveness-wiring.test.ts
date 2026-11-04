@@ -230,3 +230,21 @@ test('isCoderTimeoutError classifies by error kind in addition to message text',
   assert.equal(isCoderTimeoutError(coderError('api_error', 'API failure')), false);
   assert.equal(isCoderFreshSessionRetryableError(coderError('no_progress_timeout', 'silent turn')), true);
 });
+
+test('session_unavailable coder errors are fresh-session retryable regardless of message text', () => {
+  // A provider that classifies a resume attempt as session_unavailable (a
+  // dropped codex thread, a missing or model-mismatched openai-compatible
+  // session mirror) must route to the orchestrator's fresh-session retry;
+  // otherwise the dead handle stays persisted and every resume fails.
+  const error = new CoderRoundError(
+    new NealProviderError({
+      message: 'openai-compatible coder session is unavailable: saved session uses model "a", current config resolves "b".',
+      provider: 'openai-compatible',
+      role: 'coder',
+      kind: 'session_unavailable',
+    }),
+  );
+
+  assert.equal(isCoderTimeoutError(error), false);
+  assert.equal(isCoderFreshSessionRetryableError(error), true);
+});

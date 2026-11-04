@@ -34,7 +34,7 @@
  * and never retried).
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -1336,6 +1336,27 @@ test('runPrompt runs the same loop and returns a durable session handle', async 
   // No structured-protocol events on the unstructured path.
   assert.ok(!events.some((event) => event.type === 'structured_output_received'));
   assert.equal(events.filter((event) => event.type === 'turn_completed').length, 2);
+});
+
+test('starting a new session sweeps stale session mirrors and keeps recent ones', async () => {
+  const cwd = await createWorkDir();
+  const sessionDir = path.join(cwd, '.neal', 'provider-sessions', 'openai-compatible');
+  await mkdir(sessionDir, { recursive: true });
+  const stalePath = path.join(sessionDir, `${'a'.repeat(24)}.json`);
+  const freshPath = path.join(sessionDir, `${'b'.repeat(24)}.json`);
+  await writeFile(stalePath, '{}', 'utf8');
+  await writeFile(freshPath, '{}', 'utf8');
+  const staleTime = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+  await utimes(stalePath, staleTime, staleTime);
+
+  const model = scriptedModel([() => textResponse('Done.')]);
+  const adapter = createAdapter({ model });
+  const result = await adapter.runPrompt({ cwd, prompt: 'task', inactivityTimeoutMs: 5_000 });
+
+  await assert.rejects(access(stalePath), 'a mirror older than the retention window is deleted');
+  await access(freshPath);
+  const newId = String(result.sessionHandle).split(':').at(-1);
+  await access(path.join(sessionDir, `${newId}.json`));
 });
 
 test('runPrompt has no in-round retry budget: transient failures rethrow as retryable', async () => {
