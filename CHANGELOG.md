@@ -10,6 +10,16 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Added
+
+- `neal changes` shows what a selected run changed without hand-built Git
+  ranges: committed changes since the current scope's recorded base,
+  uncommitted worktree changes (neal-owned and admitted dirty paths filtered
+  out), and a whole-run summary from `initialBaseCommit`, with `--run` and
+  `--json`. When `HEAD` is not descended from the recorded base the range is
+  reported as unknown instead of being attributed to neal. Contributed by
+  @seytar (#83).
+
 ## [0.6.13] - 2026-11-04
 
 ### Changed
