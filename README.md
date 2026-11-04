@@ -109,7 +109,7 @@ neal grew out of a large frontend upgrade (Ember 3.28 to Ember 5) where the agen
 npm install -g @navels/neal
 ```
 
-neal requires Node.js >= 24.18.0 and drives your configured provider CLIs/SDKs
+neal requires Node.js >= 26.13.0 and drives your configured provider CLIs/SDKs
 (OpenAI Codex, Anthropic Claude, or any OpenAI-compatible / OpenRouter model).
 See [Provider setup](#provider-setup).
 

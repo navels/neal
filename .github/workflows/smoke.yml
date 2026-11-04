@@ -124,7 +124,7 @@ jobs:
         if: steps.guard.outputs.run == 'true'
         run: |
           corepack enable
-          corepack prepare pnpm@11 --activate
+          corepack prepare pnpm@12 --activate
 
       - name: Install dependencies
         if: steps.guard.outputs.run == 'true'
