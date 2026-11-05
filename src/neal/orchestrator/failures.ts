@@ -18,6 +18,15 @@ export function isCoderTimeoutError(error: CoderRoundError) {
 }
 
 export function isCoderResumeHistoryError(error: CoderRoundError) {
+  // Any provider that classifies a resume attempt as session_unavailable
+  // (codex: dropped threads; openai-compatible: a missing, corrupt, or
+  // model-mismatched session mirror) is saying the stored handle cannot be
+  // used. Without the fresh-session retry the handle stays persisted and
+  // every resume fails the same way. The message checks remain for codex
+  // errors that predate kind classification in persisted failure state.
+  if (error.kind === 'session_unavailable') {
+    return true;
+  }
   const text = error.message.toLowerCase();
   return (
     text.includes('property_name_above_max_length') ||

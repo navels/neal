@@ -12,6 +12,15 @@ dependency-update policy.
 
 ### Added
 
+- The OpenAI-compatible coder and planner now support session resume. Chat
+  Completions has no provider-side session object, so neal persists its own
+  message-history mirror under `.neal/provider-sessions/openai-compatible/`
+  behind an opaque handle: `neal resume` continues an interrupted scope's
+  conversation (including a partially completed tool loop or finalization
+  turn) instead of redoing the scope from scratch. Scope boundaries still
+  start fresh sessions, the reviewer stays stateless, and mirrors idle for 30
+  days are swept when a new session starts. Contributed by @seytar (#85).
+
 - `neal changes` shows what a selected run changed without hand-built Git
   ranges: committed changes since the current scope's recorded base,
   uncommitted worktree changes (neal-owned and admitted dirty paths filtered
@@ -19,6 +28,13 @@ dependency-update policy.
   `--json`. When `HEAD` is not descended from the recorded base the range is
   reported as unknown instead of being attributed to neal. Contributed by
   @seytar (#83).
+
+### Fixed
+
+- A coder resume that fails with `session_unavailable` (a dropped Codex
+  thread, or a missing, corrupt, or model-mismatched OpenAI-compatible
+  session mirror) now routes to the orchestrator's fresh-session retry
+  instead of failing the run with the dead handle still persisted.
 
 ## [0.6.13] - 2026-11-04
 
