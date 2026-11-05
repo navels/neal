@@ -10,6 +10,8 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-04
+
 ### Added
 
 - The OpenAI-compatible coder and planner now support session resume. Chat
