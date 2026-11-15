@@ -14,6 +14,7 @@ import {
   setProviderCapabilitiesOverrideForTesting,
 } from '../src/neal/providers/registry.js';
 import type {
+  CoderStructuredPromptArgs,
   StructuredAdvisorAdapter,
   StructuredAdvisorRoundArgs,
   StructuredAdvisorRoundResult,
@@ -131,6 +132,47 @@ function createReviewFindingsFixtures() {
   };
   return { context, draft };
 }
+
+// `neal review` is read-only and never resumes a draft session, so the draft
+// turn must ask the coder adapter not to persist resumable session state into
+// the repository. Without the flag the openai-compatible coder writes a
+// `.neal/provider-sessions/` mirror and the review's own unchanged-worktree
+// assertion fails.
+test('review-findings draft runs the coder with an ephemeral, never-resumed session', async () => {
+  const cwd = await createReviewFindingsCwd();
+  const { context, draft } = createReviewFindingsFixtures();
+  const captured: CoderStructuredPromptArgs[] = [];
+  registerProviderDefinitionForTesting(
+    createFakeProviderDefinition({
+      id: 'fake-draft-coder',
+      coderStructuredResponses: [draft],
+      onCoderStructuredRun: (args) => {
+        captured.push(args);
+      },
+    }),
+  );
+  const provider = createAgentReviewFindingsProviderAdapter({
+    cwd,
+    agentConfig: {
+      planner: { provider: 'fake-draft-coder', model: null },
+      coder: { provider: 'fake-draft-coder', model: null },
+      reviewer: { provider: 'fake-draft-coder', model: null },
+    },
+  });
+
+  const result = await provider.draftFindings({
+    context,
+    round: 1,
+    previousDraft: null,
+    reviewFindings: [],
+    prompt: 'Draft findings for the selected range.',
+  });
+
+  assert.deepEqual(result, draft);
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]!.ephemeralSession, true);
+  assert.ok(!captured[0]!.resumeHandle, 'a draft round always starts a fresh session');
+});
 
 // Negative capability case for the module-private assertReviewAgentCapabilities
 // gate inside createAgentReviewFindingsProviderAdapter. This is a SEPARATE call

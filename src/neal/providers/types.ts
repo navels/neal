@@ -181,6 +181,15 @@ export type CoderRunPromptArgs = {
   // their SDK-level cancellation; repair turns are short prompt-only turns and
   // are not wired to this signal.
   signal?: AbortSignal;
+  // The caller will never resume this session, so an adapter that keeps its
+  // resumable session state inside the working tree must not write it. Such
+  // an adapter returns a null `sessionHandle` and does not call
+  // `onSessionStarted`, because there is nothing to resume. Read-only
+  // commands (`neal review`) set this so a coder turn does not leave session
+  // state in the worktree. Adapters whose sessions live outside the
+  // repository ignore it and keep returning their usual handle. Mutually
+  // exclusive with `resumeHandle`.
+  ephemeralSession?: boolean;
 };
 
 export type CoderRunPromptResult = {

@@ -77,6 +77,10 @@ class AgentReviewFindingsProviderAdapter implements ReviewFindingsProviderAdapte
         schema,
         validator: validateReviewFindingsDraft,
       }),
+      // Each drafting round is a fresh coder session that is never resumed,
+      // and `neal review` must leave the worktree unchanged, so the coder
+      // adapter must not write resumable session state into the repository.
+      ephemeralSession: true,
       logger: this.args.logger,
     });
 

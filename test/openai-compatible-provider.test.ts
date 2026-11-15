@@ -34,7 +34,7 @@
  * and never retried).
  */
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -1357,6 +1357,97 @@ test('starting a new session sweeps stale session mirrors and keeps recent ones'
   await access(freshPath);
   const newId = String(result.sessionHandle).split(':').at(-1);
   await access(path.join(sessionDir, `${newId}.json`));
+});
+
+// `neal review` drafts findings through the coder adapter and then asserts the
+// worktree is unchanged. A session mirror written for that never-resumed
+// draft session shows up as an untracked `.neal/provider-sessions/` file and
+// fails every review, so ephemeral sessions must write nothing.
+test('an ephemeral structured coder session writes nothing under .neal and returns no resumable handle', async () => {
+  const cwd = await createWorkDir();
+  const model = scriptedModel([
+    () => listDirToolCallResponse('call-1'),
+    () => textResponse('Draft complete.'),
+    jsonPayloadResponse,
+  ]);
+  const adapter = createAdapter({ model });
+  const { events, sink } = collectEvents();
+  const started: string[] = [];
+
+  const result = await adapter.runStructuredPrompt<TestPayload>({
+    ...structuredArgs(cwd, sink),
+    apiRetryLimit: 0,
+    ephemeralSession: true,
+    onSessionStarted: (handle) => {
+      started.push(handle);
+    },
+  });
+
+  assert.deepEqual(result.structured, { done: true });
+  assert.equal(model.doGenerateCalls.length, 3);
+  // Nothing resumable exists, so no handle is returned or announced to the
+  // caller; `neal review` would otherwise record it as a draft session id.
+  assert.equal(result.sessionHandle, null);
+  assert.deepEqual(started, []);
+  await assert.rejects(access(path.join(cwd, '.neal')), 'an ephemeral session must not create .neal/');
+
+  // Telemetry still carries one events-only handle, and it is not resumable:
+  // there is no saved history behind it.
+  const startedEvents = events.filter((event) => event.type === 'session_started');
+  assert.equal(startedEvents.length, 1);
+  const eventsOnlyHandle = String(startedEvents[0]!.sessionHandle);
+  assert.doesNotMatch(eventsOnlyHandle, /^openai-compatible:v1:/);
+  await assert.rejects(
+    adapter.runStructuredPrompt<TestPayload>({
+      ...structuredArgs(cwd, sink),
+      apiRetryLimit: 0,
+      resumeHandle: eventsOnlyHandle,
+    }),
+    expectProviderError({ kind: 'session_unavailable', retryable: false }),
+  );
+  assert.equal(model.doGenerateCalls.length, 3);
+});
+
+test('an ephemeral runPrompt session neither writes a mirror nor sweeps existing ones', async () => {
+  const cwd = await createWorkDir();
+  const sessionDir = path.join(cwd, '.neal', 'provider-sessions', 'openai-compatible');
+  await mkdir(sessionDir, { recursive: true });
+  const stalePath = path.join(sessionDir, `${'a'.repeat(24)}.json`);
+  await writeFile(stalePath, '{}', 'utf8');
+  const staleTime = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+  await utimes(stalePath, staleTime, staleTime);
+
+  const model = scriptedModel([() => textResponse('Done.')]);
+  const adapter = createAdapter({ model });
+  const result = await adapter.runPrompt({
+    cwd,
+    prompt: 'task',
+    inactivityTimeoutMs: 5_000,
+    ephemeralSession: true,
+  });
+
+  assert.equal(result.finalResponse, 'Done.');
+  assert.equal(result.sessionHandle, null);
+  assert.deepEqual(await readdir(sessionDir), [`${'a'.repeat(24)}.json`]);
+});
+
+test('an ephemeral session cannot also resume a saved session', async () => {
+  const cwd = await createWorkDir();
+  const model = scriptedModel([() => textResponse('First round.'), () => textResponse('Unreachable.')]);
+  const adapter = createAdapter({ model });
+  const first = await adapter.runPrompt({ cwd, prompt: 'task', inactivityTimeoutMs: 5_000 });
+
+  await assert.rejects(
+    adapter.runPrompt({
+      cwd,
+      prompt: 'follow-up',
+      inactivityTimeoutMs: 5_000,
+      resumeHandle: first.sessionHandle,
+      ephemeralSession: true,
+    }),
+    expectProviderError({ kind: 'provider_failed', retryable: false }),
+  );
+  assert.equal(model.doGenerateCalls.length, 1);
 });
 
 test('runPrompt has no in-round retry budget: transient failures rethrow as retryable', async () => {
