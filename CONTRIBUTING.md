@@ -60,6 +60,13 @@ engine.
 For CLI behavior changes, also run the relevant `pnpm start -- ...` command from
 a disposable target repository or fixture.
 
+A test or script that creates a git repository and commits in it has to set
+`commit.gpgsign false` in that repository, next to `user.name` and
+`user.email`. Otherwise the commit fails on any machine with global commit
+signing and no pinned signing key, because there's no key for the made-up
+identity. CI doesn't sign, so it wouldn't catch this; `test/throwaway-repo-signing.test.ts`
+does.
+
 Manual npm release operation is documented in [docs/release.md](docs/release.md).
 Normal CI remains verification-only. Publishing is handled only by the manual
 `Publish` workflow. Don't duplicate the release procedure in pull requests.
