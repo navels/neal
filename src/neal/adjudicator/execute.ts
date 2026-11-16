@@ -1,19 +1,19 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 
 import { runCoderResponseRound, runReviewerRound } from '../agents.js';
-import {
-  OPEN_FINDINGS_PROMPT_ITEM_LIMIT,
-  readOnlyReviewerNeedsInlinedDiff,
-} from '../context/inline-review-context.js';
+import { OPEN_FINDINGS_PROMPT_ITEM_LIMIT } from '../context/inline-review-context.js';
 import { buildAndPersistReviewerContextPacket } from '../context/reviewer-context.js';
 import { getReviewStuckWindow } from '../config.js';
 import { getDiffForRangePaths } from '../git.js';
 import { EXECUTE_FINALIZATION_PHASE, type ExecuteFinalizationPhase } from '../execute-finalization.js';
 import type { RunLogger } from '../logger.js';
 import type { EarlierScopeFileChange } from '../prompts/execute.js';
+import { writeRangeDiffArtifact } from '../range-diff-artifact.js';
 import {
   classifyAlreadySatisfiedTopLevelScopeAcceptance,
   classifyEmptyDerivedParentAdvance,
+  getCurrentScopeLabel,
   getExecutionPlanPath,
   getParentScopeLabel,
   renderRecentAcceptedScopesSummary,
@@ -427,7 +427,7 @@ export async function runExecuteReviewerAdjudication(args: {
   getCommitRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string[]>;
   getDiffStatForRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string>;
   getChangedFilesForRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string[]>;
-  getDiffForRange: (cwd: string, baseCommit: string, headCommit: string) => Promise<string>;
+  writeRangeDiffArtifact?: typeof writeRangeDiffArtifact;
   // Path-restricted range diff for earlier-scope overlap context. Optional so
   // existing callers and fakes stay valid; defaults to the real git helper.
   getDiffForRangePaths?: (cwd: string, baseCommit: string, headCommit: string, paths: readonly string[]) => Promise<string>;
@@ -446,16 +446,26 @@ export async function runExecuteReviewerAdjudication(args: {
   const commits = await args.getCommitRange(args.state.cwd, args.state.baseCommit, headCommit);
   const diffStat = await args.getDiffStatForRange(args.state.cwd, args.state.baseCommit, headCommit);
   const changedFiles = await args.getChangedFilesForRange(args.state.cwd, args.state.baseCommit, headCommit);
-  const scratchDir = getScopeReviewerScratchDir(args.state.runDir, context.parentScopeLabel, context.round);
+  const scratchDir = getScopeReviewerScratchDir(args.state.runDir, getCurrentScopeLabel(args.state), context.round);
   await mkdir(scratchDir, { recursive: true });
-  // Read-only reviewers with read tools but no commit-range diff tool (native
-  // Claude/Codex) get the commit-range diff inlined directly so they can see
-  // exactly what changed without shell access; read-only reviewers that expose
-  // their own commit-range diff tool (openai-compatible) inspect the range with
-  // that tool instead.
-  const inlinedRangeDiff = readOnlyReviewerNeedsInlinedDiff(args.state.agentConfig.reviewer)
-    ? await args.getDiffForRange(args.state.cwd, args.state.baseCommit, headCommit)
+  const writeArtifact = args.writeRangeDiffArtifact ?? writeRangeDiffArtifact;
+  const rangeDiff = await writeArtifact({
+    cwd: args.state.cwd,
+    base: args.state.baseCommit,
+    head: headCommit,
+    dir: join(scratchDir, 'range-diff'),
+  });
+  const sincePrevious = previousHeadCommit && previousHeadCommit !== headCommit
+    ? await writeArtifact({
+        cwd: args.state.cwd,
+        base: previousHeadCommit,
+        head: headCommit,
+        dir: join(scratchDir, 'since-previous'),
+      })
     : null;
+  if (!sincePrevious) {
+    await rm(join(scratchDir, 'since-previous'), { recursive: true, force: true });
+  }
   const earlierScopeChanges = await collectEarlierScopeChanges({
     state: args.state,
     changedFiles,
@@ -485,7 +495,8 @@ export async function runExecuteReviewerAdjudication(args: {
     recentHistorySummary: context.recentHistorySummary,
     scratchDir,
     reviewerContext: await buildAndPersistReviewerContextPacket({ state: args.state }),
-    inlinedRangeDiff,
+    rangeDiffIndexPath: relative(args.state.cwd, rangeDiff.indexPath),
+    sincePreviousIndexPath: sincePrevious ? relative(args.state.cwd, sincePrevious.indexPath) : null,
     earlierScopeChanges,
     logger: args.logger,
   });

@@ -321,9 +321,9 @@ export async function runReviewerRound(args: {
   recentHistorySummary: string;
   scratchDir: string;
   reviewerContext?: ReviewerContextPacket | null;
-  // Neal-inlined commit-range diff for a read-only reviewer that has read tools
-  // but no commit-range diff tool; threaded into buildReviewerPrompt.
-  inlinedRangeDiff?: string | null;
+  // Repository-relative indexes for the cumulative range and optional round delta.
+  rangeDiffIndexPath: string;
+  sincePreviousIndexPath?: string | null;
   // Earlier accepted scopes' per-file diffs for files the current diff touches
   // again; threaded into buildReviewerPrompt.
   earlierScopeChanges?: readonly EarlierScopeFileChange[] | null;

@@ -81,6 +81,7 @@ const SCOPE_REVIEWER_ARGS = {
   changedFiles: ['file.ts'],
   round: 1,
   reviewMarkdownPath: '/tmp/REVIEW.md',
+  rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
   parentScopeLabel: '1',
   progressJustification: {
     milestoneTargeted: 'm',

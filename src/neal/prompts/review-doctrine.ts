@@ -32,6 +32,10 @@ export type CodeReviewFalsificationContext = {
   // When false (the default, e.g. openai-compatible), the doctrine keeps the
   // existing `git_diff`-tool phrasing.
   rangeDiffInlined?: boolean;
+  rangeDiffArtifact?: {
+    indexPath: string;
+    sincePreviousIndexPath?: string | null;
+  };
 };
 
 export type VerificationSkepticismContext = {
@@ -81,13 +85,33 @@ export function getAdversarialReviewDoctrineLines(context: AdversarialReviewDoct
   ];
 }
 
+export function getRangeDiffArtifactLines(context: {
+  indexPath: string;
+  sincePreviousIndexPath?: string | null;
+}) {
+  return [
+    `Commit-range diff index (repository-relative): ${context.indexPath}`,
+    ...(context.sincePreviousIndexPath
+      ? [`Changes since the previous reviewer head index (repository-relative): ${context.sincePreviousIndexPath}`]
+      : []),
+    'Start at the cumulative commit-range index. The index is the authoritative, complete list of changed entries; its patch files are the source of truth for exactly what changed, including deletions and renames. The inline diff stat and changed-file list are previews only.',
+    'Read the patch file for every index entry. Patch filenames are relative to their index directory. Read large indexes and patches in pages until complete; use byte offsets and lengths where supported, and request several pages in one turn where the tools allow. The index gives patch byte counts so page offsets can be computed in advance.',
+    ...(context.sincePreviousIndexPath
+      ? ['Also read the since-previous index and its patches to focus on the latest revisions, while still reviewing the full cumulative range.']
+      : []),
+    'Then read the changed files in full and search the tree for affected symbols and callers to verify claims. For deleted paths, use the patches and inspect surviving callers.',
+  ];
+}
+
 export function getCodeReviewFalsificationLines(context: CodeReviewFalsificationContext) {
   const mode = context.mode ?? 'tool-access';
   const reviewTarget = context.reviewTarget ?? 'changed behavior';
   const rangeDiffInlined = mode === 'read-only' && context.rangeDiffInlined === true;
   const lines: string[] = [];
 
-  if (context.rangeLabel) {
+  if (context.rangeDiffArtifact) {
+    lines.push(...getRangeDiffArtifactLines(context.rangeDiffArtifact));
+  } else if (context.rangeLabel) {
     lines.push(
       mode === 'read-only'
         ? rangeDiffInlined
@@ -104,7 +128,7 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
     );
   }
 
-  if (context.gitInspectionExamples) {
+  if (context.gitInspectionExamples && !context.rangeDiffArtifact) {
     if (mode === 'tool-access') {
       lines.push(context.gitInspectionExamples);
     } else if (mode === 'read-only') {

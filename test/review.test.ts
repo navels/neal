@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { access, chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
@@ -335,6 +335,7 @@ test('execute reviewer prompt includes coder justification and recent parent-obj
     changedFiles: ['src/neal/orchestrator.ts'],
     round: 2,
     reviewMarkdownPath: '/tmp/REVIEW.md',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
     parentScopeLabel: '5',
     progressJustification: {
       milestoneTargeted: 'Scope 3 reviewer verdict contract',
@@ -351,7 +352,7 @@ test('execute reviewer prompt includes coder justification and recent parent-obj
   // Injected recent parent-objective history is echoed back.
   assert.match(prompt, /Touched-file concentration: src\/shared\.ts \(3\/3 scopes\)/);
   // Injected commit range / scratch directory / parent objective render structurally.
-  assert.match(prompt, /git diff base123\.\.head456/);
+  assert.match(prompt, /Commit range: base123\.\.head456/);
   assert.match(prompt, /Temporary verification scratch directory: \/tmp\/repo\/\.neal\/runs\/run-123\/scratch\/reviewer-scope-5-round-2/);
   assert.match(prompt, /active parent objective.*scope 5/i);
   // Meaningful-progress contract surfaces its field names and verdict enum values.
@@ -385,6 +386,7 @@ test('execute reviewer prompt default variant instructs repository inspection wi
     changedFiles: ['src/neal/orchestrator.ts'],
     round: 2,
     reviewMarkdownPath: '/tmp/REVIEW.md',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
     parentScopeLabel: '5',
     progressJustification: {
       milestoneTargeted: 'Scope 5 doctrine defaults',
@@ -397,7 +399,7 @@ test('execute reviewer prompt default variant instructs repository inspection wi
   };
 
   const readCapablePrompt = buildReviewerPrompt(baseArgs);
-  assert.match(readCapablePrompt, /Use git commands against the repository, for example: git diff base123\.\.head456/);
+  assert.match(readCapablePrompt, /Commit-range diff index.*range-diff\/index\.md/);
   assert.match(readCapablePrompt, /Prior review history is available at \/tmp\/REVIEW\.md/);
   assert.doesNotMatch(readCapablePrompt, /Inlined review context from Neal/);
 });
@@ -413,6 +415,7 @@ test('execute reviewer prompt read-only variant instructs read-tool inspection w
     changedFiles: ['src/neal/orchestrator.ts'],
     round: 2,
     reviewMarkdownPath: '/tmp/REVIEW.md',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
     parentScopeLabel: '5',
     progressJustification: {
       milestoneTargeted: 'Scope 3 read-only doctrine mode',
@@ -425,8 +428,8 @@ test('execute reviewer prompt read-only variant instructs read-tool inspection w
   };
   const prompt = buildReviewerPrompt({ ...baseArgs, accessMode: 'read-only' });
 
-  // Read-only variant names the read-only git_diff tool for commit-range visibility.
-  assert.match(prompt, /git_diff/);
+  assert.match(prompt, /Commit-range diff index.*range-diff\/index\.md/);
+  assert.doesNotMatch(prompt, /git_diff/);
   // Path-pointer lines are allowed: the reviewer can read the file (injected REVIEW path).
   assert.match(prompt, /Prior review history is available at \/tmp\/REVIEW\.md/);
   // No execution, scratch-directory, or git-command instructions in read-only mode.
@@ -442,7 +445,7 @@ test('execute reviewer prompt read-only variant instructs read-tool inspection w
   assert.equal(buildReviewerPrompt({ ...baseArgs, accessMode: 'tool-access' }), buildReviewerPrompt(baseArgs));
 });
 
-test('execute reviewer prompt inlines an empty commit-range diff for a read-only reviewer instead of naming git_diff', () => {
+test('execute reviewer prompt points at the index even for an empty range', () => {
   const baseArgs = {
     planDoc: '/tmp/PLAN.md',
     baseCommit: 'base123',
@@ -453,24 +456,21 @@ test('execute reviewer prompt inlines an empty commit-range diff for a read-only
     changedFiles: [],
     round: 1,
     reviewMarkdownPath: '/tmp/REVIEW.md',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
     parentScopeLabel: '5',
     progressJustification: {
       milestoneTargeted: 'Empty-diff read-only scope review',
       newEvidence: 'The selected range produced an empty diff.',
-      whyNotRedundant: 'No prior scope exercised the empty inlined-diff path.',
+      whyNotRedundant: 'No prior scope exercised an empty range.',
       nextStepUnlocked: 'Native read-only reviewers still see the (empty) range.',
     },
     recentHistorySummary: 'No accepted scopes have been recorded yet for parent objective 5.',
     scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/reviewer-scope-5-round-1',
   };
-  // An empty-string diff is a present (collected) diff, not "not collected", so
-  // it still rides the inlined channel rather than falling back to git_diff.
-  const prompt = buildReviewerPrompt({ ...baseArgs, accessMode: 'read-only', inlinedRangeDiff: '' });
+  const prompt = buildReviewerPrompt({ ...baseArgs, accessMode: 'read-only' });
 
-  // Section header carries the injected commit range; empty diff marker renders.
-  assert.match(prompt, /## Inlined commit-range diff from Neal \(base123\.\.head456\)/);
-  assert.match(prompt, /\(empty diff\)/);
-  // Present (collected) empty diff rides the inlined channel, not the git_diff fallback.
+  assert.match(prompt, /Commit-range diff index.*range-diff\/index\.md/);
+  assert.doesNotMatch(prompt, /Inlined commit-range diff/);
   assert.doesNotMatch(prompt, /git_diff/);
   assert.doesNotMatch(prompt, /Use git commands against the repository/);
 });
@@ -588,7 +588,7 @@ test('execute reviewer adjudication passes the stored reviewer session handle as
     getCommitRange: async () => ['head456 Address round-1 findings'],
     getDiffStatForRange: async () => '1 file changed, 2 insertions(+)',
     getChangedFilesForRange: async () => ['src/example.ts'],
-    getDiffForRange: async () => 'diff text',
+    writeRangeDiffArtifact: async ({ base, head, dir }) => ({ base, head, indexPath: join(dir, 'index.md'), totalBytes: 0, entries: [] }),
     runReviewerRound: async (args) => {
       receivedResumeHandle = args.resumeHandle;
       return {
@@ -604,119 +604,6 @@ test('execute reviewer adjudication passes the stored reviewer session handle as
   });
 
   assert.equal(receivedResumeHandle, 'reviewer-round-1-thread');
-});
-
-test('execute reviewer adjudication does not collect unused full diffs for a reviewer with its own range diff tool', async () => {
-  const { state } = await createState({
-    baseCommit: 'base123',
-    currentScopeProgressJustification: {
-      milestoneTargeted: 'Review the formatter reconciliation scope.',
-      newEvidence: 'The coder committed the formatter reconciliation.',
-      whyNotRedundant: 'This is the first reviewer pass for this scope.',
-      nextStepUnlocked: 'The reviewer can accept or identify targeted follow-up.',
-    },
-  });
-  state.agentConfig = { ...state.agentConfig, reviewer: { provider: 'openai-compatible', model: null } };
-  let reviewerCalled = false;
-  let fullDiffCollected = false;
-  let scratchDir = '';
-
-  const result = await runExecuteReviewerAdjudication({
-    state,
-    getHeadCommit: async () => 'head456',
-    getCommitRange: async () => ['head456 Reconcile formatter ownership'],
-    getDiffStatForRange: async () => '1729 files changed, 15475 insertions(+), 15071 deletions(-)',
-    getChangedFilesForRange: async () => ['package.json', 'packages/web/app/components/example.hbs'],
-    getDiffForRange: async () => {
-      fullDiffCollected = true;
-      return 'full diff text';
-    },
-    runReviewerRound: async (args) => {
-      reviewerCalled = true;
-      assert.equal(args.baseCommit, 'base123');
-      assert.equal(args.headCommit, 'head456');
-      assert.equal(args.diffStat, '1729 files changed, 15475 insertions(+), 15071 deletions(-)');
-      assert.deepEqual(args.changedFiles, ['package.json', 'packages/web/app/components/example.hbs']);
-      assert.equal(Object.hasOwn(args, 'diff'), false);
-      assert.equal(Object.hasOwn(args, 'inlineContext'), false);
-      assert.equal(args.inlinedRangeDiff, null);
-      assert.equal(args.reviewerContext?.purpose, 'reviewer_continuity');
-      assert.equal(args.reviewerContext?.promptMarkdown.includes('Reviewer Continuity Context'), true);
-      scratchDir = args.scratchDir;
-      assert.equal(scratchDir, getScopeReviewerScratchDir(state.runDir, args.parentScopeLabel, args.round));
-      await access(scratchDir);
-
-      return {
-        sessionHandle: 'reviewer-session',
-        summary: 'Scope is acceptable.',
-        findings: [],
-        meaningfulProgress: {
-          action: 'accept',
-          rationale: 'The scope materially advances the formatter reconciliation.',
-        },
-      };
-    },
-  });
-
-  assert.equal(reviewerCalled, true);
-  assert.equal(fullDiffCollected, false);
-  await access(scratchDir);
-  assert.equal(result.reviewInput.headCommit, 'head456');
-  assert.deepEqual(result.reviewInput.changedFiles, ['package.json', 'packages/web/app/components/example.hbs']);
-});
-
-// A native read-only reviewer (read tools, no shell, no commit-range diff tool —
-// the default anthropic-claude) cannot see the commit-range diff through tools,
-// so Neal collects the commit-range diff and threads it on the dedicated
-// inlinedRangeDiff channel (not the no-read inlineContext channel).
-test('execute reviewer adjudication inlines the commit-range diff for a native read-only reviewer', async () => {
-  const { state } = await createState({
-    baseCommit: 'base123',
-    currentScopeProgressJustification: {
-      milestoneTargeted: 'Review the formatter reconciliation scope.',
-      newEvidence: 'The coder committed the formatter reconciliation.',
-      whyNotRedundant: 'This is the first reviewer pass for this scope.',
-      nextStepUnlocked: 'The reviewer can accept or identify targeted follow-up.',
-    },
-  });
-  // The default reviewer (anthropic-claude) is native read-only.
-  assert.equal(state.agentConfig.reviewer.provider, 'anthropic-claude');
-  let reviewerCalled = false;
-  let fullDiffCollected = false;
-
-  await runExecuteReviewerAdjudication({
-    state,
-    getHeadCommit: async () => 'head456',
-    getCommitRange: async () => ['head456 Reconcile formatter ownership'],
-    getDiffStatForRange: async () => '1 file changed, 1 insertion(+)',
-    getChangedFilesForRange: async () => ['feature.ts'],
-    getDiffForRange: async (_cwd, base, head) => {
-      fullDiffCollected = true;
-      assert.equal(base, 'base123');
-      assert.equal(head, 'head456');
-      return 'full diff text for native read-only reviewer';
-    },
-    runReviewerRound: async (args) => {
-      reviewerCalled = true;
-      // The diff rides the dedicated inlinedRangeDiff channel; the removed
-      // no-read inlineContext channel no longer exists on the round args.
-      assert.equal(Object.hasOwn(args, 'inlineContext'), false);
-      assert.equal(args.inlinedRangeDiff, 'full diff text for native read-only reviewer');
-
-      return {
-        sessionHandle: 'reviewer-session',
-        summary: 'Scope is acceptable.',
-        findings: [],
-        meaningfulProgress: {
-          action: 'accept',
-          rationale: 'The scope materially advances the formatter reconciliation.',
-        },
-      };
-    },
-  });
-
-  assert.equal(reviewerCalled, true);
-  assert.equal(fullDiffCollected, true);
 });
 
 test('review markdown renders reviewer evidence for persisted findings', async () => {
@@ -2801,6 +2688,7 @@ function reviewerLivenessRoundArgs(providerId: ProviderId, cwd: string, logger: 
     changedFiles: ['src/example.ts'],
     round: 1,
     reviewMarkdownPath: join(cwd, 'REVIEW.md'),
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
     parentScopeLabel: '1',
     progressJustification: {
       milestoneTargeted: 'Reviewer liveness wiring',
@@ -2954,7 +2842,7 @@ test('reviewer round that exhausts liveness retries surfaces as a no_progress_ti
 // These tests drive the real adjudicator (runExecuteReviewerAdjudication) and
 // the real round function (runReviewerRound -> buildReviewerPrompt) with a
 // capturing structured-advisor adapter, then assert on the FINAL adapter
-// prompt. This is what catches a wiring regression (dropped inlinedRangeDiff,
+// prompt. This is what catches a wiring regression (dropped artifact paths,
 // wrong doctrine, re-added removed inline context) between the adjudicator
 // and the round.
 
@@ -3062,101 +2950,97 @@ async function runRealScopeReviewAdjudication(state: OrchestrationState) {
     getCommitRange,
     getDiffStatForRange,
     getChangedFilesForRange,
-    getDiffForRange,
   });
 }
 
-// A native read-only reviewer (read tools, no shell, no commit-range diff tool
-// — anthropic-claude/openai-codex) gets the commit-range diff inlined directly
-// so it can see exactly what changed, and the read-only doctrine references
-// that inlined diff instead of naming a git_diff tool or instructing shell. It
-// still reads the repository itself, so Neal does not inline the plan or
-// review history and the continuity packet keeps citations.
-test('scope review prompt reaching a native read-only structured advisor inlines the commit-range diff and names only its read tools', async () => {
+for (const provider of ['anthropic-claude', 'openai-codex', 'openai-compatible']) {
+  test(`scope review delivers complete round artifacts to ${provider}`, async () => {
+    const { state } = await createScopeReviewCaptureFixture(provider);
+    const captured = installCapturingScopeReviewAdvisor(provider);
+    const first = await runRealScopeReviewAdjudication(state);
+    const firstHead = first.reviewInput.headCommit;
+    const firstDir = getScopeReviewerScratchDir(state.runDir, '1', 1);
+    const index = await readFile(join(firstDir, 'range-diff/index.md'), 'utf8');
+    assert.ok(index.includes(`${state.baseCommit}..${firstHead}`));
+    assert.ok(index.includes('feature.ts'));
+    assert.equal(await readFile(join(firstDir, 'range-diff/0001.patch'), 'utf8'),
+      (await execFileAsync('git', ['diff', '--full-index', `${state.baseCommit}..${firstHead}`], { cwd: state.cwd })).stdout);
+    await assert.rejects(access(join(firstDir, 'since-previous/index.md')));
+
+    state.rounds.push({
+      round: 1, reviewerSessionHandle: null, reviewedPlanPath: state.planDoc,
+      commitRange: { base: state.baseCommit!, head: firstHead },
+      openBlockingCanonicalCount: 0, findings: [],
+      normalizationApplied: false, normalizationOperations: [], normalizationScopeLabelMappings: [],
+    });
+    await writeFile(join(state.cwd, 'feature.ts'), 'export const revised = 2;\n');
+    await runGit(state.cwd, ['add', 'feature.ts']);
+    await runGit(state.cwd, ['commit', '--no-verify', '-m', 'revise scope']);
+    const second = await runRealScopeReviewAdjudication(state);
+    const secondHead = second.reviewInput.headCommit;
+    const secondDir = getScopeReviewerScratchDir(state.runDir, '1', 2);
+    for (const [dir, base] of [['range-diff', state.baseCommit!], ['since-previous', firstHead]]) {
+      const roundIndex = await readFile(join(secondDir, dir, 'index.md'), 'utf8');
+      assert.ok(roundIndex.includes(`${base}..${secondHead}`));
+      assert.equal(await readFile(join(secondDir, dir, '0001.patch'), 'utf8'),
+        (await execFileAsync('git', ['diff', '--full-index', `${base}..${secondHead}`], { cwd: state.cwd })).stdout);
+    }
+    for (const [i, round] of captured.entries()) {
+      const prompt = round.prompt;
+      const expectedDir = relative(state.cwd, i === 0 ? firstDir : secondDir);
+      assert.ok(prompt.includes(`${expectedDir}/range-diff/index.md`));
+      assert.equal(prompt.includes(`${expectedDir}/since-previous/index.md`), i === 1);
+      assert.equal(prompt.includes(SCOPE_REVIEW_DIFF_SENTINEL), false);
+      assert.match(prompt, /authoritative, complete list/);
+      assert.match(prompt, /patch files are the source of truth/);
+      assert.match(prompt, /several pages in one turn/);
+      assert.match(prompt, /Absence from the diff is not evidence of absence from the repository/);
+      assert.doesNotMatch(prompt, /git_diff|git diff |git show |git log |Inlined commit-range diff/);
+      assert.doesNotMatch(prompt, /Temporary verification scratch directory:|running them when available/);
+      assert.equal(prompt.includes(SCOPE_REVIEW_PLAN_SENTINEL), false);
+      assert.equal(prompt.includes(SCOPE_REVIEW_HISTORY_SENTINEL), false);
+      assert.match(prompt, /## Citations/);
+    }
+    // A retry at the same head still gets its cumulative artifact, without a redundant delta.
+    state.rounds[0]!.commitRange.head = secondHead;
+    await runRealScopeReviewAdjudication(state);
+    assert.doesNotMatch(captured[2]!.prompt, /Changes since the previous reviewer head index/);
+    await assert.rejects(access(join(secondDir, 'since-previous')), { code: 'ENOENT' });
+  });
+}
+
+test('derived sub-scopes of one parent retain distinct diff artifact paths', async () => {
   const { state } = await createScopeReviewCaptureFixture('anthropic-claude');
   const captured = installCapturingScopeReviewAdvisor('anthropic-claude');
+  state.currentScopeNumber = 4;
+  state.derivedFromScopeNumber = 4;
+  state.derivedPlanPath = state.planDoc;
+  state.derivedPlanStatus = 'accepted';
+  state.derivedScopeIndex = 1;
+  state.reviewerSessionHandle = 'shared-reviewer-session';
+  const first = await runRealScopeReviewAdjudication(state);
+  const firstDir = getScopeReviewerScratchDir(state.runDir, '4.1', 1);
+  const firstPatch = await readFile(join(firstDir, 'range-diff/0001.patch'), 'utf8');
 
+  // Scope advance resets review rounds but retains the reviewer's session.
+  state.baseCommit = first.reviewInput.headCommit;
+  state.derivedScopeIndex = 2;
+  state.rounds = [];
+  await writeFile(join(state.cwd, 'feature.ts'), 'export const nextScope = 3;\n');
+  await runGit(state.cwd, ['add', 'feature.ts']);
+  await runGit(state.cwd, ['commit', '--no-verify', '-m', 'second derived scope']);
   await runRealScopeReviewAdjudication(state);
-
-  assert.equal(captured.length, 1);
-  const prompt = captured[0]!.prompt;
-
-  // The commit-range diff is inlined as the source of truth: assert the
-  // structural section header, the inlined diff sentinel, and the stable
-  // diff-myopia rule anchor — not the verbatim instruction sentences.
-  assert.match(prompt, /## Inlined commit-range diff from Neal \(/);
-  assert.ok(prompt.includes(SCOPE_REVIEW_DIFF_SENTINEL), 'native read-only reviewer prompt should inline the commit-range diff');
-  assert.match(prompt, /Absence from the diff is not evidence of absence from the repository/);
-
-  // No commit-range diff tool naming and no shell/git-command/scratch instructions.
-  assert.doesNotMatch(prompt, /git_diff/);
-  assert.doesNotMatch(prompt, /Use git commands/);
-  assert.doesNotMatch(prompt, /git diff |git show |git log /);
-  assert.doesNotMatch(prompt, /Temporary verification scratch directory:/);
-  assert.doesNotMatch(prompt, /scratch directory/i);
-  assert.doesNotMatch(prompt, /running them when available/);
-
-  // It reads the repository itself: no inline-context framing, plan/history not
-  // inlined, continuity packet keeps the tool-access rendering with citations.
-  assert.doesNotMatch(prompt, /## Inlined review context from Neal/);
-  assert.equal(prompt.includes(SCOPE_REVIEW_PLAN_SENTINEL), false, 'native read-only reviewer prompt must not inline the plan body');
-  assert.equal(
-    prompt.includes(SCOPE_REVIEW_HISTORY_SENTINEL),
-    false,
-    'native read-only reviewer prompt must not inline the review history',
-  );
-  assert.match(prompt, /Prior review history is available at /);
-  assert.match(prompt, /## Citations/);
-});
-
-// openai-compatible advisor rounds run a read-only tool loop: the reviewer
-// inspects the repository with read tools, so its scope-review prompt must use
-// the read-only doctrine (inspection instructions, no execution/scratch/git
-// commands) and must not receive Neal-inlined context.
-test('scope review prompt reaching a read-only structured advisor instructs read-tool inspection without execution and no inline sections', async () => {
-  const { state } = await createScopeReviewCaptureFixture('openai-compatible');
-  const captured = installCapturingScopeReviewAdvisor('openai-compatible');
-
-  const result = await runRealScopeReviewAdjudication(state);
-
-  assert.equal(captured.length, 1);
-  const round = captured[0]!;
-  assert.equal(round.label, 'review');
-  const prompt = round.prompt;
-
-  // Read-only inspection routes through the git_diff tool: assert the tool
-  // marker and the stat:true overview option are named, plus the stable
-  // diff-myopia rule anchor — not the verbatim instruction sentences.
-  assert.match(prompt, /git_diff/);
-  assert.match(prompt, /stat:true/);
-  assert.match(prompt, /Absence from the diff is not evidence of absence from the repository/);
-  // Path-pointer lines are allowed: a read-only reviewer can read_file them.
-  assert.match(prompt, /Prior review history is available at /);
-
-  // No command-execution, test-running, scratch-directory, or git-command
-  // instructions of any kind.
-  assert.doesNotMatch(prompt, /Temporary verification scratch directory:/);
-  assert.doesNotMatch(prompt, /scratch directory/i);
-  assert.doesNotMatch(prompt, /Use git commands/);
-  assert.doesNotMatch(prompt, /git diff |git show |git log /);
-  assert.doesNotMatch(prompt, /running them when available/);
-
-  // No Neal-inlined context: the reviewer reads the repository itself.
-  assert.doesNotMatch(prompt, /## Inlined review context from Neal/);
-  assert.equal(prompt.includes(SCOPE_REVIEW_DIFF_SENTINEL), false, 'read-only reviewer prompt must not inline the diff');
-  assert.equal(prompt.includes(SCOPE_REVIEW_PLAN_SENTINEL), false, 'read-only reviewer prompt must not inline the plan body');
-  assert.equal(
-    prompt.includes(SCOPE_REVIEW_HISTORY_SENTINEL),
-    false,
-    'read-only reviewer prompt must not inline the review history',
-  );
-
-  // The continuity packet uses the tool-access rendering with citation paths.
-  assert.match(prompt, /# Reviewer Continuity Context/);
-  assert.match(prompt, /## Citations/);
-
-  assert.equal(result.reviewerResult.sessionHandle, null);
-  assert.equal(result.reviewerResult.meaningfulProgress.action, 'accept');
+  const secondDir = getScopeReviewerScratchDir(state.runDir, '4.2', 1);
+  const firstIndexPath = relative(state.cwd, join(firstDir, 'range-diff/index.md'));
+  const secondIndexPath = relative(state.cwd, join(secondDir, 'range-diff/index.md'));
+  assert.notEqual(firstIndexPath, secondIndexPath);
+  assert.ok(captured[0]!.prompt.includes(firstIndexPath));
+  assert.ok(captured[1]!.prompt.includes(secondIndexPath));
+  assert.equal(captured[1]!.prompt.includes(firstIndexPath), false);
+  assert.equal(captured[0]!.resumeHandle, 'shared-reviewer-session');
+  assert.equal(captured[1]!.resumeHandle, 'shared-reviewer-session');
+  assert.equal(await readFile(join(firstDir, 'range-diff/0001.patch'), 'utf8'), firstPatch);
+  assert.notEqual(await readFile(join(secondDir, 'range-diff/0001.patch'), 'utf8'), firstPatch);
 });
 
 // Issue #10: the reviewer session is the only long-lived memory across scopes,
@@ -3211,7 +3095,7 @@ test('execute reviewer adjudication inlines earlier accepted scopes\' per-file d
     getCommitRange: async () => ['head600 Adjust the shared helper'],
     getDiffStatForRange: async () => '2 files changed',
     getChangedFilesForRange: async () => ['src/helper.ts', 'test/helper.test.ts'],
-    getDiffForRange: async () => 'current scope diff',
+    writeRangeDiffArtifact: async ({ base, head, dir }) => ({ base, head, indexPath: join(dir, 'index.md'), totalBytes: 0, entries: [] }),
     getDiffForRangePaths: async (_cwd, base, head, paths) => {
       diffCalls.push({ base, head, paths });
       return `diff for ${paths.join(',')} in ${base}..${head}`;
@@ -3267,6 +3151,7 @@ test('scope reviewer prompt renders earlier-scope per-file diffs when supplied a
     changedFiles: ['src/helper.ts', 'test/helper.test.ts'],
     round: 1,
     reviewMarkdownPath: '/tmp/REVIEW.md',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
     parentScopeLabel: '6',
     progressJustification: {
       milestoneTargeted: 'm',
@@ -3319,6 +3204,7 @@ const REVIEW_LEVEL_SCOPE_ARGS = {
   changedFiles: ['src/neal/orchestrator.ts'],
   round: 1,
   reviewMarkdownPath: '/tmp/REVIEW.md',
+  rangeDiffIndexPath: '.neal/runs/run-123/scratch/range-diff/index.md',
   parentScopeLabel: '1',
   progressJustification: {
     milestoneTargeted: 'Review-level calibration',
