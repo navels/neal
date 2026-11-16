@@ -21,7 +21,7 @@ import type {
   ReviewerMeaningfulProgressAction,
 } from '../../types.js';
 import { writeExecutionArtifacts } from '../artifacts.js';
-import { REVIEWER_CONTENT_REFUSED_BLOCK_REASON, shouldNotifyFailure } from '../failures.js';
+import { REVIEWER_CONTENT_REFUSED_BLOCK_REASON, notifyRunFailure } from '../failures.js';
 import { notifyBlocked } from '../notifications.js';
 import { enterInteractiveBlockedRecovery, shouldNotifyInteractiveBlockedRecoveryEntry } from './recovery.js';
 import { printReviewResult } from './shared.js';
@@ -116,9 +116,7 @@ export async function runReviewPhase(state: OrchestrationState, statePath: strin
         subtype: error.subtype,
         message: error.message,
       });
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }

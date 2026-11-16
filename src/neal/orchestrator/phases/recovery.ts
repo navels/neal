@@ -29,7 +29,7 @@ import type {
   RecentBlockRecord,
 } from '../../types.js';
 import { writeExecutionArtifacts } from '../artifacts.js';
-import { isCoderTimeoutError, shouldNotifyFailure } from '../failures.js';
+import { isCoderTimeoutError, notifyRunFailure } from '../failures.js';
 import { flushDerivedPlanNotifications, notifyBlocked } from '../notifications.js';
 import { persistSplitPlanRecovery } from '../split-plan.js';
 import {
@@ -922,9 +922,7 @@ export async function runInteractiveBlockedRecoveryPhase(
         await bestEffortCleanupTimedOutCoder(error.sessionHandle ?? state.coderSessionHandle, logger);
       }
       const failedState = await persistCoderFailureState(state, statePath, 'interactive_blocked_recovery', error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }

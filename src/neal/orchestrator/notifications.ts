@@ -29,7 +29,12 @@ function consultantAdviceNotificationSuffix(state: OrchestrationState): string {
   return ` | consultant advice (read-only): triage ${advice.triageCategory}; suggested directive: ${directive}`;
 }
 
-async function notifyBlocked(state: OrchestrationState, reason: string, logger?: RunLogger) {
+async function notifyBlocked(
+  state: OrchestrationState,
+  reason: string,
+  logger?: RunLogger,
+  options: { maxMessageChars?: number } = {},
+) {
   const planName = basename(state.planDoc);
   const adviceSuffix = consultantAdviceNotificationSuffix(state);
   await logger?.event('notify.blocked', {
@@ -37,7 +42,12 @@ async function notifyBlocked(state: OrchestrationState, reason: string, logger?:
     planName,
     consultantAdvice: state.interactiveBlockedRecovery?.consultantAdvice ?? null,
   });
-  await notify('blocked', `[neal] ${planName}: ${reason}${adviceSuffix}`, state.cwd);
+  const message = `[neal] ${planName}: ${reason}${adviceSuffix}`;
+  const maxMessageChars = options.maxMessageChars;
+  const boundedMessage = maxMessageChars !== undefined && message.length > maxMessageChars
+    ? `${message.slice(0, maxMessageChars - 1)}…`
+    : message;
+  await notify('blocked', boundedMessage, state.cwd);
 }
 
 async function notifyInteractiveBlockedRecovery(state: OrchestrationState, reason: string, logger?: RunLogger) {

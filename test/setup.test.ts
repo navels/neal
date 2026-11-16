@@ -1031,6 +1031,7 @@ test('neal setup writes linked worktree excludes to git rev-parse --git-path inf
     await runGit(main, 'init');
     await runGit(main, 'config', 'user.email', 'neal@example.test');
     await runGit(main, 'config', 'user.name', 'Neal Test');
+    await runGit(main, 'config', 'commit.gpgsign', 'false');
     await writeFile(join(main, 'README.md'), 'linked worktree fixture\n', 'utf8');
     await runGit(main, 'add', 'README.md');
     await runGit(main, 'commit', '-m', 'initial commit');

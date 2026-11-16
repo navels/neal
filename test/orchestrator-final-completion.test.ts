@@ -534,6 +534,7 @@ test('execute finalization persists the squashed checkpoint before failing the c
     assert.equal(failedState.archivedReviewPath?.endsWith(`REVIEW-${failedState.finalCommit}.md`), true);
     assert.equal(failedState.completedScopes.some((scope) => scope.finalCommit === failedState.finalCommit), true);
     assert.equal(failedState.coderSessionHandle, 'coder-final-completion-failed');
+    assert.equal((await readRunEvents(failedState.runDir)).filter((event) => event.type === 'notify.blocked').length, 1);
     const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(failedState.runDir), 'utf8');
     assert.match(completionArtifact, /## Unstructured Coder Summary Output/);
   } finally {
@@ -614,6 +615,7 @@ test('final completion review failure artifact includes unstructured reviewer ou
     const failedState = await loadState(statePath);
     assert.equal(failedState.status, 'failed');
     assert.equal(failedState.reviewerSessionHandle, null);
+    assert.equal((await readRunEvents(failedState.runDir)).filter((event) => event.type === 'notify.blocked').length, 1);
     const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(failedState.runDir), 'utf8');
     assert.match(completionArtifact, /## Unstructured Reviewer Output/);
     assert.match(completionArtifact, /Unstructured reviewer verdict accepts completion, part one\./);
@@ -700,6 +702,7 @@ test('final completion review returns a terminal blocked state on a content_refu
       (event) => event.type === 'phase.error' && event.data?.phase === 'final_completion_review',
     );
     assert.equal(phaseError?.data?.errorKind, 'content_refused');
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 1);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
@@ -796,6 +799,7 @@ test('final completion review parser failures persist failed state and reviewer 
     assert.equal(failedState.status, 'failed');
     assert.equal(failedState.phase, 'final_completion_review');
     assert.equal(failedState.reviewerSessionHandle, null);
+    assert.equal((await readRunEvents(failedState.runDir)).filter((event) => event.type === 'notify.blocked').length, 1);
     assert.equal(failedState.finalCompletionReviewVerdict, null);
     assert.equal(failedState.finalCompletionResolvedAction, null);
 
@@ -1591,8 +1595,15 @@ test('final completion review blocks with an explicit diagnostic hint when conti
     },
   });
 
+  const logger = await createRunLogger({
+    cwd: state.cwd,
+    stateDir: join(state.cwd, '.neal'),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
   try {
-    const nextState = await runFinalCompletionReviewPhase(state, statePath);
+    const nextState = await runFinalCompletionReviewPhase(state, statePath, logger);
     assert.equal(nextState.phase, 'blocked');
     assert.equal(nextState.status, 'blocked');
     assert.equal(nextState.blockedFromPhase, 'final_completion_review');
@@ -1605,6 +1616,9 @@ test('final completion review blocks with an explicit diagnostic hint when conti
     // Operator guidance points at the recovery CLI tokens.
     assert.match(notifyLog, /neal status/);
     assert.match(notifyLog, /neal resume --message/);
+    const notifications = (await readRunEvents(state.runDir)).filter((event) => event.type === 'notify.blocked');
+    assert.equal(notifications.length, 1);
+    assert.match(String(notifications[0].data?.reason), /neal resume --message/);
     const progressMarkdown = await readFile(nextState.progressMarkdownPath, 'utf8');
     assert.match(progressMarkdown, /- Reviewer action: continue_execution/);
     assert.match(progressMarkdown, /- Resulting action: block_for_operator/);

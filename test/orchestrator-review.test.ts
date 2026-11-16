@@ -2219,6 +2219,7 @@ test('review phase returns a terminal blocked state on a content_refused reviewe
       (event) => event.type === 'phase.error' && event.data?.phase === 'reviewer_scope',
     );
     assert.equal(phaseError?.data?.errorKind, 'content_refused');
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 1);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
@@ -2270,6 +2271,10 @@ test('review phase still fails a non-refusal reviewer error and persists status 
     assert.equal(reloaded.status, 'failed');
     assert.equal(reloaded.phase, 'reviewer_scope');
     assert.equal(reloaded.blockerReason, null);
+    const events = await readRunEvents(state.runDir);
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 1);
+    assert.equal(events.find((event) => event.type === 'notify.blocked')?.data?.reason,
+      'reviewer provider failed for an unrelated reason');
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }

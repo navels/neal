@@ -611,6 +611,8 @@ Roles carry very different privilege: the coder role (and the inherited planner)
 
 Notifications are opt-in. If `neal.notify_bin` is configured, neal runs that command with one notification-text argument for `blocked`, `complete`, `done`, and `retry`. Messages start with `[neal] <planName>:` followed by the reason or status. Blocked and interactive-recovery retry messages append `| consultant advice (read-only): triage <category>; suggested directive: <directive>` when consultant advice is available.
 
+A `blocked` notification is also sent when a provider failure ends the run, including usage limits and invalid provider output. Provider-failure notification text is capped at 300 characters with an ellipsis; the `notify.blocked` event retains the full reason.
+
 `NEAL_NOTIFY_BIN` overrides the configured command. Set it to another path to use that command, or set it to an empty value to disable notifications for the process. Notification command failures never fail or change the result of a run.
 
 `neal check` reports the resolved notification command and, in an interactive terminal, can send a test notification after confirmation.

@@ -21,6 +21,11 @@ dependency-update policy.
   turns are never resumed, so they now run with an ephemeral session that
   writes nothing.
 
+- Provider failures that end a run now send a blocked notification regardless
+  of error wording, including usage limits and rejected final-completion
+  payloads. Provider-failure notification text is capped at 300 characters;
+  the event log keeps the full reason (#115).
+
 ## [0.7.0] - 2026-11-04
 
 ### Added

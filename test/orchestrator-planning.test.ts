@@ -1088,6 +1088,7 @@ test('plan review phase returns a terminal blocked state on a content_refused re
       (event) => event.type === 'phase.error' && event.data?.phase === 'reviewer_plan',
     );
     assert.equal(phaseError?.data?.errorKind, 'content_refused');
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 1);
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
@@ -1103,7 +1104,51 @@ test('plan review phase still fails a non-refusal reviewer error and persists st
     assert.equal(reloaded.status, 'failed');
     assert.equal(reloaded.phase, 'reviewer_plan');
     assert.equal(reloaded.blockerReason, null);
+    const events = await readRunEvents(state.runDir);
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 1);
+    assert.equal(events.find((event) => event.type === 'notify.blocked')?.data?.reason,
+      'reviewer provider failed for an unrelated reason');
   } finally {
     clearProviderCapabilitiesOverridesForTesting();
   }
 });
+
+for (const phase of ['coder_plan', 'coder_plan_response', 'coder_plan_optional_response'] as const) {
+  test(`${phase} notifies once on a non-transient provider failure`, async () => {
+    const { statePath, state } = await createPlanReviewGuidanceResponseFixture({
+      phase,
+      pendingPlanReviewGuidance: null,
+      findings: [{
+        ...createOpenPlanReviewFinding(),
+        severity: phase === 'coder_plan_optional_response' ? 'non_blocking' : 'blocking',
+      }],
+    });
+    const message = "You've hit your session limit · resets 3pm";
+    const logger = await createRunLogger({
+      cwd: state.cwd,
+      stateDir: join(state.cwd, '.neal'),
+      planDoc: state.planDoc,
+      topLevelMode: state.topLevelMode,
+      runDir: state.runDir,
+    });
+    const fail = async () => {
+      throw new NealProviderError({ message, kind: 'provider_failed', provider: 'openai-codex', role: 'coder' });
+    };
+    setProviderCapabilitiesOverrideForTesting('openai-codex', {
+      createCoderAdapter: () => ({ runPrompt: fail, runStructuredPrompt: fail }),
+    });
+    try {
+      await assert.rejects(() => phase === 'coder_plan'
+        ? runCoderPlanPhase(state, statePath, logger)
+        : runPlanningResponsePhase(state, statePath, phase, logger), { message });
+      const failedState = await loadState(statePath);
+      assert.equal(failedState.status, 'failed');
+      assert.equal(failedState.phase, phase);
+      const notifications = (await readRunEvents(state.runDir)).filter((event) => event.type === 'notify.blocked');
+      assert.equal(notifications.length, 1);
+      assert.equal(notifications[0].data?.reason, message);
+    } finally {
+      clearProviderCapabilitiesOverridesForTesting();
+    }
+  });
+}

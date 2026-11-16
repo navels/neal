@@ -60,7 +60,7 @@ import {
   filterWrapperOwnedWorktreeStatus,
   formatDirtyWorktreeDiagnostic,
 } from '../worktree-status.js';
-import { REVIEWER_CONTENT_REFUSED_BLOCK_REASON, shouldNotifyFailure } from './failures.js';
+import { REVIEWER_CONTENT_REFUSED_BLOCK_REASON, notifyRunFailure } from './failures.js';
 
 type ExecutionArtifactWriter = (state: OrchestrationState) => Promise<void>;
 type FinalizationRuntime = {
@@ -444,21 +444,19 @@ function synthesizeFinalCommitMessage(args: {
 // CoderRoundError-specific extras for the shared execute-finalization failure
 // path. The generic (non-CoderRoundError) branch passes null: it persists the
 // seeded coder session fields untouched, writes no failed final-completion
-// review artifact, and never notifies.
+// review artifact, and still notifies.
 type CoderSummaryFailureExtras = {
   // error.sessionHandle ?? state.coderSessionHandle: overrides the persisted
   // coder session handle, keys the protocol derivation, names the failed
   // artifact's session, and stamps phase.error.
   sessionHandleOverride: string | null;
-  // shouldNotifyFailure(error): gates the notifyBlocked call.
-  notify: boolean;
 };
 
 // The one shared failure-persistence path for both summary-adjudication catch
 // branches. Ordering is pinned by test/execute-finalization-failure.test.ts:
 // failed state save, execution artifacts, failed final-completion review
 // artifact (coder-round branch only), checkpoint retrospective, phase.error,
-// gated notification (coder-round branch only).
+// notification (both branches).
 async function persistExecuteFinalizationFailure(args: {
   state: OrchestrationState;
   statePath: string;
@@ -468,7 +466,7 @@ async function persistExecuteFinalizationFailure(args: {
   archivedReviewPath: string;
   completedScopes: OrchestrationState['completedScopes'];
   finalCompletionSummary: OrchestrationState['finalCompletionSummary'];
-  errorMessage: string;
+  error: unknown;
   coderRoundExtras: CoderSummaryFailureExtras | null;
 }) {
   const { state, coderRoundExtras } = args;
@@ -498,11 +496,9 @@ async function persistExecuteFinalizationFailure(args: {
   await args.logger?.event('phase.error', {
     phase: EXECUTE_FINALIZATION_PHASE,
     sessionHandle: coderRoundExtras ? coderRoundExtras.sessionHandleOverride : state.coderSessionHandle,
-    message: args.errorMessage,
+    message: args.error instanceof Error ? args.error.message : String(args.error),
   });
-  if (coderRoundExtras?.notify) {
-    await notifyBlocked(failedState, args.errorMessage, args.logger);
-  }
+  await notifyRunFailure(failedState, args.error, args.logger);
 }
 
 // Summary adjudication for a terminal finalization: archive the review, build
@@ -556,15 +552,10 @@ async function adjudicateFinalCompletionSummary(args: {
       archivedReviewPath: args.archivedReviewPath,
       completedScopes: args.completedScopes,
       finalCompletionSummary: args.finalCompletionSummary,
-      errorMessage: coderRoundFailure
-        ? coderRoundFailure.message
-        : error instanceof Error
-          ? error.message
-          : String(error),
+      error,
       coderRoundExtras: coderRoundFailure
         ? {
             sessionHandleOverride: coderRoundFailure.sessionHandle ?? state.coderSessionHandle,
-            notify: shouldNotifyFailure(coderRoundFailure),
           }
         : null,
     });
@@ -761,9 +752,7 @@ export async function runFinalCompletionReviewPhase(
         logger,
         runtime,
       });
-      if (error instanceof ReviewerRoundError && shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }

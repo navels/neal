@@ -28,6 +28,7 @@ async function createContextFixture(args: {
   await execFileAsync('git', ['init'], { cwd });
   await execFileAsync('git', ['config', 'user.email', 'neal@example.test'], { cwd });
   await execFileAsync('git', ['config', 'user.name', 'Neal Test'], { cwd });
+  await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd });
 
   const planDoc = join(cwd, 'PLAN.md');
   await writeFile(planDoc, '# Fixture Plan\n\nImplement the fixture behavior.\n', 'utf8');

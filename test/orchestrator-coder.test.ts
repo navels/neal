@@ -17,7 +17,7 @@ import { applyResumeActions, planResumeActions } from '../src/neal/resume-planne
 import { buildStatusSnapshot } from '../src/neal/status.js';
 import { loadState, saveState } from '../src/neal/state.js';
 import { createFakeProviderDefinition } from './helpers/fake-provider.js';
-import { writeRepoConfig, createNotifyCapture, runGit, createCoderScopeManualGateFixture, readRunEvents, openAICodexProviderError, createExecuteFinalizationFixture } from './helpers/orchestrator-harness.js';
+import { writeRepoConfig, createNotifyCapture, createResumeFixture, createOpenPlanReviewFinding, runGit, createCoderScopeManualGateFixture, readRunEvents, openAICodexProviderError, createExecuteFinalizationFixture } from './helpers/orchestrator-harness.js';
 
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator-coder');
 
@@ -828,6 +828,7 @@ test('coder scope stream failure after a clean commit recovers directly into rev
     );
 
     const events = await readRunEvents(recoveredState.runDir);
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 0);
     assert.equal(
       events.some((event) => event.type === 'run.recovered_pending_review_after_coder_failure'),
       true,
@@ -939,6 +940,7 @@ test('coder response stream failure after a clean commit recovers directly into 
     assert.equal(recoveredState.coderRetryCount, 0);
 
     const events = await readRunEvents(recoveredState.runDir);
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 0);
     assert.equal(
       events.some((event) => event.type === 'run.recovered_pending_review_after_coder_response_failure'),
       true,
@@ -1013,3 +1015,47 @@ test('coder scope stream failure with dirty committed work still fails instead o
     clearProviderCapabilitiesOverridesForTesting();
   }
 });
+
+for (const phase of ['coder_scope', 'coder_response', 'coder_optional_response'] as const) {
+  for (const failure of [
+    { kind: 'provider_failed', message: "You've hit your session limit · resets 3pm" },
+    { kind: 'api_error', message: 'API error: overloaded, try again' },
+    { kind: 'timeout', message: 'Provider inactivity timeout' },
+  ] as const) {
+    test(`${phase} notifies once when ${failure.kind} ends the run`, async () => {
+      const { statePath, state } = await createResumeFixture({
+        phase,
+        status: 'running',
+        coderRetryCount: 1,
+        findings: [{
+          ...createOpenPlanReviewFinding(),
+          severity: phase === 'coder_optional_response' ? 'non_blocking' : 'blocking',
+        }],
+      });
+      const logger = await createRunLogger({
+        cwd: state.cwd,
+        stateDir: join(state.cwd, '.neal'),
+        planDoc: state.planDoc,
+        topLevelMode: state.topLevelMode,
+        runDir: state.runDir,
+      });
+      const fail = async () => {
+        throw openAICodexProviderError({ ...failure, sessionHandle: null });
+      };
+      setProviderCapabilitiesOverrideForTesting('openai-codex', {
+        createCoderAdapter: () => ({ runPrompt: fail, runStructuredPrompt: fail }),
+      });
+      try {
+        await assert.rejects(() => runOnePass(state, statePath, logger), { message: failure.message });
+        const failedState = await loadState(statePath);
+        assert.equal(failedState.status, 'failed');
+        assert.equal(failedState.phase, phase);
+        const notifications = (await readRunEvents(state.runDir)).filter((event) => event.type === 'notify.blocked');
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0].data?.reason, failure.message);
+      } finally {
+        clearProviderCapabilitiesOverridesForTesting();
+      }
+    });
+  }
+}
