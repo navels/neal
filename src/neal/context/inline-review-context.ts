@@ -202,40 +202,6 @@ export function getReviewerDoctrineAccessMode(reviewer: AgentRoleConfig): Review
   return 'tool-access';
 }
 
-// True when the configured reviewer is a read-only reviewer (read tools, no
-// shell) that has no commit-range diff tool of its own, so Neal must inline the
-// commit-range diff into its reviewer prompt. Read-only reviewers that expose a
-// commit-range diff tool (providesRangeDiffTool === true, e.g. openai-compatible)
-// inspect the range with that tool and do not receive an inlined diff, and
-// tool-access reviewers run shell git themselves.
-export function readOnlyReviewerNeedsInlinedDiff(reviewer: AgentRoleConfig): boolean {
-  if (!isRegisteredProviderId(reviewer.provider)) {
-    return false;
-  }
-
-  if (getReviewerDoctrineAccessMode(reviewer) !== 'read-only') {
-    return false;
-  }
-
-  return getProviderDefinition(reviewer.provider).capabilities['structured-advisor'].providesRangeDiffTool !== true;
-}
-
-// Renders the Neal-inlined commit-range diff section for a read-only reviewer
-// that lacks a commit-range diff tool. Unlike renderInlineReviewerContext (the
-// no-read framing that denies all repository access), this framing affirms the
-// reviewer's read tools and presents the inlined diff only as the source of
-// truth for what the range changed.
-export function renderInlinedRangeDiffSection(args: { rangeLabel: string; diff: string }): string {
-  return [
-    `## Inlined commit-range diff from Neal (${args.rangeLabel})`,
-    '',
-    'You have read-only repository access but no commit-range diff tool, so Neal has inlined the commit-range diff below. That access may be dedicated read and search tools, or a shell running in a read-only sandbox; if it is a shell, use it only to read files and search the tree, never to write.',
-    'This inlined diff is the source of truth for exactly what this range changed, including deletions and renames that head-state file reads cannot reveal. Use your read tools to verify the surrounding code.',
-    '',
-    args.diff.trim() === '' ? '(empty diff)' : truncateInlineSectionBody(args.diff),
-  ].join('\n');
-}
-
 // Best-effort artifact read for inline reviewer sections. Missing or
 // unreadable artifacts inline as empty content (callers substitute an explicit
 // "(unavailable)" placeholder) instead of failing the reviewer round.

@@ -1,9 +1,9 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
@@ -175,15 +175,14 @@ test('final completion adjudicator runners preserve packet and summary context w
   const reviewerResult = await runFinalCompletionReviewerAdjudication({
     state,
     packet,
-    // The default reviewer (anthropic-claude) is native read-only with no
-    // commit-range diff tool, so Neal inlines the aggregate diff; inject the
-    // diff fetcher to keep the fixture hermetic (the packet's aggregate commits
-    // are synthetic and absent from the fixture repo).
-    getDiffForRange: async (_cwd, base, head) => {
+    // Synthetic commits keep this context-wiring test independent of Git.
+    writeRangeDiffArtifact: async ({ cwd, base, head, dir }) => {
       aggregateDiffCollected = true;
+      assert.equal(cwd, state.cwd);
       assert.equal(base, 'base-commit');
       assert.equal(head, 'final-commit');
-      return 'aggregate diff text for native read-only reviewer';
+      assert.equal(dir, join(getFinalCompletionReviewerScratchDir(state.runDir), 'range-diff'));
+      return { base, head, indexPath: join(dir, 'index.md'), totalBytes: 0, entries: [] };
     },
     runReviewerRound: async (args) => {
       reviewerArgs = args;
@@ -194,9 +193,9 @@ test('final completion adjudicator runners preserve packet and summary context w
         'the removed inlineContext channel must not reach the reviewer round',
       );
       assert.equal(
-        args.inlinedRangeDiff,
-        'aggregate diff text for native read-only reviewer',
-        'a native read-only reviewer must receive the aggregate diff on the inlinedRangeDiff channel',
+        args.rangeDiffIndexPath,
+        relative(state.cwd, join(scratchDir, 'range-diff', 'index.md')),
+        'every reviewer receives the repository-relative aggregate index',
       );
       assert.equal(args.reviewerContext?.purpose, 'reviewer_continuity');
       assert.equal(args.reviewerContext?.promptMarkdown.includes('Final Completion'), true);
@@ -263,7 +262,7 @@ test('final completion transition assertions reject impossible live outcomes for
 // and the real round function (runReviewerFinalCompletionRound ->
 // buildFinalCompletionReviewerPrompt) with a capturing structured-advisor
 // adapter, then assert on the FINAL adapter prompt. This is what catches a
-// wiring regression (dropped inlinedRangeDiff, wrong doctrine, re-added
+// wiring regression (dropped rangeDiffIndexPath, wrong doctrine, re-added
 // removed inline context) between the adjudicator and the round.
 
 const FINAL_COMPLETION_DIFF_SENTINEL = 'const finalCompletionSentinel = "captured-by-final-completion-test";';
@@ -385,42 +384,34 @@ function createCapturePacket(args: {
   };
 }
 
-test('final-completion prompt reaching a native read-only structured advisor inlines the aggregate diff and names only its read tools', async () => {
-  const { state, baseCommit, headCommit } = await createFinalCompletionCaptureFixture('anthropic-claude');
-  const captured = installCapturingFinalCompletionAdvisor('anthropic-claude');
-  const packet = createCapturePacket({ baseCommit, headCommit, unavailableReason: null });
+for (const provider of ['anthropic-claude', 'openai-codex', 'openai-compatible']) {
+  test(`final-completion prompt for ${provider} points at the complete aggregate artifact`, async () => {
+    const { state, baseCommit, headCommit } = await createFinalCompletionCaptureFixture(provider);
+    const captured = installCapturingFinalCompletionAdvisor(provider);
+    const packet = createCapturePacket({ baseCommit, headCommit, unavailableReason: null });
 
-  // No runReviewerRound injection: this drives the real rounds.ts ->
-  // buildFinalCompletionReviewerPrompt -> getStructuredAdvisorAdapter path,
-  // with the default git getDiffForRange collecting the aggregate diff.
-  const result = await runFinalCompletionReviewerAdjudication({ state, packet });
+    // Exercise adjudication, real round construction and the provider boundary.
+    const result = await runFinalCompletionReviewerAdjudication({ state, packet });
+    assert.equal(captured.length, 1);
+    const round = captured[0]!;
+    assert.equal(round.label, 'final-completion');
+    const dir = join(getFinalCompletionReviewerScratchDir(state.runDir), 'range-diff');
+    assert.ok(round.prompt.includes(relative(state.cwd, join(dir, 'index.md'))));
+    const index = await readFile(join(dir, 'index.md'), 'utf8');
+    assert.ok(index.includes(`${baseCommit}..${headCommit}`));
+    assert.match(index, /feature\.ts/);
+    assert.ok((await readFile(join(dir, '0001.patch'), 'utf8')).includes(FINAL_COMPLETION_DIFF_SENTINEL));
+    assert.equal(round.prompt.includes(FINAL_COMPLETION_DIFF_SENTINEL), false);
+    assert.match(round.prompt, /patch files are the source of truth/);
+    assert.doesNotMatch(round.prompt, /git_diff|git diff |git show |git log |Inlined commit-range diff/);
+    assert.doesNotMatch(round.prompt, /Temporary verification scratch directory:/);
+    assert.doesNotMatch(round.prompt, /## Inlined review context from Neal/);
+    assert.equal(result.reviewerResult.sessionHandle, null);
+    assert.equal(result.reviewerResult.verdict.action, 'block_for_operator');
+  });
+}
 
-  assert.equal(captured.length, 1);
-  const round = captured[0]!;
-  assert.equal(round.label, 'final-completion');
-  const prompt = round.prompt;
-
-  // The aggregate commit-range diff is inlined as the source of truth.
-  assert.match(prompt, /## Inlined commit-range diff from Neal \(/);
-  assert.ok(prompt.includes(FINAL_COMPLETION_DIFF_SENTINEL), 'native read-only final-completion prompt should inline the aggregate diff');
-  assert.match(
-    prompt,
-    /The commit-range diff for that aggregate range .* is inlined below and is the source of truth/,
-  );
-  assert.match(prompt, /Inspect the change using the inlined commit-range diff below for what changed/);
-
-  // No commit-range diff tool naming and no shell/git-command/scratch instructions.
-  assert.doesNotMatch(prompt, /git_diff/);
-  assert.doesNotMatch(prompt, /Use git commands/);
-  assert.doesNotMatch(prompt, /git diff |git show |git log /);
-  assert.doesNotMatch(prompt, /Temporary verification scratch directory:/);
-  assert.doesNotMatch(prompt, /## Inlined review context from Neal/);
-
-  assert.equal(result.reviewerResult.sessionHandle, null);
-  assert.equal(result.reviewerResult.verdict.action, 'block_for_operator');
-});
-
-test('final-completion prompt for a native read-only structured advisor omits the inlined diff when the aggregate range is unavailable', async () => {
+test('final-completion review writes no artifact when the aggregate range is unavailable', async () => {
   const { state } = await createFinalCompletionCaptureFixture('anthropic-claude');
   const captured = installCapturingFinalCompletionAdvisor('anthropic-claude');
   const packet = createCapturePacket({
@@ -434,8 +425,9 @@ test('final-completion prompt for a native read-only structured advisor omits th
   assert.equal(captured.length, 1);
   const prompt = captured[0]!.prompt;
 
-  assert.doesNotMatch(prompt, /## Inlined commit-range diff from Neal/);
-  assert.equal(prompt.includes(FINAL_COMPLETION_DIFF_SENTINEL), false, 'no aggregate diff should be inlined when the range is unavailable');
+  await assert.rejects(access(join(getFinalCompletionReviewerScratchDir(state.runDir), 'range-diff')));
+  assert.doesNotMatch(prompt, /Commit-range diff index|git_diff|git diff |Inlined commit-range diff/);
+  assert.equal(prompt.includes(FINAL_COMPLETION_DIFF_SENTINEL), false, 'no aggregate diff should be delivered when the range is unavailable');
   // The reviewer still reads the repository itself and treats the missing range
   // as an evidence gap rather than proof of correctness.
   assert.match(prompt, /treat the missing aggregate range as a completion-review evidence gap/);
@@ -456,4 +448,80 @@ test('final-completion round resolves neal.review_level from the repository conf
   assert.match(prompt, /Review level: lenient\./);
   assert.doesNotMatch(prompt, /Review level: moderate\./);
   assert.match(prompt, /A finding category that the review level or the User Guidance section has demoted or ignored is not missing work/);
+});
+
+test('issue 116: final review delivers more than 200,000 characters and every changed entry, then rewrites after continuation', async () => {
+  const { state, baseCommit } = await createFinalCompletionCaptureFixture('openai-compatible');
+  const captured = installCapturingFinalCompletionAdvisor('openai-compatible');
+  const addedPaths = Array.from({ length: 24 }, (_, i) => `entry-${String(i).padStart(2, '0')}.txt`);
+  addedPaths.push('large.txt');
+  for (const path of addedPaths) {
+    const text = path === 'large.txt' ? 'large patch line\n'.repeat(30_000) : `content for ${path}\n`;
+    await writeFile(join(state.cwd, path), text);
+  }
+  await runGit(state.cwd, ['add', '--', ...addedPaths]);
+  await runGit(state.cwd, ['commit', '--no-verify', '-m', 'large aggregate range']);
+  const largeHead = await runGit(state.cwd, ['rev-parse', 'HEAD']);
+  const packet = createCapturePacket({ baseCommit, headCommit: largeHead, unavailableReason: null });
+  packet.aggregateReviewContext.changedFiles = ['feature.ts', ...addedPaths];
+  await runFinalCompletionReviewerAdjudication({ state, packet });
+
+  const dir = join(getFinalCompletionReviewerScratchDir(state.runDir), 'range-diff');
+  const index = await readFile(join(dir, 'index.md'), 'utf8');
+  const patchNames = [...index.matchAll(/\b\d{4}\.patch\b/g)].map((match) => match[0]);
+  assert.equal(patchNames.length, 26, 'the authoritative index must include entries beyond the 20-file preview');
+  for (const path of packet.aggregateReviewContext.changedFiles) assert.ok(index.includes(path), path);
+  const patches = await Promise.all(patchNames.map((name) => readFile(join(dir, name))));
+  const delivered = Buffer.concat(patches);
+  assert.ok(delivered.length > 400_000, 'exercise both the former inline cap and a large single patch');
+  const { stdout: expected } = await execFileAsync('git', [
+    'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--full-index', '--find-renames', `${baseCommit}..${largeHead}`,
+  ], { cwd: state.cwd, encoding: 'buffer' });
+  assert.deepEqual(delivered, expected, 'all aggregate diff bytes must reach the artifact');
+  const prompt = captured[0]!.prompt;
+  assert.match(prompt, /\(\+6 more\)/);
+  assert.match(prompt, /inline diff stat and changed-file list are previews only/);
+  assert.doesNotMatch(prompt, /\[truncated|Inlined commit-range diff|git_diff|git diff |large patch line/);
+
+  // Execution continues, with the aggregate range still rooted at the initial base.
+  await runGit(state.cwd, ['rm', '--', ...addedPaths]);
+  await writeFile(join(state.cwd, 'feature.ts'), 'export const base = 1;\nexport const continuation = true;\n');
+  await runGit(state.cwd, ['add', '--', 'feature.ts']);
+  await runGit(state.cwd, ['commit', '--no-verify', '-m', 'continued execution']);
+  const nextHead = await runGit(state.cwd, ['rev-parse', 'HEAD']);
+  await runFinalCompletionReviewerAdjudication({
+    state,
+    packet: createCapturePacket({ baseCommit, headCommit: nextHead, unavailableReason: null }),
+  });
+  assert.deepEqual((await readdir(dir)).sort(), ['0001.patch', 'index.md']);
+  const nextIndex = await readFile(join(dir, 'index.md'), 'utf8');
+  assert.ok(nextIndex.includes(`${baseCommit}..${nextHead}`));
+  assert.equal(nextIndex.includes(largeHead), false);
+  const nextPatch = await readFile(join(dir, '0001.patch'), 'utf8');
+  assert.match(nextPatch, /continuation = true/);
+  assert.equal(nextPatch.includes(FINAL_COMPLETION_DIFF_SENTINEL), false);
+  assert.equal(captured.length, 2);
+
+  // A later unavailable range must not expose the previous review's evidence.
+  await runFinalCompletionReviewerAdjudication({
+    state,
+    packet: createCapturePacket({ baseCommit, headCommit: nextHead, unavailableReason: 'aggregate range is unreadable' }),
+    writeRangeDiffArtifact: async () => { throw new Error('unavailable ranges must not be collected'); },
+  });
+  await assert.rejects(access(dir));
+  assert.doesNotMatch(captured[2]!.prompt, /Commit-range diff index|git_diff|git diff /);
+  assert.match(captured[2]!.prompt, /aggregate range is unreadable/);
+});
+
+test('an empty aggregate range still supplies an authoritative zero-entry index', async () => {
+  const { state, baseCommit } = await createFinalCompletionCaptureFixture('openai-codex');
+  const captured = installCapturingFinalCompletionAdvisor('openai-codex');
+  await runFinalCompletionReviewerAdjudication({
+    state,
+    packet: createCapturePacket({ baseCommit, headCommit: baseCommit, unavailableReason: null }),
+  });
+  const dir = join(getFinalCompletionReviewerScratchDir(state.runDir), 'range-diff');
+  assert.deepEqual(await readdir(dir), ['index.md']);
+  assert.match(await readFile(join(dir, 'index.md'), 'utf8'), /Entries: 0/);
+  assert.match(captured[0]!.prompt, /Commit-range diff index.*range-diff\/index\.md/);
 });

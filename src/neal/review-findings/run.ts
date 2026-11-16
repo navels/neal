@@ -1,6 +1,6 @@
 import type { Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join, normalize, resolve } from 'node:path';
+import { join, normalize, relative, resolve } from 'node:path';
 
 import {
   REVIEW_FINDINGS_ADJUDICATED_LOOP_CONTRACT,
@@ -11,6 +11,7 @@ import type { ParsedReviewArgs } from '../cli.js';
 import { getMaxReviewRounds } from '../config.js';
 import { getDiffForRange, getDiffStatForRange, getWorktreeStatus } from '../git.js';
 import { createRunId, RunLogger } from '../logger.js';
+import { writeRangeDiffArtifact } from '../range-diff-artifact.js';
 import { resolveReviewTarget } from '../review-mode.js';
 import {
   getCurrentPlanAndExecuteQueuePointerPath,
@@ -124,6 +125,13 @@ export async function runNealReviewCli(args: RunNealReviewCliArgs): Promise<Revi
   await writeReviewFindingsContext(paths, context);
 
   try {
+    const rangeDiff = await writeRangeDiffArtifact({
+      cwd,
+      base: target.externalBaseCommit,
+      head: target.externalHeadCommit,
+      dir: join(paths.reviewDir, 'range-diff'),
+    });
+    const rangeDiffIndexPath = relative(cwd, rangeDiff.indexPath).split('\\').join('/');
     for (let roundNumber = 1; roundNumber <= maxRounds; roundNumber += 1) {
       await reportActivity(args, {
         activity: `coder drafting review findings round ${roundNumber}/${maxRounds}`,
@@ -160,7 +168,7 @@ export async function runNealReviewCli(args: RunNealReviewCliArgs): Promise<Revi
         activity: `reviewer checking review findings round ${roundNumber}/${maxRounds}`,
         detailContext: { runId: reviewId, phase: 'review', scopeNumber: roundNumber },
       });
-      const reviewPrompt = buildReviewFindingsReviewPrompt(context, draft, roundNumber);
+      const reviewPrompt = buildReviewFindingsReviewPrompt(context, draft, rangeDiffIndexPath, roundNumber);
       let reviewSessionHandle: string | null = null;
       let reviewSessionProvider: string | null = null;
       const reviewResponse = await provider.reviewDraft({

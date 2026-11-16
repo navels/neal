@@ -189,6 +189,8 @@ const SCOPE_REVIEWER_CONTEXT = context('ScopeReviewerPromptContext', [
   field('progressJustification', 'review_history', true, 'Coder-authored meaningful-progress JSON payload for the scope.'),
   field('recentHistorySummary', 'review_history', true, 'Accepted-scope history for the active parent objective.'),
   field('reviewMarkdownPath', 'run_artifact', true, 'Review artifact that carries prior findings and coder responses.'),
+  field('rangeDiffIndexPath', 'run_artifact', true, 'Repository-relative index for the complete cumulative scope diff.'),
+  field('sincePreviousIndexPath', 'run_artifact', false, 'Repository-relative index for changes since the previous reviewer head, when it differs.'),
   field('scratchDir', 'run_artifact', true, 'Run-local reviewer scratch directory for temporary verification artifacts.'),
   field(
     'earlierScopeChanges',
@@ -222,6 +224,7 @@ const COMPLETION_REVIEWER_CONTEXT = context('CompletionReviewerPromptContext', [
   field('packet', 'orchestrator_state', true, 'Whole-plan completion packet assembled from Neal run state.'),
   field('summary', 'review_history', true, 'Coder-authored whole-plan completion summary under review.'),
   field('scratchDir', 'run_artifact', true, 'Run-local final-completion reviewer scratch directory for temporary verification artifacts.'),
+  field('rangeDiffIndexPath', 'run_artifact', true, 'Repository-relative index for the complete aggregate diff, or null when the range is unavailable.'),
   field('repositoryState', 'repository_state', true, 'Current repository state used to judge whole-plan completion.'),
   field(
     'accessMode',
@@ -593,7 +596,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'scope_reviewer',
-    version: 6,
+    version: 7,
     changelog: [
       {
         version: 1,
@@ -619,6 +622,11 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
         version: 6,
         renderSha: 'ed8d66b768a869817ff4c6b3d127b0f6f3958dff3cf57e036cc27c21800201a4',
       },
+      {
+        // #116: every scope reviewer reads cumulative and round-delta diff artifacts.
+        version: 7,
+        renderSha: '4b2364132e2ce9eef3b5dae54be16b96e2bd10b9201c706815be24225fd81e64',
+      },
     ],
     role: 'reviewer',
     purpose: 'Review execute-scope results for correctness, verification coverage, and meaningful progress toward the active parent objective.',
@@ -641,6 +649,8 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
         field('round', 'orchestrator_state', true, 'Review round number.'),
         field('reviewMarkdownPath', 'run_artifact', true, 'Review history artifact path.'),
         field('progressJustification', 'review_history', true, 'Coder progress-justification payload.'),
+        field('rangeDiffIndexPath', 'run_artifact', true, 'Repository-relative index for the complete cumulative scope diff.'),
+        field('sincePreviousIndexPath', 'run_artifact', false, 'Repository-relative index for changes since the previous reviewer head, when it differs.'),
         field('scratchDir', 'run_artifact', true, 'Run-local scratch directory for reviewer verification artifacts.'),
         field(
           'earlierScopeChanges',
@@ -679,6 +689,8 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
             field('commits', 'orchestrator_state', true, 'Commits produced in the current scope.'),
             field('reviewMarkdownPath', 'run_artifact', true, 'Review history artifact path.'),
             field('parentScopeLabel', 'orchestrator_state', true, 'Active parent objective label.'),
+            field('rangeDiffIndexPath', 'run_artifact', true, 'Repository-relative index for the complete cumulative scope diff.'),
+            field('sincePreviousIndexPath', 'run_artifact', false, 'Repository-relative index for changes since the previous reviewer head, when it differs.'),
             field('scratchDir', 'run_artifact', true, 'Run-local scratch directory for reviewer verification artifacts.'),
             field(
               'accessMode',
@@ -791,7 +803,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
   },
   {
     id: 'completion_reviewer',
-    version: 6,
+    version: 7,
     changelog: [
       {
         version: 1,
@@ -817,6 +829,10 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
         version: 6,
         renderSha: '079a57a685c33aaba5b9a6b919ed4cb961a79f89e770ed6ede85020b618addd6',
       },
+      {
+        version: 7,
+        renderSha: 'fc37ae54a0c9959f4669301fbeb8ba16a9a9afe48e895ea777fe9063ef9e7db6',
+      },
     ],
     role: 'reviewer',
     purpose: 'Judge whole-plan completion and decide whether Neal should accept completion, continue execution, or block for operator input.',
@@ -836,6 +852,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
         field('packet', 'orchestrator_state', true, 'Whole-plan completion packet.'),
         field('summary', 'review_history', true, 'Coder-authored completion summary.'),
         field('scratchDir', 'run_artifact', true, 'Run-local scratch directory for final-completion reviewer artifacts.'),
+        field('rangeDiffIndexPath', 'run_artifact', true, 'Repository-relative index for the complete aggregate diff, or null when the range is unavailable.'),
       ]),
     },
     providerVariants: SHARED_PROVIDER_VARIANTS,
@@ -862,6 +879,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
             field('packet', 'orchestrator_state', true, 'Whole-plan completion packet.'),
             field('summary', 'review_history', true, 'Coder-authored completion summary.'),
             field('scratchDir', 'run_artifact', true, 'Run-local scratch directory for final-completion reviewer artifacts.'),
+            field('rangeDiffIndexPath', 'run_artifact', true, 'Repository-relative index for the complete aggregate diff, or null when the range is unavailable.'),
             field(
               'accessMode',
               'orchestrator_state',

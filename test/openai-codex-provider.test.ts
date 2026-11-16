@@ -18,7 +18,7 @@ import { openAICodexProviderTestHooks } from '../src/neal/providers/openai-codex
 import { resolveRateCost } from '../src/neal/providers/pricing.js';
 import { createProviderTelemetrySink } from '../src/neal/providers/telemetry.js';
 import { NealProviderError, type ProviderRuntimeEvent } from '../src/neal/providers/types.js';
-import { buildReviewFindingsInlinedDiffSection } from '../src/neal/review-findings/prompts.js';
+import { buildReviewFindingsReviewPrompt } from '../src/neal/review-findings/prompts.js';
 import type { ReviewFindingsContext } from '../src/neal/review-findings/types.js';
 
 class FakeFooter {
@@ -1952,12 +1952,12 @@ test('Codex coder structured prompt rejects an over-budget prompt without burnin
   assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
 });
 
-test('Codex advisor round rejects an oversized inlined review-findings diff before any SDK call', async () => {
+test('Codex advisor round still rejects an oversized review instruction with file-based diffs', async () => {
   const fake = threadCreationRecorder();
   const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fake.createThread);
   const context: ReviewFindingsContext = {
     version: 1,
-    instruction: 'review the selected range',
+    instruction: 'review the selected range'.repeat(60000),
     instructionSource: 'default',
     selector: { kind: 'last', count: 1 },
     baseRef: 'base',
@@ -1970,7 +1970,8 @@ test('Codex advisor round rejects an oversized inlined review-findings diff befo
     diffStat: '1 file changed',
     diff: `diff --git a/src/example.ts b/src/example.ts\n${'+x\n'.repeat(400_000)}`,
   };
-  const prompt = `## Review Findings Adjudication\nAdjudicate the draft.\n\n${buildReviewFindingsInlinedDiffSection(context)}`;
+  const prompt = buildReviewFindingsReviewPrompt(context, { summary: 'Draft', findings: [] }, '.neal/reviews/example/range-diff/index.md');
+  assert.doesNotMatch(prompt, /diff --git|Diff preview:/);
 
   await assert.rejects(
     () =>
@@ -1988,7 +1989,7 @@ test('Codex advisor round rejects an oversized inlined review-findings diff befo
       const providerError = error as NealProviderError;
       assert.equal(providerError.kind, 'input_too_large');
       assert.equal(providerError.retryable, false);
-      assert.match(providerError.message, /"Inlined Selected-Range Diff"/);
+      assert.match(providerError.message, /"Review Instruction"/);
       return true;
     },
   );

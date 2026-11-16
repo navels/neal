@@ -42,8 +42,9 @@ The reviewer role is **read-only**, enforced in two layers:
   - The Claude reviewer is limited to the `Read`, `Grep`, and `Glob` tools at
     the SDK level. No write or shell tool exists in the reviewer session.
   - The `openai-compatible` reviewer is bound to a neal-owned read-only toolset
-    (`read_file`, `list_dir`, `grep`, and a read-only `git_diff` over a commit
-    range). Write and shell tools are absent from that toolset by construction.
+    (`read_file`, `list_dir`, `grep`). These tools read neal-written diff
+    indexes and patches as well as repository files. Write and shell tools
+    are absent from that toolset by construction.
 
 Both layers are pinned by tests, including a registry-driven conformance test
 (`test/reviewer-readonly-conformance.test.ts`) that fails if a provider is

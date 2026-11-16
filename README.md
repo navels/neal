@@ -33,6 +33,7 @@ or medical crisis.
 ### What makes neal interesting
 
 - **Roles, not one monolithic agent.** Planner, coder, and reviewer are independent, separately configurable roles. Mix vendors and models per role (e.g. Codex codes, Claude reviews).
+- **Reviewers read the full committed diff from files.** Scope review, final completion review, and `neal review` use an index and numbered patches under `.neal/`, with the same delivery for every provider. Reviewers page through large patches; inline summaries are previews. See [docs/storage.md](docs/storage.md).
 - **The reviewer is read-only.** Declared at provider registration and enforced mechanically in each adapter (OS sandbox for Codex, SDK tool allowlist for Claude, a neal-owned jailed toolset for OpenRouter models). See [SECURITY.md](SECURITY.md) and [docs/providers.md](docs/providers.md).
 - **`neal compat`.** A built-in harness that qualifies any OpenAI-compatible / OpenRouter model across all three roles and emits a dated PASS/FAIL whitelist. See [docs/compatible-models.md](docs/compatible-models.md).
 - **Crash-safe and resumable.** Every run's state and artifacts live under `.neal/`. `neal resume` continues an interrupted run.
@@ -109,8 +110,9 @@ neal grew out of a large frontend upgrade (Ember 3.28 to Ember 5) where the agen
 npm install -g @navels/neal
 ```
 
-neal requires Node.js >= 26.13.0 and drives your configured provider CLIs/SDKs
-(OpenAI Codex, Anthropic Claude, or any OpenAI-compatible / OpenRouter model).
+neal requires Node.js >= 26.13.0 and Git >= 2.30 on `PATH`. It drives your
+configured provider CLIs/SDKs (OpenAI Codex, Anthropic Claude, or any
+OpenAI-compatible / OpenRouter model).
 See [Provider setup](#provider-setup).
 
 ### Run from source / contribute

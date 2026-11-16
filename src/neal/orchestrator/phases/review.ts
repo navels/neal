@@ -8,7 +8,6 @@ import { assertAdjudicationTransitionSignal } from '../../adjudicator/specs.js';
 import {
   getChangedFilesForRange,
   getCommitRange,
-  getDiffForRange,
   getDiffForRangePaths,
   getDiffStatForRange,
   getHeadCommit,
@@ -64,7 +63,6 @@ export async function runReviewPhase(state: OrchestrationState, statePath: strin
       getCommitRange,
       getDiffStatForRange,
       getChangedFilesForRange,
-      getDiffForRange,
       getDiffForRangePaths,
     }));
     reviewerSynthesis = synthesizeExecuteReviewerState({

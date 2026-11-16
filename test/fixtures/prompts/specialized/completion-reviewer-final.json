@@ -82,7 +82,8 @@
         "Completion reviewer contract wording still needs one final pass."
       ]
     },
-    "scratchDir": "/tmp/repo/.neal/runs/run-123/scratch/final-completion-review"
+    "scratchDir": "/tmp/repo/.neal/runs/run-123/scratch/final-completion-review",
+    "rangeDiffIndexPath": ".neal/runs/run-123/scratch/final-completion-review/range-diff/index.md"
   },
   "contains": [
     "base123..abc123",
@@ -97,9 +98,14 @@
     "`squashCommitMessage`",
     "\"verificationTally\":",
     "\"totalRuns\": 3",
-    "`verificationTally` is a bounded summary of the run's recorded verification commands; the complete per-command record is in the run directory's events.ndjson."
+    "`verificationTally` is a bounded summary of the run's recorded verification commands; the complete per-command record is in the run directory's events.ndjson.",
+    "Commit-range diff index (repository-relative): .neal/runs/run-123/scratch/final-completion-review/range-diff/index.md",
+    "patch files are the source of truth"
   ],
   "excludes": [
-    "Ordered Derived Scopes"
+    "Ordered Derived Scopes",
+    "git_diff",
+    "git diff ",
+    "Inlined commit-range diff"
   ]
 }

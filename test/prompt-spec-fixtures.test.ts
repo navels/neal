@@ -173,7 +173,7 @@ test('prompt fixtures cover the known ambiguity regressions from the prompt-spec
   // Completion reviewer: injected aggregate range, scratch-path markers, verdict
   // action enums, the squash-commit-message field surface, and the bounded
   // verification tally with its events.ndjson pointer.
-  assert.match(renderedCompletionReviewer, /aggregate range base123\.\.abc123/);
+  assert.match(renderedCompletionReviewer, /base123\.\.abc123/);
   assert.match(renderedCompletionReviewer, /"verificationTally":/);
   assert.match(renderedCompletionReviewer, /"recentFailures":/);
   assert.match(

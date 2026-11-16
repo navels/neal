@@ -8,12 +8,10 @@
  * API keys.
  */
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { promisify } from 'node:util';
 import { generateText, stepCountIs, type ToolExecutionOptions } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import type { z } from 'zod';
@@ -21,6 +19,8 @@ import type { z } from 'zod';
 import {
   GREP_MAX_MATCHING_LINES,
   RESULT_BYTE_LIMIT,
+  READ_FILE_BYTE_LIMIT,
+  READ_FILE_PAGE_BYTE_LIMIT,
   createCoderToolset,
   createPlanAuthorToolset,
   createReadOnlyToolset,
@@ -29,8 +29,6 @@ import {
   truncateResult,
   type OpenAICompatibleToolEvent,
 } from '../src/neal/providers/openai-compatible-tools.js';
-
-const execFileAsync = promisify(execFile);
 
 const callOptions = { toolCallId: 'test-call', messages: [] } as unknown as ToolExecutionOptions<never>;
 
@@ -107,6 +105,7 @@ describe('coder tool layer', () => {
     const result = await callTool(tools.read_file, { path: 'big.txt' });
     assert.ok(isToolErrorResult(result), `expected error result, got: ${result.slice(0, 100)}`);
     assert.match(result, /file too large/);
+    assert.match(result, /offset and length for paging/);
   });
 
   it('read_file rejects a binary file as an error result', async () => {
@@ -253,6 +252,15 @@ describe('coder tool layer', () => {
     assert.match(result, /grep-target\.txt:2:unique-marker-xyz/);
   });
 
+  it('grep searches an explicitly named dotted directory', async () => {
+    await fs.mkdir(path.join(rootDir, '.neal', 'diff'), { recursive: true });
+    await fs.writeFile(path.join(rootDir, '.neal', 'diff', '0001.patch'), 'artifact-only-marker\n');
+    assert.equal(await callTool(tools.grep, { pattern: 'artifact-only-marker' }),
+      'no matches for /artifact-only-marker/');
+    assert.equal(await callTool(tools.grep, { pattern: 'artifact-only-marker', path: '.neal' }),
+      '.neal/diff/0001.patch:1:artifact-only-marker');
+  });
+
   it('run surfaces a non-zero exit code in the result', async () => {
     const result = await callTool(tools.run, { command: 'echo out; echo err >&2; exit 7' });
     assert.match(result, /exit code: 7/);
@@ -276,10 +284,221 @@ describe('coder tool layer', () => {
     await fs.writeFile(path.join(rootDir, 'long.txt'), 'a'.repeat(size));
     const result = await callTool(tools.read_file, { path: 'long.txt' });
     assert.ok(
-      result.endsWith(`[truncated: showing ${RESULT_BYTE_LIMIT} of ${size} bytes]`),
+      result.endsWith(`[truncated: showing ${RESULT_BYTE_LIMIT} of ${size} bytes] Use read_file with offset and length for paging.`),
       `unexpected tail: ...${result.slice(-80)}`,
     );
     assert.ok(Buffer.byteLength(result, 'utf8') < size, 'result was not actually truncated');
+  });
+});
+
+function parseReadPage(result: string) {
+  assert.ok(Buffer.byteLength(result, 'utf8') <= RESULT_BYTE_LIMIT);
+  assert.doesNotMatch(result, /\[truncated:/);
+  const match = /^\[read_file bytes (\d+)\.\.(\d+) of (\d+); end exclusive; text bytes (\d+)\.\.(\d+); invalid UTF-8 bytes replaced with "\?": (\d+)\]\n([\s\S]*)\n\[next offset: (\d+|EOF)\]$/.exec(result);
+  assert.ok(match, result.slice(0, 200));
+  return {
+    offset: Number(match[1]), end: Number(match[2]), size: Number(match[3]),
+    textStart: Number(match[4]), textEnd: Number(match[5]), replacedBytes: Number(match[6]), text: match[7],
+    nextOffset: match[8] === 'EOF' ? null : Number(match[8]),
+  };
+}
+
+describe('read_file byte paging', () => {
+  let rootDir: string;
+  let tools: ReturnType<typeof createReadOnlyToolset>;
+
+  before(async () => {
+    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-read-pages-'));
+    tools = createReadOnlyToolset(rootDir);
+  });
+
+  after(async () => {
+    await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('reconstructs a file over both limits, including a long line, using bounded positioned reads', async (t) => {
+    const source = '+a'.repeat(READ_FILE_BYTE_LIMIT) + '\nlast line\n';
+    await fs.writeFile(path.join(rootDir, 'large.patch'), source);
+    const originalOpen = fs.open.bind(fs);
+    const readLengths: number[] = [];
+    let closes = 0;
+    t.mock.method(fs, 'readFile', () => { throw new Error('whole-file reads are forbidden'); });
+    t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+      const file = await originalOpen(...args);
+      const originalRead = file.read.bind(file);
+      const originalClose = file.close.bind(file);
+      t.mock.method(file, 'read', (buffer: Buffer, offset: number, length: number, position: number) => {
+        readLengths.push(length);
+        assert.ok(buffer.length <= READ_FILE_PAGE_BYTE_LIMIT + 6);
+        // Exercise short reads as well as the bounded allocation.
+        return originalRead(buffer, offset, Math.min(length, 997), position);
+      });
+      t.mock.method(file, 'close', async () => { closes += 1; await originalClose(); });
+      return file;
+    });
+    let offset: number | null = 0;
+    let reconstructed = '';
+    let pages = 0;
+    while (offset !== null) {
+      const page = parseReadPage(await callTool(tools.read_file, { path: 'large.patch', offset }));
+      assert.equal(page.offset, offset);
+      assert.equal(page.end, Math.min(offset + READ_FILE_PAGE_BYTE_LIMIT, source.length));
+      assert.equal(page.size, source.length);
+      reconstructed += page.text;
+      offset = page.nextOffset;
+      pages += 1;
+    }
+    assert.equal(reconstructed, source);
+    assert.equal(closes, pages);
+    assert.ok(readLengths.every((length) => length <= READ_FILE_PAGE_BYTE_LIMIT + 6));
+  });
+
+  it('reconstructs out-of-order windows with 2-, 3-, and 4-byte characters across boundaries', async () => {
+    for (const length of [1, 2, 3, 7, READ_FILE_PAGE_BYTE_LIMIT]) {
+      const source = 'é中🙂'.repeat(length + 2) + '\nend';
+      const bytes = Buffer.from(source);
+      await fs.writeFile(path.join(rootDir, 'unicode.txt'), bytes);
+      const offsets = Array.from({ length: Math.ceil(bytes.length / length) }, (_, i) => i * length);
+      const pages = new Map<number, string>();
+      for (const offset of [...offsets].reverse()) {
+        const page = parseReadPage(await callTool(tools.read_file, { path: 'unicode.txt', offset, length }));
+        assert.equal(page.offset, offset);
+        assert.equal(page.size, bytes.length);
+        assert.equal(page.end, Math.min(offset + length, bytes.length));
+        assert.equal(page.nextOffset, page.end === bytes.length ? null : page.end);
+        assert.equal(page.text, bytes.subarray(page.textStart, page.textEnd).toString('utf8'));
+        assert.doesNotMatch(page.text, /\uFFFD/);
+        assert.equal(page.replacedBytes, 0);
+        pages.set(offset, page.text);
+      }
+      assert.equal(offsets.map((offset) => pages.get(offset)).join(''), source);
+    }
+  });
+
+  it('handles length-only calls, empty files and EOF without truncating', async () => {
+    await fs.writeFile(path.join(rootDir, 'small.txt'), 'hello');
+    const first = parseReadPage(await callTool(tools.read_file, { path: 'small.txt', length: 3 }));
+    assert.equal(first.text, 'hel');
+    assert.equal(first.nextOffset, 3);
+    const eof = parseReadPage(await callTool(tools.read_file, { path: 'small.txt', offset: 5 }));
+    assert.equal(eof.text, '');
+    assert.equal(eof.nextOffset, null);
+    await fs.writeFile(path.join(rootDir, 'empty.txt'), '');
+    const empty = parseReadPage(await callTool(tools.read_file, { path: 'empty.txt', offset: 0 }));
+    assert.equal(empty.size, 0);
+    assert.equal(empty.text, '');
+    assert.equal(empty.nextOffset, null);
+  });
+
+  it('finishes multibyte characters at every maximum-size page boundary', async () => {
+    const length = READ_FILE_PAGE_BYTE_LIMIT;
+    const source = 'a'.repeat(length - 1) + 'é' + 'b'.repeat(length - 2) + '中' +
+      'c'.repeat(length - 3) + '🙂' + 'tail';
+    await fs.writeFile(path.join(rootDir, 'boundaries.txt'), source);
+    const pages = new Map<number, ReturnType<typeof parseReadPage>>();
+    for (const i of [3, 1, 2, 0]) {
+      pages.set(i, parseReadPage(await callTool(tools.read_file, {
+        path: 'boundaries.txt', offset: i * length, length,
+      })));
+    }
+    assert.equal(pages.get(0)?.text, 'a'.repeat(length - 1) + 'é');
+    assert.equal(pages.get(1)?.text, 'b'.repeat(length - 2) + '中');
+    assert.equal(pages.get(2)?.text, 'c'.repeat(length - 3) + '🙂');
+    assert.equal(pages.get(3)?.text, 'tail');
+    assert.equal([0, 1, 2, 3].map((i) => pages.get(i)?.text).join(''), source);
+  });
+
+  it('validates paging inputs and keeps errors as tool results', async () => {
+    await fs.writeFile(path.join(rootDir, 'bounds.txt'), 'bounds');
+    const schema = tools.read_file.inputSchema as unknown as z.ZodType;
+    for (const input of [
+      { offset: -1 }, { offset: 0.5 }, { offset: Number.MAX_SAFE_INTEGER + 1 },
+      { length: 0 }, { length: -1 }, { length: 1.5 }, { length: READ_FILE_PAGE_BYTE_LIMIT + 1 },
+    ]) {
+      assert.equal(schema.safeParse({ path: 'bounds.txt', ...input }).success, false);
+      assert.ok(isToolErrorResult(await callTool(tools.read_file, { path: 'bounds.txt', ...input })));
+    }
+    assert.match(await callTool(tools.read_file, { path: 'bounds.txt', offset: 7 }), /exceeds file size/);
+    assert.match(await callTool(tools.read_file, { path: '.', offset: 0 }), /not a regular file/);
+    assert.match(await callTool(tools.read_file, { path: 'missing', offset: 0 }), /Error:.*ENOENT/);
+  });
+
+  it('sniffs the first 8 KiB even when the requested page is later in a large binary file', async () => {
+    const bytes = Buffer.alloc(READ_FILE_BYTE_LIMIT + 1, 65);
+    bytes[8191] = 0;
+    await fs.writeFile(path.join(rootDir, 'binary'), bytes);
+    assert.match(await callTool(tools.read_file, { path: 'binary', offset: 9000, length: 10 }), /binary file/);
+  });
+
+  it('pages mixed UTF-8 and invalid bytes out of order without loss or truncation', async () => {
+    const length = READ_FILE_PAGE_BYTE_LIMIT;
+    const source = Buffer.concat([
+      Buffer.from('a'.repeat(length - 2)), Buffer.from([0xff, 0xc2]),
+      Buffer.from('é'), Buffer.from([0x80]), Buffer.from('b'.repeat(length - 4) + '🙂'),
+      Buffer.from([0xff]), Buffer.from('c'.repeat(length - 5)), Buffer.from([0xf0, 0x9f]),
+      Buffer.from('中tail'),
+    ]);
+    assert.ok(source.length > RESULT_BYTE_LIMIT);
+    await fs.writeFile(path.join(rootDir, 'mixed.patch'), source);
+    const expected = ['a'.repeat(length - 2) + '??', 'é?' + 'b'.repeat(length - 4) + '🙂',
+      '?' + 'c'.repeat(length - 5) + '?', '?中tail'];
+    const counts = [2, 1, 2, 1];
+    const pages = new Map<number, string>();
+    for (const i of [3, 1, 0, 2]) {
+      const page = parseReadPage(await callTool(tools.read_file, { path: 'mixed.patch', offset: i * length, length }));
+      assert.equal(page.text, expected[i]);
+      assert.equal(page.replacedBytes, counts[i]);
+      assert.equal(page.size, source.length);
+      assert.equal(page.nextOffset, i === 3 ? null : (i + 1) * length);
+      pages.set(i, page.text);
+    }
+    assert.equal([0, 1, 2, 3].map((i) => pages.get(i)).join(''), expected.join(''));
+  });
+
+  it('replaces every byte of malformed sequences in its own window', async () => {
+    const source = Buffer.concat([
+      Buffer.from([0x80, 0xc2]), Buffer.from('é中🙂'),
+      // Overlong, surrogate, out-of-range and incomplete encodings.
+      Buffer.from([0xc0, 0xaf, 0xed, 0xa0, 0x80, 0xf4, 0x90, 0x80, 0x80, 0xf0, 0x9f]),
+    ]);
+    await fs.writeFile(path.join(rootDir, 'malformed.txt'), source);
+    for (const length of [1, 2, 3, 7]) {
+      const pages = new Map<number, string>();
+      let replacedBytes = 0;
+      const offsets = Array.from({ length: Math.ceil(source.length / length) }, (_, i) => i * length);
+      for (const offset of [...offsets].reverse()) {
+        const page = parseReadPage(await callTool(tools.read_file, { path: 'malformed.txt', offset, length }));
+        replacedBytes += page.replacedBytes;
+        pages.set(offset, page.text);
+      }
+      assert.equal(offsets.map((offset) => pages.get(offset)).join(''), '??é中🙂' + '?'.repeat(11));
+      assert.equal(replacedBytes, 13);
+    }
+  });
+
+  it('keeps entirely invalid maximum-size pages inside the result budget', async () => {
+    const length = READ_FILE_PAGE_BYTE_LIMIT;
+    await fs.writeFile(path.join(rootDir, 'invalid.txt'), Buffer.alloc(length * 2, 0xff));
+    for (const offset of [length, 0]) {
+      const page = parseReadPage(await callTool(tools.read_file, { path: 'invalid.txt', offset, length }));
+      assert.equal(page.text, '?'.repeat(length));
+      assert.equal(page.replacedBytes, length);
+    }
+  });
+
+  it('preserves path jailing for paged reads', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-page-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'secret'), 'secret');
+      await fs.symlink(path.join(outside, 'secret'), path.join(rootDir, 'escape'));
+      for (const filePath of ['../outside', path.join(outside, 'secret'), 'escape']) {
+        const result = await callTool(tools.read_file, { path: filePath, offset: 0, length: 10 });
+        assert.ok(isToolErrorResult(result));
+        assert.match(result, /not allowed|escapes the working directory/);
+      }
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
@@ -557,11 +776,11 @@ describe('role-scoped toolsets', () => {
     }
   });
 
-  it('the read-only toolset contains exactly read_file, list_dir, grep, git_diff', async () => {
+  it('the read-only toolset contains exactly read_file, list_dir, grep', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-roles-ro-'));
     try {
       const tools = createReadOnlyToolset(rootDir);
-      assert.deepEqual(Object.keys(tools).sort(), ['git_diff', 'grep', 'list_dir', 'read_file']);
+      assert.deepEqual(Object.keys(tools).sort(), ['grep', 'list_dir', 'read_file']);
       const keys = Object.keys(tools);
       assert.ok(!keys.includes('write_file'));
       assert.ok(!keys.includes('edit_file'));
@@ -571,17 +790,7 @@ describe('role-scoped toolsets', () => {
     }
   });
 
-  it('the coder toolset does not gain the reviewer git_diff tool', async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-roles-coder-gd-'));
-    try {
-      const tools = createCoderToolset(rootDir);
-      assert.ok(!Object.keys(tools).includes('git_diff'));
-    } finally {
-      await fs.rm(rootDir, { recursive: true, force: true });
-    }
-  });
-
-  it('the plan-author toolset omits shell and diff tools but keeps bounded writers', async () => {
+  it('the plan-author toolset omits shell tools but keeps bounded writers', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-roles-plan-'));
     try {
       const tools = createPlanAuthorToolset(rootDir, { allowedWritePaths: ['PLAN.md'] });
@@ -607,159 +816,6 @@ describe('role-scoped toolsets', () => {
       assert.ok(isToolErrorResult(escape));
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
-    }
-  });
-});
-
-/**
- * git_diff battery: actual commit-range visibility for read-only reviewers.
- * The fixture repository has one modified file and one deleted file between
- * base and head, so the battery proves the deletion-detection contract that
- * head-state file reads cannot provide.
- */
-describe('git_diff tool', () => {
-  let rootDir: string;
-  let base: string;
-  let head: string;
-
-  async function git(...gitArgs: string[]): Promise<string> {
-    const { stdout } = await execFileAsync('git', gitArgs, { cwd: rootDir });
-    return stdout.trim();
-  }
-
-  before(async () => {
-    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-git-diff-'));
-    await git('init', '--quiet');
-    // Pin identity and signing locally so the fixture commits succeed
-    // regardless of the operator's global git configuration.
-    await git('config', 'user.email', 'neal-test@example.invalid');
-    await git('config', 'user.name', 'Neal Test');
-    await git('config', 'commit.gpgsign', 'false');
-    await fs.writeFile(path.join(rootDir, 'kept.txt'), 'line one\n');
-    await fs.writeFile(path.join(rootDir, 'doomed.txt'), 'doomed content\n');
-    await git('add', '-A');
-    await git('commit', '--quiet', '-m', 'base commit');
-    base = await git('rev-parse', 'HEAD');
-    await fs.writeFile(path.join(rootDir, 'kept.txt'), 'line one\nline two\n');
-    await fs.rm(path.join(rootDir, 'doomed.txt'));
-    await git('add', '-A');
-    await git('commit', '--quiet', '-m', 'head commit');
-    head = await git('rev-parse', 'HEAD');
-    // Configure an external diff driver for the whole battery: --no-ext-diff
-    // must suppress it on every call, so every patch assertion below also
-    // proves operator git config cannot execute commands through this tool.
-    await git('config', 'diff.external', 'echo EXTERNAL-DIFF-RAN');
-  });
-
-  after(async () => {
-    await fs.rm(rootDir, { recursive: true, force: true });
-  });
-
-  it('shows the committed range patch, including deletions head-state reads cannot reveal', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /\+line two/);
-    assert.match(result, /deleted file mode/);
-    assert.match(result, /-doomed content/);
-    assert.ok(!result.includes('EXTERNAL-DIFF-RAN'), 'configured external diff driver must be suppressed');
-  });
-
-  it('strips GIT_ environment overrides from the child process', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    process.env.GIT_EXTERNAL_DIFF = 'echo ENV-EXTERNAL-DIFF-RAN';
-    try {
-      const result = await callTool(tools.git_diff, { base, head });
-      assert.ok(!isToolErrorResult(result));
-      assert.match(result, /\+line two/);
-      assert.ok(!result.includes('ENV-EXTERNAL-DIFF-RAN'), 'GIT_EXTERNAL_DIFF must not reach the child');
-    } finally {
-      delete process.env.GIT_EXTERNAL_DIFF;
-    }
-  });
-
-  it('rejects pathspec magic in the path filter', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head, path: ':(top)kept.txt' });
-    assert.ok(isToolErrorResult(result));
-    assert.match(result, /pathspec magic is not allowed/);
-  });
-
-  it('returns the diffstat overview with stat:true', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head, stat: true });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /kept\.txt/);
-    assert.match(result, /doomed\.txt/);
-    assert.match(result, /2 files changed/);
-    assert.ok(!result.includes('+line two'), 'stat mode must not include patch hunks');
-  });
-
-  it('filters to a single path, including a deleted path that no longer exists on disk', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head, path: 'doomed.txt' });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /deleted file mode/);
-    assert.ok(!result.includes('kept.txt'), 'path filter must exclude other files');
-  });
-
-  it('reports an empty range as a no-differences result, not an error', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base: head, head });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /no differences for /);
-  });
-
-  it('rejects revisions that could be parsed as options or ranges', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    for (const bad of ['--all', '-p', `${base}..${head}`, 'two words', '']) {
-      const result = await callTool(tools.git_diff, { base: bad, head });
-      assert.ok(isToolErrorResult(result), `expected error for base ${JSON.stringify(bad)}`);
-      assert.match(result, /invalid git base revision/);
-    }
-    const badHead = await callTool(tools.git_diff, { base, head: '--cached' });
-    assert.ok(isToolErrorResult(badHead));
-    assert.match(badHead, /invalid git head revision/);
-  });
-
-  it('returns unknown revisions as bounded error results', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', head });
-    assert.ok(isToolErrorResult(result));
-    assert.match(result, /git diff .* failed/);
-  });
-
-  it('jails the optional path filter lexically', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const absolute = await callTool(tools.git_diff, { base, head, path: '/etc/passwd' });
-    assert.ok(isToolErrorResult(absolute));
-    assert.match(absolute, /absolute paths are not allowed/);
-    const escape = await callTool(tools.git_diff, { base, head, path: '../outside.txt' });
-    assert.ok(isToolErrorResult(escape));
-    assert.match(escape, /escapes the working directory/);
-  });
-
-  it('emits the shared tool event grammar with per-tool error attribution', async () => {
-    const events: OpenAICompatibleToolEvent[] = [];
-    const tools = createReadOnlyToolset(rootDir, { emitToolEvent: (event) => events.push(event) });
-
-    const ok = await callTool(tools.git_diff, { base, head });
-    assert.ok(!isToolErrorResult(ok));
-    assert.deepEqual(events[0], { type: 'tool_started', toolName: 'git_diff' });
-    assert.equal(events[1].type, 'tool_progress');
-    assert.equal(events[1].toolName, 'git_diff');
-    if (events[1].type === 'tool_progress') {
-      assert.equal(events[1].isError, false);
-      assert.match(events[1].message, /git_diff .* bytes\)/);
-    }
-
-    events.length = 0;
-    const bad = await callTool(tools.git_diff, { base: '--all', head });
-    assert.ok(isToolErrorResult(bad));
-    assert.equal(events[1].type, 'tool_progress');
-    if (events[1].type === 'tool_progress') {
-      assert.equal(events[1].isError, true);
-      assert.equal(events[1].message, bad);
     }
   });
 });

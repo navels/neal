@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -350,6 +350,68 @@ test('neal review writes accepted findings artifacts without writer-run mutation
   assert.match(stderr.text(), /review: analyzing 1 commit/);
 });
 
+test('neal review writes complete range files once before adjudication without ignoring .neal', async () => {
+  const repo = await createRepo('neal-review-range-files-');
+  await repo.commitFile('feature.txt', 'patch-body-sentinel\n'.repeat(1000), 'add feature');
+  const head = await repo.commitFile('second.txt', 'second patch sentinel\n', 'add second');
+  const indexPath = '.neal/reviews/review-range-files/range-diff/index.md';
+  const indexFile = join(repo.cwd, indexPath);
+  let firstIndexStat: Awaited<ReturnType<typeof stat>> | undefined;
+  const observedRounds: number[] = [];
+  class InspectingReviewProvider extends QueueReviewProvider {
+    override async reviewDraft(args: ReviewFindingsProviderReviewArgs): Promise<ReviewFindingsReview> {
+      observedRounds.push(args.round);
+      assert.ok(args.prompt.includes(indexPath));
+      assert.doesNotMatch(args.prompt, /Diff preview:|diff --git|patch-body-sentinel|second patch sentinel/);
+      const index = await readFile(indexFile, 'utf8');
+      assert.ok(index.includes(`Range: ${repo.baseCommit}..${head}`));
+      assert.match(index, /Entries: 2/);
+      assert.match(index, /"feature.txt".*0001\.patch/);
+      assert.match(index, /"second.txt".*0002\.patch/);
+      const patches = await Promise.all(['0001.patch', '0002.patch'].map(
+        (name) => readFile(join(repo.cwd, '.neal/reviews/review-range-files/range-diff', name), 'utf8'),
+      ));
+      const aggregate = await runGit(repo.cwd, 'diff', '--full-index', `${repo.baseCommit}..${head}`);
+      assert.equal(patches.join('').trim(), aggregate);
+      const indexStat = await stat(indexFile);
+      if (firstIndexStat) {
+        assert.equal(indexStat.ino, firstIndexStat.ino, 'later rounds must reuse the original artifact');
+        assert.equal(indexStat.mtimeMs, firstIndexStat.mtimeMs);
+      } else {
+        firstIndexStat = indexStat;
+      }
+      return super.reviewDraft(args);
+    }
+  }
+  const provider = new InspectingReviewProvider(
+    [sampleDraft()],
+    [
+      { verdict: 'revise', findings: ['Explain the error path.'] },
+      acceptedFinal('# Review Findings\n\nAccepted after revision.'),
+    ],
+  );
+  const result = await runNealReviewCli({
+    cwd: repo.cwd,
+    parsed: parseReviewArgs(['review', '--since', repo.baseCommit]),
+    stdout: new CaptureWritable(),
+    stderr: new CaptureWritable(),
+    provider,
+    reviewId: 'review-range-files',
+  });
+
+  assert.equal(result.outcome, 'accepted');
+  assert.deepEqual(observedRounds, [1, 2]);
+  for (const call of provider.draftCalls) {
+    assert.match(call.prompt, /Diff preview:/);
+    assert.match(call.prompt, /patch-body-sentinel/);
+    assert.match(call.prompt, /diff truncated to 12000 characters/);
+    assert.doesNotMatch(call.prompt, /Selected-Range Diff Files/);
+  }
+  const status = await runGit(repo.cwd, 'status', '--porcelain', '--untracked-files=all');
+  assert.ok(status.includes(indexPath), 'artifact must be untracked, not ignored, to exercise the worktree exemption');
+  assert.ok(status.split('\n').every((line) => line.startsWith('?? .neal/reviews/review-range-files/')));
+});
+
 test('neal review ignores a stray file in the runs directory', async () => {
   const repo = await createRepo('neal-review-stray-runs-entry-');
   await repo.commitFile('feature.txt', 'feature\n', 'add feature');
@@ -490,6 +552,12 @@ test('neal review keeps its frozen target if HEAD advances during the read-only 
   assert.equal(result.outcome, 'accepted');
   assert.equal(result.context.externalHeadCommit, featureCommit);
   assert.notEqual(finalHead, featureCommit);
+  const index = await readFile(join(result.paths.reviewDir, 'range-diff/index.md'), 'utf8');
+  assert.ok(index.includes(`Range: ${repo.baseCommit}..${featureCommit}`));
+  assert.match(index, /Entries: 1/);
+  assert.doesNotMatch(index, /concurrent\.txt/);
+  assert.match(await readFile(join(result.paths.reviewDir, 'range-diff/0001.patch'), 'utf8'), /\+feature/);
+
   assert.match(await readFile(result.paths.context, 'utf8'), new RegExp(featureCommit));
   assert.match(stdout.text(), /Accepted findings for the originally selected range/);
   assert.match(stdout.text(), /Review findings accepted:/);

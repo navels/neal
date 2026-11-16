@@ -78,7 +78,10 @@ neal operations and diagnostics.
 | `.neal/runs/<run-id>/SCOPE_<scope>_INVALID_DERIVED_PLAN.md` | Support/debug artifact | Rejected split-plan payload and its validation errors. Written only when the returned replacement plan is invalid. |
 | `.neal/runs/<run-id>/SCOPE_<scope>_DISCARDED.diff` | Support/debug artifact | Scope work preserved before neal resets it while adopting a replacement plan. |
 | `.neal/runs/<run-id>/GATE-<id>.md` | User-facing human artifact | Instructions and resume checks for an active manual gate. |
-| `.neal/runs/<run-id>/scratch/` | Support/debug artifact | Reserved run-local scratch root for execute-scope and final-completion review. Read-only reviewer prompts do not use it. It is not durable state, but it remains project-local `.neal/` data for retention and privacy purposes. |
+| `.neal/runs/<run-id>/scratch/` | Support/debug artifact | Run-local root for neal-written reviewer diff artifacts and temporary verification work. Read-only reviewers read the diff artifacts but never write scratch files. It is not durable state, but it remains project-local `.neal/` data for retention and privacy purposes. |
+| `.neal/runs/<run-id>/scratch/reviewer-scope-<scope-label>-round-<round>/range-diff/` | Support/debug artifact | Cumulative scope range: `index.md` plus numbered patch files. Scope labels include derived-scope identity, so child scopes don't overwrite one another. |
+| `.neal/runs/<run-id>/scratch/reviewer-scope-<scope-label>-round-<round>/since-previous/` | Support/debug artifact | Same format for the previous reviewer head through the current head, when those commits differ. |
+| `.neal/runs/<run-id>/scratch/final-completion-review/range-diff/` | Support/debug artifact | Whole-plan range index and patches, rewritten for each available final completion range. |
 | `.neal/runs/<run-id>/plan-progress.json` | Internal state | Machine-readable v1 progress artifact used by neal context and summaries. |
 | `.neal/runs/<run-id>/PLAN_PROGRESS.md` | User-facing human artifact | Human-readable progress summary for the active plan or scope. |
 | `.neal/runs/<run-id>/RETROSPECTIVE.md` | User-facing human artifact | Human-readable retrospective or checkpoint summary. Archived variants such as `RETROSPECTIVE-scope-*.md` may also exist. |
@@ -99,6 +102,7 @@ neal operations and diagnostics.
 | `.neal/reviews/<review-id>/events.ndjson` | Support/debug artifact | Append-only review event log. |
 | `.neal/reviews/<review-id>/REVIEW_REQUEST.md` | User-facing human artifact | Original review request, selected range, and loop prompts. |
 | `.neal/reviews/<review-id>/REVIEW_CONTEXT.json` | Support/debug artifact | Resolved local commit range, changed files, diff stat, and diff used for findings. |
+| `.neal/reviews/<review-id>/range-diff/` | Support/debug artifact | Selected review range's `index.md` and numbered patches, written once before the first adjudication round. |
 | `.neal/reviews/<review-id>/REVIEW_DRAFT.md` | User-facing human artifact | Human-readable draft findings history for each review loop round. |
 | `.neal/reviews/<review-id>/REVIEW_REVIEW.json` | Support/debug artifact | Versioned review loop summary, including outcome, cap, and round reviews. |
 | `.neal/reviews/<review-id>/REVIEW_ROUNDS.json` | Support/debug artifact | Versioned round-by-round review draft/review prompt and response history. |
@@ -115,6 +119,21 @@ lock file contract. After a timeout, call `neal status --json --run <run-id>`
 when the run id is known. Treat the wrapper timeout as the primary result while
 using `status`, `health`, and `lock.kind` to record whether neal's run state is
 still running, cleaned up, live, stale, cross-host, or unreadable.
+
+### Reviewer diff artifacts
+
+Each diff directory contains an authoritative `index.md` and one opaque numbered
+patch file per changed entry (`0001.patch`, `0002.patch`, ...). The index records
+the range, paths, statuses, byte and line counts, and binary flags. Patch files
+split one aggregate Git diff; concatenating them in index order reconstructs
+that diff byte for byte. Binary changes carry Git's text summary, not raw binary
+contents. Empty ranges have an index with no patches. Rewriting an artifact
+replaces its contents, with atomic writes per file.
+
+These files contain source diffs, including removed code and repository paths.
+Treat them with the same privacy, access, and retention care as other run and
+review artifacts. Keep `.neal/` ignored by Git and inspect artifacts before
+sharing them. They aren't public storage APIs or durable run state.
 
 ## Patch automation policy
 

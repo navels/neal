@@ -238,8 +238,7 @@ const CANNED_PLAN_REVIEW_GUIDANCE = {
 
 // Completion packet variant with an unavailable aggregate range. Production sets
 // this when no aggregate commit range resolves; buildFinalCompletionReviewerPrompt
-// then renders rangeLabel=null falsification text, and read-only-inlined does
-// not occur because no diff is collected.
+// omits artifact instructions and preserves the explicit evidence-gap wording.
 const CANNED_COMPLETION_PACKET_UNAVAILABLE: FinalCompletionPacket = {
   ...CANNED_COMPLETION_PACKET,
   finalCommit: null,
@@ -258,10 +257,8 @@ const CANNED_COMPLETION_PACKET_UNAVAILABLE: FinalCompletionPacket = {
 // Builder matrix specs. Each builder declares its authored-instruction axes and
 // a render function. An authored-instruction axis selects different
 // Neal-authored instruction text (mode/reviewMode enums, doctrine access mode
-// including its read-only submode, and boolean toggles such as
-// `authoredOneShot`); it excludes pure data interpolation. The `accessMode` axis for the two range-diff
-// reviewers encodes the read-only submode: `read-only-inlined` supplies a canned
-// inlined range diff, `read-only-tool` omits it (the providesRangeDiffTool case).
+// and boolean toggles such as `authoredOneShot`); it excludes pure data
+// interpolation. Both code reviewers share file delivery across access modes.
 // The `reviewLevel` axis on the same two reviewers selects the level-calibration
 // doctrine (`strict`, `moderate`, `lenient`).
 // ---------------------------------------------------------------------------
@@ -384,7 +381,7 @@ const blockedRecoverySpec: BuilderMatrixSpec = {
 const reviewerSpec: BuilderMatrixSpec = {
   exportName: 'buildReviewerPrompt',
   axes: [
-    { name: 'accessMode', values: ['tool-access', 'read-only-inlined', 'read-only-tool'] },
+    { name: 'accessMode', values: ['tool-access', 'read-only'] },
     { name: 'earlierScopeChanges', values: ['present', 'absent'] },
     { name: 'previousHead', values: ['present', 'absent'] },
     { name: 'reviewLevel', values: REVIEW_LEVEL_AXIS_VALUES },
@@ -406,7 +403,8 @@ const reviewerSpec: BuilderMatrixSpec = {
       recentHistorySummary: RECENT_HISTORY,
       scratchDir: SCRATCH_DIR,
       reviewerContext: CANNED_REVIEWER_PACKET,
-      inlinedRangeDiff: c.accessMode === 'read-only-inlined' ? CANNED_RANGE_DIFF : null,
+      rangeDiffIndexPath: '.neal/runs/run-000/scratch/review/range-diff/index.md',
+      sincePreviousIndexPath: c.previousHead === 'present' ? '.neal/runs/run-000/scratch/review/since-previous/index.md' : null,
       earlierScopeChanges: c.earlierScopeChanges === 'present' ? CANNED_EARLIER_SCOPE_CHANGES : null,
       accessMode,
       reviewLevel: c.reviewLevel as ReviewLevel,
@@ -429,21 +427,17 @@ function renderCompletionReviewer(c: Combo): string {
     summary: CANNED_COMPLETION_SUMMARY,
     scratchDir: SCRATCH_DIR,
     reviewerContext: CANNED_REVIEWER_PACKET,
-    // read-only-inlined only occurs with an available aggregate range (a diff was
-    // collected); the unavailable spec omits that submode entirely.
-    inlinedRangeDiff: c.accessMode === 'read-only-inlined' ? CANNED_RANGE_DIFF : null,
+    rangeDiffIndexPath: available ? '.neal/runs/run-000/scratch/final-completion-review/range-diff/index.md' : null,
     accessMode,
     reviewLevel: c.reviewLevel as ReviewLevel,
   });
 }
 
-// Range available: all three access submodes. Range unavailable: no
-// read-only-inlined, since production never inlines a range diff without a
-// collected range (final-completion.ts).
+// Both access modes use files whenever the aggregate range is available.
 const finalCompletionReviewerAvailableSpec: BuilderMatrixSpec = {
   exportName: 'buildFinalCompletionReviewerPrompt',
   axes: [
-    { name: 'accessMode', values: ['tool-access', 'read-only-inlined', 'read-only-tool'] },
+    { name: 'accessMode', values: ['tool-access', 'read-only'] },
     { name: 'aggregateRange', values: ['available'] },
     { name: 'reviewLevel', values: REVIEW_LEVEL_AXIS_VALUES },
   ],
@@ -453,7 +447,7 @@ const finalCompletionReviewerAvailableSpec: BuilderMatrixSpec = {
 const finalCompletionReviewerUnavailableSpec: BuilderMatrixSpec = {
   exportName: 'buildFinalCompletionReviewerPrompt',
   axes: [
-    { name: 'accessMode', values: ['tool-access', 'read-only-tool'] },
+    { name: 'accessMode', values: ['tool-access', 'read-only'] },
     { name: 'aggregateRange', values: ['unavailable'] },
     { name: 'reviewLevel', values: REVIEW_LEVEL_AXIS_VALUES },
   ],
@@ -581,36 +575,24 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
     'buildScopePrompt',
   ],
   scope_reviewer: [
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=absent#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=absent#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=absent#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=present#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=present#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=present#previousHead=present#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=absent#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=absent#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=absent#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=present#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=present#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=present#previousHead=present#reviewLevel=lenient',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=present#previousHead=absent#reviewLevel=strict',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=present#previousHead=absent#reviewLevel=moderate',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=present#previousHead=absent#reviewLevel=lenient',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=present#previousHead=present#reviewLevel=strict',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=present#previousHead=present#reviewLevel=moderate',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=present#previousHead=present#reviewLevel=lenient',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=absent#reviewLevel=strict',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=absent#reviewLevel=moderate',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=absent#reviewLevel=lenient',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=present#reviewLevel=strict',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=present#reviewLevel=moderate',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=present#previousHead=present#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=absent#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=absent#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=absent#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=absent#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=absent#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=absent#reviewLevel=lenient',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=strict',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=lenient',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=absent#reviewLevel=strict',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=absent#reviewLevel=moderate',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=absent#reviewLevel=lenient',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=present#reviewLevel=strict',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
+    'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=present#reviewLevel=lenient',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=absent#reviewLevel=strict',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=absent#reviewLevel=moderate',
     'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=absent#reviewLevel=lenient',
@@ -620,15 +602,12 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
   ],
   completion_coder: ['buildFinalCompletionSummaryPrompt'],
   completion_reviewer: [
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#reviewLevel=strict',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#reviewLevel=moderate',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#reviewLevel=lenient',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=strict',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=moderate',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=lenient',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=strict',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=moderate',
-    'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=lenient',
+    'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=available#reviewLevel=strict',
+    'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=available#reviewLevel=moderate',
+    'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=available#reviewLevel=lenient',
+    'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=strict',
+    'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=moderate',
+    'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=lenient',
     'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=strict',
     'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=moderate',
     'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=lenient',
@@ -641,11 +620,11 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
 
 const EXPECTED_MODULE_SHAS: Record<(typeof MATRIX_BUILDER_MODULES)[number], string> = {
   'src/neal/prompts/planning.ts': '602857121d8b3c1dea023ef1156b7f7259c298a378ab7f4b74503b675b91b1fe',
-  'src/neal/prompts/execute.ts': '0b160d5510ffd1dda9916067337ecee04f758f3325cc2057468627a154744886',
-  'src/neal/prompts/specialized.ts': '396c46ab85aa4e41ef0bf5cbce5c84d0dd11210d07b25a4c58327fd615ca8683',
+  'src/neal/prompts/execute.ts': 'a1bc3cc6ee8d877e69f811d9895722cc3b8a311cb588daf7f147a8c0a1b1b38f',
+  'src/neal/prompts/specialized.ts': '39ae6bdb2e6a18d12fc48232e4718f2a3b5e86d3d95378ddca9f468b6d0096bd',
   'src/neal/agents/prompts.ts': 'c9b8b6bd135206ec8c7055aa887d65003490b8fdef95c3a662797018d01a667e',
   'src/neal/context/reviewer-context.ts': '93c3aff16ed614f96e626c296b3984c8efcded5f4db1e333774d69f4c015faad',
-  'src/neal/context/inline-review-context.ts': '707a75dec9712158b14c9b15ccac19491a6b0d3221089545b4b2c3431458bbe7',
+  'src/neal/context/inline-review-context.ts': '75e5691be0eae369dfd820292c70a1cf99ec0925d6c0d025cfaa587bd0925707',
 };
 
 function assertModuleShaMatches(relPath: (typeof MATRIX_BUILDER_MODULES)[number], expectedSha: string): void {
@@ -702,13 +681,10 @@ function assertSentinelPresence(cellKey: string, render: string, sentinel: strin
 // (whose render must not contain that sentinel). Covers every authored axis:
 // authoredOneShot, previousHead, terminalOnly, allowReplacement,
 // allowLaterScopeRevision, both response
-// modes, plan/derived-plan modes, every reviewer access submode of both
+// modes, plan/derived-plan modes, both reviewer access modes of both
 // range-diff reviewers, and every review level of both range-diff reviewers.
 type AxisConformanceCase = { withKey: string; withoutKey: string; sentinel: string };
 
-const GIT_COMMANDS_SENTINEL = 'Use git commands against the repository';
-const GIT_DIFF_TOOL_SENTINEL = 'use the git_diff tool';
-const INLINED_RANGE_DIFF_SENTINEL = '## Inlined commit-range diff from Neal';
 const EARLIER_SCOPE_CHANGES_SENTINEL = '## Earlier-scope changes to files in this diff';
 const STRICT_LEVEL_SENTINEL = 'Review level: strict.';
 const MODERATE_LEVEL_SENTINEL = 'Review level: moderate.';
@@ -789,37 +765,17 @@ const AXIS_CONFORMANCE: AxisConformanceCase[] = [
     withoutKey: 'buildCoderPlanResponsePrompt#mode=blocking#planReviewGuidance=absent#reviewMode=plan',
     sentinel: 'Continue refining the derived implementation plan at',
   },
-  // buildReviewerPrompt access submodes
+  // Scope review differs only in command/scratch permissions, not diff delivery.
   {
     withKey: 'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    withoutKey: 'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    sentinel: GIT_COMMANDS_SENTINEL,
+    withoutKey: 'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
+    sentinel: 'Temporary verification scratch directory:',
   },
-  {
-    withKey: 'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    withoutKey: 'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    sentinel: INLINED_RANGE_DIFF_SENTINEL,
-  },
-  {
-    withKey: 'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    withoutKey: 'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-    sentinel: GIT_DIFF_TOOL_SENTINEL,
-  },
-  // buildFinalCompletionReviewerPrompt access submodes (aggregate range available)
+  // Completion access modes differ only in execution and scratch permissions.
   {
     withKey: 'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=moderate',
-    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=moderate',
-    sentinel: GIT_COMMANDS_SENTINEL,
-  },
-  {
-    withKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#reviewLevel=moderate',
-    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=moderate',
-    sentinel: INLINED_RANGE_DIFF_SENTINEL,
-  },
-  {
-    withKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=moderate',
-    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-inlined#aggregateRange=available#reviewLevel=moderate',
-    sentinel: GIT_DIFF_TOOL_SENTINEL,
+    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=available#reviewLevel=moderate',
+    sentinel: 'Temporary verification scratch directory:',
   },
   // buildPlanReviewerPrompt access modes: tool-access vs read-only
   // doctrine/framing. Read-only names read-only file tools; tool-access names
@@ -847,17 +803,17 @@ const AXIS_CONFORMANCE: AxisConformanceCase[] = [
     sentinel: 'Operator guidance for this blocked plan-review recovery:',
   },
   // completion aggregate-range available/unavailable (R2-F1). Available renders
-  // the range-anchored falsification line; unavailable has no resolved range so
+  // the artifact instructions; unavailable has no resolved range so
   // that line is absent.
   {
     withKey: 'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=moderate',
     withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=unavailable#reviewLevel=moderate',
-    sentinel: 'Review that aggregate range base000..head000 directly with repository tools',
+    sentinel: 'Commit-range diff index (repository-relative):',
   },
   {
-    withKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=moderate',
-    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=moderate',
-    sentinel: 'Review that aggregate range base000..head000 directly with your read-only repository tools',
+    withKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=available#reviewLevel=moderate',
+    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=moderate',
+    sentinel: 'Commit-range diff index (repository-relative):',
   },
   // reviewLevel on buildReviewerPrompt: each level renders its own calibration
   // line; only lenient narrows the robustness/performance severity rule.
@@ -893,8 +849,8 @@ const AXIS_CONFORMANCE: AxisConformanceCase[] = [
     sentinel: MODERATE_LEVEL_SENTINEL,
   },
   {
-    withKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=lenient',
-    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=strict',
+    withKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=lenient',
+    withoutKey: 'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=strict',
     sentinel: LENIENT_LEVEL_SENTINEL,
   },
 ];
@@ -940,17 +896,18 @@ function registerTests(): void {
     }
   });
 
-  test('reviewer access-mode branches render distinctly (both read-only submodes covered)', () => {
-    const render = (accessMode: string, previousHead: string) =>
-      reviewerSpec.render({ accessMode, earlierScopeChanges: 'absent', previousHead, reviewLevel: 'moderate' });
-    const toolAccess = render('tool-access', 'present');
-    const readOnlyInlined = render('read-only-inlined', 'present');
-    const readOnlyTool = render('read-only-tool', 'present');
-    const renders = [toolAccess, readOnlyInlined, readOnlyTool];
-    for (let i = 0; i < renders.length; i += 1) {
-      for (let j = i + 1; j < renders.length; j += 1) {
-        assert.notEqual(renders[i], renders[j], `buildReviewerPrompt access-mode renders ${i} and ${j} must differ`);
-      }
+  test('scope reviewer access modes share file delivery with distinct execution permissions', () => {
+    const render = (accessMode: string) =>
+      reviewerSpec.render({ accessMode, earlierScopeChanges: 'absent', previousHead: 'present', reviewLevel: 'moderate' });
+    const toolAccess = render('tool-access');
+    const readOnly = render('read-only');
+    assert.notEqual(toolAccess, readOnly);
+    for (const prompt of [toolAccess, readOnly]) {
+      assert.match(prompt, /range-diff\/index\.md/);
+      assert.match(prompt, /since-previous\/index\.md/);
+      assert.match(prompt, /patch files are the source of truth/);
+      assert.doesNotMatch(prompt, /git_diff|git diff |Inlined commit-range diff/);
+      assert.equal(prompt.includes(CANNED_RANGE_DIFF), false);
     }
 
     // plan_reviewer plan vs derived-plan and coder-plan-response blocking vs optional.
@@ -971,11 +928,26 @@ function registerTests(): void {
     assert.notEqual(coderPlanBlocking, coderPlanOptional);
   });
 
+  test('completion reviewer modes share complete file delivery or explicit unavailable evidence', () => {
+    for (const cell of getSpecCells('completion_reviewer')) {
+      const available = cell.key.includes('aggregateRange=available');
+      assert.equal(cell.render.includes('Commit-range diff index (repository-relative):'), available);
+      assert.doesNotMatch(cell.render, /git_diff|git diff |Inlined commit-range diff/);
+      assert.equal(cell.render.includes(CANNED_RANGE_DIFF), false);
+      if (available) {
+        assert.match(cell.render, /patch files are the source of truth/);
+        assert.match(cell.render, /range-diff\/index\.md/);
+      } else {
+        assert.match(cell.render, /treat the missing aggregate range as a completion-review evidence gap/);
+      }
+    }
+  });
+
   test('reviewer cells render production continuity framing and plan content per access mode', () => {
     // scope reviewer: every mode gets the tool-access citations framing (the
     // removed no-read inline framing must never render).
     const scopeToolAccess = cellRenderByKey('buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate');
-    const scopeReadOnly = cellRenderByKey('buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate');
+    const scopeReadOnly = cellRenderByKey('buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate');
     for (const render of [scopeToolAccess, scopeReadOnly]) {
       assert.ok(render.includes('# Reviewer Continuity Context'), 'scope reviewer must render the continuity block');
       assert.ok(render.includes('Inspect cited artifacts'));
@@ -1007,7 +979,7 @@ function registerTests(): void {
       'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=moderate',
     );
     const complReadOnly = cellRenderByKey(
-      'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=available#reviewLevel=moderate',
+      'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=available#reviewLevel=moderate',
     );
     for (const render of [complToolAccess, complReadOnly]) {
       assert.ok(render.includes('Inspect cited artifacts'));
@@ -1061,12 +1033,11 @@ function registerTests(): void {
       'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=false#terminalOnly=true',
       'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=false#allowReplacement=true#terminalOnly=false',
       'buildBlockedRecoveryCoderPrompt#allowLaterScopeRevision=true#allowReplacement=true#terminalOnly=false',
-      'buildReviewerPrompt#accessMode=read-only-inlined#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
-      'buildReviewerPrompt#accessMode=read-only-tool#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
+      'buildReviewerPrompt#accessMode=read-only#earlierScopeChanges=absent#previousHead=present#reviewLevel=moderate',
       // New authored axes (R2-F1): planDocument, planReviewGuidance, aggregate-range.
       'buildPlanningPrompt#authoredOneShot=false#planDocument=present',
       'buildCoderPlanResponsePrompt#mode=blocking#planReviewGuidance=present#reviewMode=plan',
-      'buildFinalCompletionReviewerPrompt#accessMode=read-only-tool#aggregateRange=unavailable#reviewLevel=moderate',
+      'buildFinalCompletionReviewerPrompt#accessMode=read-only#aggregateRange=unavailable#reviewLevel=moderate',
       'buildReviewerPrompt#accessMode=tool-access#earlierScopeChanges=absent#previousHead=present#reviewLevel=lenient',
       'buildFinalCompletionReviewerPrompt#accessMode=tool-access#aggregateRange=available#reviewLevel=strict',
     ];

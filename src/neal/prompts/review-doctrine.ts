@@ -12,26 +12,21 @@ export type AdversarialReviewDoctrineContext = {
 // 'tool-access' is the default doctrine for reviewers that can inspect AND
 // execute against the repository directly (git commands, test runs, scratch
 // directories). 'read-only' is for reviewers that can read and search the
-// repository through read tools — including the read-only git_diff
-// commit-range tool — but cannot run commands; it must not instruct command
-// execution, test runs, shell git-command usage, or scratch-directory work.
+// repository and range-diff artifacts through read tools but cannot run
+// commands; it must not instruct command execution, test runs, shell
+// git-command usage, or scratch-directory work.
 // Every reviewer provider has repository read access; there is no reviewer
 // doctrine for providers without read tools.
 export type ReviewDoctrineAccessMode = 'tool-access' | 'read-only';
 
 export type CodeReviewFalsificationContext = {
-  rangeLabel?: string | null;
-  gitInspectionExamples?: string;
   reviewTarget?: string;
   includeExecuteFailureClasses?: boolean;
   mode?: ReviewDoctrineAccessMode;
-  // Only meaningful with mode === 'read-only'. When true, Neal has inlined the
-  // commit-range diff into the reviewer prompt (the reviewer has read tools but
-  // no commit-range diff tool), so the doctrine references that inlined diff as
-  // the source of truth and must not name a `git_diff` tool.
-  // When false (the default, e.g. openai-compatible), the doctrine keeps the
-  // existing `git_diff`-tool phrasing.
-  rangeDiffInlined?: boolean;
+  rangeDiffArtifact?: {
+    indexPath: string;
+    sincePreviousIndexPath?: string | null;
+  };
 };
 
 export type VerificationSkepticismContext = {
@@ -81,20 +76,31 @@ export function getAdversarialReviewDoctrineLines(context: AdversarialReviewDoct
   ];
 }
 
+export function getRangeDiffArtifactLines(context: {
+  indexPath: string;
+  sincePreviousIndexPath?: string | null;
+}) {
+  return [
+    `Commit-range diff index (repository-relative): ${context.indexPath}`,
+    ...(context.sincePreviousIndexPath
+      ? [`Changes since the previous reviewer head index (repository-relative): ${context.sincePreviousIndexPath}`]
+      : []),
+    'Start at the cumulative commit-range index. The index is the authoritative, complete list of changed entries; its patch files are the source of truth for exactly what changed, including deletions and renames. The inline diff stat and changed-file list are previews only.',
+    'Read the patch file for every index entry. Patch filenames are relative to their index directory. Read large indexes and patches in pages until complete; use byte offsets and lengths where supported, and request several pages in one turn where the tools allow. The index gives patch byte counts so page offsets can be computed in advance.',
+    ...(context.sincePreviousIndexPath
+      ? ['Also read the since-previous index and its patches to focus on the latest revisions, while still reviewing the full cumulative range.']
+      : []),
+    'Then read the changed files in full and search the tree for affected symbols and callers to verify claims. For deleted paths, use the patches and inspect surviving callers.',
+  ];
+}
+
 export function getCodeReviewFalsificationLines(context: CodeReviewFalsificationContext) {
   const mode = context.mode ?? 'tool-access';
   const reviewTarget = context.reviewTarget ?? 'changed behavior';
-  const rangeDiffInlined = mode === 'read-only' && context.rangeDiffInlined === true;
   const lines: string[] = [];
 
-  if (context.rangeLabel) {
-    lines.push(
-      mode === 'read-only'
-        ? rangeDiffInlined
-          ? `The commit-range diff for that ${context.rangeLabel} is inlined below and is the source of truth for exactly what the ${context.rangeLabel} changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.`
-          : `Review that ${context.rangeLabel} directly with your read-only repository tools: use the git_diff tool to see exactly what the ${context.rangeLabel} changed (including deletions and renames), and your read tools to verify the surrounding code. The ${context.rangeLabel} is the source of truth for this review.`
-        : `Review that ${context.rangeLabel} directly with repository tools. The ${context.rangeLabel} is the source of truth for this review.`,
-    );
+  if (context.rangeDiffArtifact) {
+    lines.push(...getRangeDiffArtifactLines(context.rangeDiffArtifact));
   }
 
   if (mode === 'read-only') {
@@ -102,18 +108,6 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
       'A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.',
       'Your read tools may be dedicated read and search tools, or a shell running in a read-only sandbox. If your only repository tool is that shell, use it to read files and search the tree (for example cat, sed -n, grep, ls); it cannot write, and you must not try to.',
     );
-  }
-
-  if (context.gitInspectionExamples) {
-    if (mode === 'tool-access') {
-      lines.push(context.gitInspectionExamples);
-    } else if (mode === 'read-only') {
-      lines.push(
-        rangeDiffInlined
-          ? 'Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.'
-          : 'Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.',
-      );
-    }
   }
 
   lines.push(

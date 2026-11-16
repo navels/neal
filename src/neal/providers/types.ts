@@ -12,14 +12,6 @@ export type ProviderUsageReporting = 'opportunistic' | 'none';
 export type ProviderRoleCapabilities = {
   supported: boolean;
   toolAccess: ProviderToolAccess;
-  // Structural signal that a read-only structured-advisor reviewer exposes a
-  // commit-range diff tool (e.g. openai-compatible's `git_diff`). When absent or
-  // false, a read-only reviewer has no way to see the commit-range diff through
-  // tools, so Neal inlines the commit-range diff into its reviewer prompt
-  // instead of instructing it to call a diff tool it does not have. Only
-  // meaningful for the `read-only` review doctrine; irrelevant for
-  // `tool-access` (shell `git diff`).
-  providesRangeDiffTool?: boolean;
   // Hard per-turn input limit in characters, when the provider enforces one
   // (Codex's app-server rejects any single turn over 1,048,576 chars with
   // `input_too_large`). An adapter whose role declares this preflights every

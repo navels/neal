@@ -207,22 +207,18 @@ tool access:
 - `read-only` (read access without shell access, which every built-in reviewer
   today): the reviewer is instructed to inspect the repository through read
   tools only (reading changed files and searching the tree) and is never
-  instructed to run commands, run tests, or use scratch directories.
-  Commit-range visibility depends on whether the provider exposes its own
-  range-diff tool:
-  - `openai-compatible` declares a read-only `git_diff` commit-range tool
-    (`providesRangeDiffTool`), so its reviewer inspects the range with that tool
-    and receives no inlined diff.
-  - native read-only reviewers such as `openai-codex` and `anthropic-claude`
-    have read and search tools but no commit-range diff tool, so neal inlines
-    the commit-range diff into the reviewer prompt as the source of truth for
-    what the range changed (including deletions and renames that head-state file
-    reads cannot reveal), and the reviewer uses its read/search tools to verify
-    the surrounding code.
+  instructed to run tests or create scratch files.
+  For scope review, final completion review, and `neal review`, every provider
+  reads the commit-range diff from a repository-relative `index.md` and numbered
+  patch files written by neal. The index is the complete list of changed entries;
+  the patches preserve deletions and renames that head-state reads can't show.
+  Reviewers read every patch, page through large files, then inspect surrounding
+  code and affected callers. The inline diff stat and changed-file list are
+  previews only. There's no pasted range diff or reviewer range-diff tool.
 
-  In both branches the doctrine states that absence from a diff is not evidence
-  of absence from the repository: the reviewer must open files with read tools
-  before claiming a missing import or declaration.
+  The doctrine states that absence from a diff isn't evidence of absence from
+  the repository: the reviewer must open files with read tools before claiming
+  a missing import or declaration.
 - `tool-access` (read and shell access): a reviewer is instructed to inspect
   and execute against the repository directly. Because the read-only reviewer
   invariant forbids any supported `structured-advisor` capability from holding
@@ -540,14 +536,10 @@ Role support and behavior:
   The planner inherits the coder provider unless configured explicitly.
 - Tool-capable reviewer. The structured-advisor role runs the same
   neal-owned loop over a read-only toolset (`read_file`, `list_dir`,
-  `grep`, and the read-only `git_diff` commit-range inspector), so the
-  reviewer inspects the repository directly under the `read-only` review
-  doctrine mode (see
-  [Review doctrine access modes](#review-doctrine-access-modes)). `git_diff`
-  is a neal-owned fixed-argv git query (never a shell string) that gives the
-  reviewer actual commit-range visibility, including deletions and renames
-  that head-state file reads cannot reveal. After the read-tool loop
-  completes with a zero-tool-call turn, the structured payload is requested
+  `grep`), so the reviewer reads the diff artifacts and repository under the
+  `read-only` review doctrine mode (see
+  [Review doctrine access modes](#review-doctrine-access-modes)). After the
+  read-tool loop completes with a zero-tool-call turn, the structured payload is requested
   in a single dedicated finalization turn that carries no tools. The same
   adapter also serves the final-completion summary gate when
   `openai-compatible` is the coder.
@@ -614,6 +606,27 @@ reviewer duty. Treat the dated [compatible-models.md](compatible-models.md)
 whitelist as the current evidence for `openai-compatible` model compatibility.
 It is a contract smoke test, not a skill ranking, so still trial unfamiliar
 models on a disposable project before using them on real work.
+
+### Reading large files
+
+`read_file` accepts optional `offset` and `length` arguments measured in bytes.
+Supplying either enables paging: `offset` defaults to `0`, and `length` defaults
+to `15,872` bytes (the maximum). Each result reports its byte window, total file
+size, and next offset or EOF. Page metadata and content fit inside the 16 KiB
+result budget, so the result wrapper doesn't truncate a page again. Paging
+bypasses the 256 KiB whole-file limit and uses bounded reads.
+
+Windows can be requested out of order or batched in one model turn. A valid
+UTF-8 character belongs to the window containing its first byte; adjacent
+windows don't duplicate or lose it. Invalid bytes render as `?`. NUL-containing
+files still fail the binary check. Calls without paging arguments retain the
+256 KiB file limit and 16 KiB result truncation, with a hint to use paging.
+These arguments work for coder and reviewer reads. Paths must be
+repository-relative; explicit paths under `.neal/` are readable.
+
+Batching matters for large patches: the advisor loop still has a 24-turn cap.
+The test suite checks batching with a scripted model; qualify live models on
+large patches before relying on their ability to finish within that cap.
 
 ### Configuration
 
@@ -836,6 +849,9 @@ event collection, structured-output parsing, retry behavior, and error
 normalization.
 
 ## SDK prerequisites
+
+Git 2.30 or newer must be available on `PATH`. Creating reviewer diff artifacts
+uses `git rev-parse --end-of-options` to resolve the range endpoints.
 
 Provider documentation should state the SDK package, required credentials or
 login state, model assumptions, filesystem/tool permission assumptions, and any

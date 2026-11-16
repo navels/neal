@@ -25,7 +25,8 @@
       "whyNotRedundant": "The prior wording left too much ambiguity in reviewer guidance.",
       "nextStepUnlocked": "Reviewer verdicts can now judge progress against the parent objective."
     },
-    "recentHistorySummary": "Accepted scope history for parent objective 5.2...\nTouched-file concentration: src/shared.ts (2/2 scopes)"
+    "recentHistorySummary": "Accepted scope history for parent objective 5.2...\nTouched-file concentration: src/shared.ts (2/2 scopes)",
+    "rangeDiffIndexPath": ".neal/runs/run-123/scratch/range-diff/index.md"
   },
   "contains": [
     "Temporary verification scratch directory: /tmp/repo/.neal/runs/run-123/scratch/reviewer-scope-5.2-round-2",

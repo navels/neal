@@ -6,7 +6,6 @@ import {
   boundFreeTextValues,
   boundOpenFindingsForPrompt,
   GIT_SUMMARY_SECTION_MAX_CHARS,
-  renderInlinedRangeDiffSection,
   truncateInlineSectionBody,
 } from '../context/inline-review-context.js';
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
@@ -212,9 +211,9 @@ export function buildReviewerPrompt(args: {
   recentHistorySummary: string;
   scratchDir: string;
   reviewerContext?: ReviewerContextPacket | null;
-  // Neal-inlined commit-range diff for a read-only reviewer that has read tools
-  // but no commit-range diff tool. Only rendered when accessMode is 'read-only'.
-  inlinedRangeDiff?: string | null;
+  // Repository-relative indexes for the cumulative range and optional round delta.
+  rangeDiffIndexPath: string;
+  sincePreviousIndexPath?: string | null;
   // Files in the current diff that an earlier accepted scope also changed, each
   // with that earlier scope's per-file diff. Rendered in every access mode when
   // non-empty; omitted entirely when there is no overlap.
@@ -234,22 +233,17 @@ export function buildReviewerPrompt(args: {
 
   const accessMode = args.accessMode ?? 'tool-access';
   const reviewLevel = args.reviewLevel ?? 'moderate';
-  // A collected diff may legitimately be the empty string (a range with no
-  // changes); distinguish "collected" (any string, including '') from "not
-  // collected" (null/undefined) so an empty diff still rides the inlined channel
-  // instead of falling back to git_diff-tool phrasing the reviewer cannot use.
-  const rangeDiffInlined =
-    accessMode === 'read-only' && args.inlinedRangeDiff !== null && args.inlinedRangeDiff !== undefined;
   const changedFilesText =
     args.changedFiles.length > 0 ? boundChangedFileList(args.changedFiles).join('\n') : '(no changed files)';
   const commitsText = args.commits.length > 0 ? boundCommitSubjectList(args.commits).join('\n') : '(no commits recorded)';
   const falsificationLines = getCodeReviewFalsificationLines({
-    rangeLabel: 'commit range',
-    gitInspectionExamples: `Use git commands against the repository, for example: git diff ${args.baseCommit}..${args.headCommit}, git show --stat ${args.headCommit}, and targeted path diffs or file reads for changed files.`,
+    rangeDiffArtifact: {
+      indexPath: args.rangeDiffIndexPath,
+      sincePreviousIndexPath: args.sincePreviousIndexPath,
+    },
     reviewTarget: 'scope diff',
     includeExecuteFailureClasses: true,
     mode: accessMode,
-    rangeDiffInlined,
   });
   // Scratch-directory work requires command execution; only the full
   // tool-access mode may instruct it.
@@ -329,15 +323,6 @@ export function buildReviewerPrompt(args: {
     'If prior review history or continuity context describes a finding as fixed, rejected, or deferred, do not reopen the same claim from that history alone.',
     'Before emitting a finding that resembles a prior fixed/rejected/deferred finding, inspect the current code or current diff and cite fresh current evidence showing the defect still exists.',
     'If current evidence is ambiguous for an already-addressed claim, do not use a blocking finding to force another coder loop; use meaningfulProgressAction=`block_for_operator` only when operator judgment is genuinely required.',
-    ...(rangeDiffInlined
-      ? [
-          '',
-          renderInlinedRangeDiffSection({
-            rangeLabel: `${args.baseCommit}..${args.headCommit}`,
-            diff: args.inlinedRangeDiff!,
-          }),
-        ]
-      : []),
     ...(args.earlierScopeChanges && args.earlierScopeChanges.length > 0
       ? ['', renderEarlierScopeChangesSection(args.earlierScopeChanges)]
       : []),

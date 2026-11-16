@@ -7,9 +7,7 @@ import {
   assertNoReadPromptInstructionText,
   createInlineSection,
   getReviewerDoctrineAccessMode,
-  readOnlyReviewerNeedsInlinedDiff,
   renderInlineReviewerContext,
-  renderInlinedRangeDiffSection,
   truncateInlineSectionBody,
 } from '../src/neal/context/inline-review-context.js';
 import {
@@ -50,65 +48,6 @@ test('getReviewerDoctrineAccessMode selects read-only for read access without sh
   );
 
   assert.equal(getReviewerDoctrineAccessMode({ provider: 'fake-read-only-reviewer', model: null }), 'read-only');
-});
-
-test('readOnlyReviewerNeedsInlinedDiff is true only for read-only reviewers lacking a commit-range diff tool', () => {
-  // Native read-only reviewers (read tools, no shell, no commit-range diff tool)
-  // need Neal to inline the commit-range diff.
-  assert.equal(readOnlyReviewerNeedsInlinedDiff({ provider: 'anthropic-claude', model: null }), true);
-  assert.equal(readOnlyReviewerNeedsInlinedDiff({ provider: 'openai-codex', model: null }), true);
-  // openai-compatible exposes its own git_diff range tool, so it does not need an
-  // inlined diff.
-  assert.equal(readOnlyReviewerNeedsInlinedDiff({ provider: 'openai-compatible', model: null }), false);
-  // Unregistered ids default to false (tool-access doctrine).
-  assert.equal(readOnlyReviewerNeedsInlinedDiff({ provider: 'unregistered-provider', model: null }), false);
-});
-
-test('readOnlyReviewerNeedsInlinedDiff respects the providesRangeDiffTool capability flag', () => {
-  registerProviderDefinitionForTesting(
-    createFakeProviderDefinition({
-      id: 'fake-read-only-with-diff-tool',
-      capabilities: {
-        coder: fakeProviderDefaultCapabilities.coder,
-        'structured-advisor': {
-          ...fakeProviderDefaultCapabilities['structured-advisor'],
-          toolAccess: { read: true, write: false, shell: false },
-          providesRangeDiffTool: true,
-        },
-      },
-    }),
-  );
-  registerProviderDefinitionForTesting(
-    createFakeProviderDefinition({
-      id: 'fake-read-only-without-diff-tool',
-      capabilities: {
-        coder: fakeProviderDefaultCapabilities.coder,
-        'structured-advisor': {
-          ...fakeProviderDefaultCapabilities['structured-advisor'],
-          toolAccess: { read: true, write: false, shell: false },
-        },
-      },
-    }),
-  );
-
-  assert.equal(readOnlyReviewerNeedsInlinedDiff({ provider: 'fake-read-only-with-diff-tool', model: null }), false);
-  assert.equal(readOnlyReviewerNeedsInlinedDiff({ provider: 'fake-read-only-without-diff-tool', model: null }), true);
-});
-
-test('renderInlinedRangeDiffSection affirms read tools and presents the diff as the source of truth', () => {
-  const rendered = renderInlinedRangeDiffSection({ rangeLabel: 'aaa..bbb', diff: '+added line' });
-
-  assert.match(rendered, /## Inlined commit-range diff from Neal \(aaa\.\.bbb\)/);
-  assert.match(rendered, /You have read-only repository access but no commit-range diff tool/);
-  assert.match(rendered, /a shell running in a read-only sandbox/);
-  assert.match(rendered, /source of truth for exactly what this range changed/);
-  assert.match(rendered, /\+added line/);
-  // This is not the no-read framing: it must not deny all repository access.
-  assert.doesNotMatch(rendered, /You do not have repository, file, shell, or tool access of any kind/);
-  assert.doesNotMatch(rendered, /git_diff/);
-
-  const empty = renderInlinedRangeDiffSection({ rangeLabel: 'aaa..bbb', diff: '   ' });
-  assert.match(empty, /\(empty diff\)/);
 });
 
 test('truncateInlineSectionBody appends an explicit truncation marker', () => {

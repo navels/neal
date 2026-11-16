@@ -53,8 +53,8 @@ with artifacts under `.neal/reviews/<review-id>/`.
   - validated allowed transition outcomes declared per spec
 - Adjudicator helpers (`planning.ts`, `execute.ts`, `final-completion.ts`):
   - per-family context resolution from run state
-  - reviewer/coder round invocation, including supplying the commit-range diff
-    to read-only reviewers that lack their own range-diff tool
+  - reviewer/coder round invocation, including writing the range-diff artifact
+    and passing its index path to the reviewer round
   - execute-family findings synthesis, reopened-finding and stuck-window
     detection, and disposition resolution
 - Transition layer (`src/neal/orchestrator.ts`, `src/neal/orchestrator/run-loop.ts`,
@@ -214,9 +214,10 @@ Every in-scope spec declares allowed outcomes
 
 - Current loop surface: `runNealReviewCli` in `src/neal/review-findings/run.ts`
 - Artifact under review: findings draft for a selected local commit range
-- Prompt surfaces (own prompts, not shared with `scope_reviewer` or
-  `review-doctrine.ts`): `buildReviewFindingsDraftPrompt`,
-  `buildReviewFindingsReviewPrompt` in `src/neal/review-findings/prompts.ts`
+- Prompt surfaces: `buildReviewFindingsDraftPrompt` and
+  `buildReviewFindingsReviewPrompt` in `src/neal/review-findings/prompts.ts`.
+  The loop keeps its own prompts but takes the diff-artifact delivery wording
+  from `src/neal/prompts/review-doctrine.ts`.
 - Output contracts:
   - draft: `ReviewFindingsDraft`
   - review: `ReviewFindingsReview` with verdict `accepted`, `revise`, or `blocked`

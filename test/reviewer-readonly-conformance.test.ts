@@ -315,15 +315,14 @@ async function verifyOpenAICompatibleReviewerWiring() {
     await fs.writeFile(path.join(rootDir, 'canary.txt'), canaryContent);
     await git('add', '-A');
     await git('commit', '--quiet', '-m', 'canary commit');
-    const head = await git('rev-parse', 'HEAD');
 
     const tools = createReadOnlyToolset(rootDir);
 
     // (a) Exactly the expected read-only tool set — nothing more, nothing less.
     assert.deepEqual(
       Object.keys(tools).sort(),
-      ['git_diff', 'grep', 'list_dir', 'read_file'],
-      'openai-compatible reviewer toolset must be exactly read_file, list_dir, grep, git_diff',
+      ['grep', 'list_dir', 'read_file'],
+      'openai-compatible reviewer toolset must be exactly read_file, list_dir, grep',
     );
 
     // (b) No mutation- or execution-shaped tool under any plausible name.
@@ -341,7 +340,6 @@ async function verifyOpenAICompatibleReviewerWiring() {
       read_file: { path: 'canary.txt' },
       list_dir: { path: '.' },
       grep: { pattern: 'canary' },
-      git_diff: { base: head, head },
     };
     const callOptions = { toolCallId: 'conformance-call', messages: [] } as unknown as ToolExecutionOptions<never>;
 

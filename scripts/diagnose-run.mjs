@@ -318,6 +318,7 @@ if (!existsSync(stderrPath)) {
 
 // ---- estimate ----
 section('Final-completion reviewer prompt estimate');
+line('Legacy estimate for runs before file-based diff delivery. This script does not determine whether the producing version used that delivery; the total below includes a legacy inline-diff term.');
 const guidanceBytes = fileSize(join(guidanceDir, 'reviewer.md')) ?? 0;
 const contextBytes = fileSize(join(runDir, 'REVIEWER_CONTEXT.md')) ?? 0;
 const diffTerm = aggregateDiffBytes == null ? null : Math.min(aggregateDiffBytes, 200_000);
@@ -327,7 +328,7 @@ const verificationBytes = commandHistory.recordsBytes + commandHistory.summaryBy
 const fixed = 9_000;
 const terms = [
   ['fixed instructions', fixed],
-  ['inlined aggregate diff (capped at 200000)', diffTerm ?? 0],
+  ['legacy inlined aggregate diff (before file-based delivery only; capped at 200000)', diffTerm ?? 0],
   ['command history in packet (upper bound)', verificationBytes],
   ['scope accounting in packet', scopeBytes],
   ['reviewer continuity markdown', contextBytes],

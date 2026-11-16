@@ -51,6 +51,7 @@ import {
   openAICompatibleProviderTestHooks,
 } from '../src/neal/providers/openai-compatible.js';
 import { computeRateCostUsd, resolveRateCost } from '../src/neal/providers/pricing.js';
+import { READ_FILE_PAGE_BYTE_LIMIT, RESULT_BYTE_LIMIT } from '../src/neal/providers/openai-compatible-tools.js';
 import { NealProviderError } from '../src/neal/providers/types.js';
 import type {
   ProviderRuntimeEvent,
@@ -1693,7 +1694,7 @@ test('a string-form protocol schema throws provider_failed naming the schema lab
 // --- Structured-advisor battery ----------------------------------------------
 //
 // The advisor adapter runs reviewer rounds through the bounded read-only tool
-// loop (read_file, list_dir, grep, git_diff; OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS) and the
+// loop (read_file, list_dir, grep; OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS) and the
 // final-completion round when the coder is openai-compatible, so its loop,
 // retry, and cancellation behavior is what keeps reviews and run completion
 // from stalling.
@@ -1787,12 +1788,11 @@ test('advisor: a valid round returns the structured verdict with the ordered eve
   assert.deepEqual(received.providerData, { schemaLabel: 'test_payload' });
 
   // The advisor loop turn carries exactly the read-only toolset on the SDK
-  // call: no write or shell tools, ever. git_diff is the read-only
-  // commit-range inspector (deletion visibility without shell access).
+  // call: no write or shell tools, ever.
   assert.equal(model.doGenerateCalls.length, 2);
   assert.deepEqual(
     (model.doGenerateCalls[0].tools ?? []).map((tool) => tool.name).sort(),
-    ['git_diff', 'grep', 'list_dir', 'read_file'],
+    ['grep', 'list_dir', 'read_file'],
   );
   const initialPrompt = JSON.stringify(model.doGenerateCalls[0].prompt);
   assert.ok(!initialPrompt.includes('neal-json'), 'the base prompt must not carry fence instructions');
@@ -2076,6 +2076,67 @@ test('advisor: a read-tool sequence ends in a valid payload with per-tool and st
     toolCalls: { read_file: 1 },
     toolErrors: {},
     steps: 3,
+  });
+});
+
+test('advisor: batches every page of a large patch in one turn within the advisor cap', async () => {
+  const cwd = await createWorkDir();
+  const artifactPath = '.neal/runs/fixture/scratch/range-diff/0001.patch';
+  const source = '+large patch line é中🙂 '.repeat(20_000) + '\nfinal-patch-marker\n';
+  const size = Buffer.byteLength(source);
+  assert.ok(size > 384 * 1024);
+  await mkdir(path.dirname(path.join(cwd, artifactPath)), { recursive: true });
+  await writeFile(path.join(cwd, artifactPath), source);
+  const offsets = Array.from({ length: Math.ceil(size / READ_FILE_PAGE_BYTE_LIMIT) },
+    (_, i) => i * READ_FILE_PAGE_BYTE_LIMIT);
+  assert.ok(offsets.length > OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS);
+  const model = scriptedModel([
+    () => ({
+      content: [...offsets].reverse().map((offset) => ({
+        type: 'tool-call', toolCallId: `page-${offset}`, toolName: 'read_file',
+        input: JSON.stringify({ path: artifactPath, offset, length: READ_FILE_PAGE_BYTE_LIMIT }),
+      })),
+      finishReason: TOOL_CALLS_FINISH_REASON,
+      usage: REPORTED_USAGE,
+      warnings: [],
+    }),
+    () => textResponse('All patch pages reviewed.'),
+    jsonPayloadResponse,
+  ]);
+  const adapter = createAdvisorAdapter({ model });
+  const { events, sink } = collectEvents();
+  const result = await adapter.runStructuredRound<TestPayload>(advisorArgs(cwd, sink));
+  assert.deepEqual(result.structured, { done: true });
+  assert.equal(model.doGenerateCalls.length, 3);
+  assert.ok(model.doGenerateCalls.length < OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS);
+  const pages = new Map<number, string>();
+  for (const message of model.doGenerateCalls[1].prompt) {
+    if (message.role !== 'tool') {
+      continue;
+    }
+    for (const part of message.content) {
+      assert.equal(part.type, 'tool-result');
+      if (part.type !== 'tool-result') {
+        continue;
+      }
+      assert.equal(part.output.type, 'text');
+      if (part.output.type !== 'text') {
+        continue;
+      }
+      const text = part.output.value;
+      assert.ok(Buffer.byteLength(text) <= RESULT_BYTE_LIMIT);
+      assert.doesNotMatch(text, /\[truncated:/);
+      const match = /^\[read_file bytes (\d+)\.\.\d+ of (\d+);[^\n]*\]\n([\s\S]*)\n\[next offset: (?:\d+|EOF)\]$/.exec(text);
+      assert.ok(match, text.slice(0, 200));
+      assert.equal(Number(match[2]), size);
+      pages.set(Number(match[1]), match[3]);
+    }
+  }
+  assert.equal(pages.size, offsets.length);
+  assert.equal(offsets.map((offset) => pages.get(offset)).join(''), source);
+  const completions = events.filter((event) => event.type === 'turn_completed');
+  assert.deepEqual(completions.at(-1)?.providerData, {
+    toolCalls: { read_file: offsets.length }, toolErrors: {}, steps: 3,
   });
 });
 
