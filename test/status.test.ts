@@ -615,6 +615,7 @@ test('buildStatusSnapshot summarizes provider and unclassified phase errors with
     kind: null,
     message: 'finalization failed',
     retryable: null,
+    resetsAt: null,
     diagnostic: null,
   });
 });
@@ -2302,4 +2303,57 @@ test('neal status --json --run reads exact run-local state without mutating arti
   assert.equal(after.mtimeMs, before.mtimeMs);
   assert.equal(await readFile(runStatePath, 'utf8'), beforeRunState);
   assert.equal(await readFile(getCurrentRunPointerPath(fixture.cwd), 'utf8'), beforeCurrent);
+});
+
+test('usage-limit waiting status requires an unfinished wait and a live writer for this run', async (t) => {
+  const fixture = await createStatusFixture({ status: 'failed', phase: 'coder_scope' });
+  const resetsAt = '2026-11-15T23:00:00.000Z';
+  const wakeAt = '2026-11-15T23:01:00.000Z';
+  const started = event('2026-11-15T22:00:00.000Z', 'run.usage_limit_wait_started', { resetsAt, wakeAt });
+  const failure = event('2026-11-15T21:59:59.000Z', 'provider.provider_error', {
+    provider: 'openai-codex', role: 'coder', errorKind: 'usage_limit', resetsAt, message: 'Usage limit reached', retryable: false,
+  });
+  await writeEvents(fixture.eventsPath, [failure, started]);
+  const args = { cwd: fixture.cwd, statePath: fixture.statePath };
+  const absent = await buildStatusSnapshot(args);
+  assert.equal(absent.effectiveStatus, 'failed');
+  assert.match(absent.nextAction, /neal resume/);
+  const lock = await acquireActiveRunLock({ ...args, runStatePath: fixture.statePath, runId: runIdForFixture(fixture), planDoc: fixture.planDoc, topLevelMode: 'execute' });
+  t.after(() => lock.release());
+  const waiting = await buildStatusSnapshot(args);
+  assert.equal(waiting.status, 'failed');
+  assert.equal(waiting.effectiveStatus, 'waiting_for_usage_limit');
+  assert.equal(waiting.publicStatus, 'waiting_for_usage_limit');
+  assert.equal(waiting.health.classification, 'waiting_for_usage_limit');
+  assert.match(waiting.nextAction, /neal will resume automatically/);
+  assert.doesNotMatch(waiting.nextAction, /neal resume --run/);
+  assert.equal(waiting.providerError?.kind, 'usage_limit');
+  assert.equal(waiting.providerError?.resetsAt, resetsAt);
+  assert.equal(waiting.lastMeaningfulEvent?.type, 'run.usage_limit_wait_started');
+  assert.match(renderHumanStatusSnapshot(waiting), /waiting_for_usage_limit/);
+  for (const json of [true, false]) {
+    const invocation = nealCliInvocation(join(REPO_ROOT, 'src/neal/index.ts'), ['status', '--run', runIdForFixture(fixture), ...(json ? ['--json'] : [])]);
+    const { stdout } = await execFileAsync(invocation.command, invocation.args, { cwd: fixture.cwd });
+    if (json) {
+      const snapshot = JSON.parse(stdout);
+      assert.equal(snapshot.status, 'failed');
+      assert.equal(snapshot.publicStatus, 'waiting_for_usage_limit');
+      assert.equal(snapshot.providerError.resetsAt, resetsAt);
+    } else {
+      assert.match(stdout, /waiting_for_usage_limit/);
+      assert.match(stdout, /neal will resume automatically/);
+    }
+  }
+  for (const end of ['run.usage_limit_wait_finished', 'run.resumed']) {
+    await writeEvents(fixture.eventsPath, [failure, started, event('2026-11-15T23:01:00.000Z', end)]);
+    assert.equal((await buildStatusSnapshot(args)).effectiveStatus, 'failed');
+  }
+  await writeEvents(fixture.eventsPath, [failure, started]);
+  const lockPath = getActiveRunLockPath(fixture.cwd);
+  const lockData = JSON.parse(await readFile(lockPath, 'utf8'));
+  await writeFile(lockPath, JSON.stringify({ ...lockData, pid: 2147483647 }));
+  const dead = await buildStatusSnapshot(args);
+  assert.equal(dead.lock.kind, 'stale_same_run');
+  assert.equal(dead.effectiveStatus, 'failed');
+  assert.match(dead.nextAction, /neal resume/);
 });

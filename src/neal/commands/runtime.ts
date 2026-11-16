@@ -17,7 +17,8 @@ import {
 } from '../blocked-guidance.js';
 import { createInteractiveKeyController, renderInteractiveKeyHint } from '../interactive-controls.js';
 import { createRunId, type RunLogger } from '../logger.js';
-import { runOnePass } from '../orchestrator.js';
+import { loadRunForResume, runOnePass } from '../orchestrator.js';
+import { notifyBlocked } from '../orchestrator/notifications.js';
 import { writeExecutionArtifacts } from '../orchestrator/artifacts.js';
 import {
   countOpenNonBlockingFindings,
@@ -43,6 +44,7 @@ import {
 import { formatPublicPhase, formatStatusNextActionForState } from '../status.js';
 import { StatusFooter } from '../status-footer.js';
 import { createTerminalNarrator } from '../terminal-narrator.js';
+import { decideUsageLimitWait, getUsageLimitError, usageLimitProgressKey } from '../usage-limits.js';
 import type { OrchestrationState, TopLevelMode } from '../types.js';
 
 let runLogger: RunLogger | undefined;
@@ -56,6 +58,8 @@ export type ExecuteRunResult = {
 
 export type ExecuteRunOptions = {
   autoSquashOnCompletion?: boolean;
+  waitForUsageLimit?: boolean;
+  usageLimitClock?: { now: () => number; sleep: (ms: number) => Promise<void> };
 };
 
 export type PreparedWriterRun = {
@@ -583,32 +587,77 @@ export async function executeRun(
       writeDiagnostic(renderInteractiveKeyHint(allowStopRequest));
     }
 
-    let finalState;
+    let finalState: OrchestrationState;
+    let waitsSoFar = 0;
+    let lastFailureProgress: string | null = null;
+    const clock = options.usageLimitClock ?? {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    };
     let runFailureMessage: string | null = null;
     try {
-      try {
-        finalState = await runOnePass(state, statePath, logger, {
-          shouldStopAfterCurrentScope() {
-            return stopController.isStopRequested();
-          },
-          onDisplayState(nextState, phaseStartedAt) {
-            displayedPhaseStartedAt = phaseStartedAt;
-            currentDetailContext = getDiagnosticDetailContextForState(nextState);
-            setDiagnosticDetailContext(currentDetailContext);
-            return footer.setState(nextState, phaseStartedAt).then(() => {
-              return narrator.observe(nextState);
-            });
-          },
-        });
-      } catch (error) {
-        finalState = await loadFailedWriterResultAfterRunError({
-          statePath,
-          initialState: state,
-        });
-        if (!finalState) {
-          throw error;
+      while (true) {
+        try {
+          finalState = await runOnePass(state, statePath, logger, {
+            shouldStopAfterCurrentScope() {
+              return stopController.isStopRequested();
+            },
+            onDisplayState(nextState, phaseStartedAt) {
+              displayedPhaseStartedAt = phaseStartedAt;
+              currentDetailContext = getDiagnosticDetailContextForState(nextState);
+              setDiagnosticDetailContext(currentDetailContext);
+              return footer.setState(nextState, phaseStartedAt).then(() => {
+                return narrator.observe(nextState);
+              });
+            },
+          });
+          break;
+        } catch (error) {
+          const failedState = await loadFailedWriterResultAfterRunError({
+            statePath,
+            initialState: state,
+          });
+          if (!failedState) {
+            throw error;
+          }
+          finalState = failedState;
+          runFailureMessage = error instanceof Error ? error.message : String(error);
+          const usageLimit = getUsageLimitError(error);
+          if (!usageLimit) break;
+          const progress = usageLimitProgressKey(finalState);
+          if (lastFailureProgress !== progress) waitsSoFar = 0;
+          lastFailureProgress = progress;
+          const decision = options.waitForUsageLimit === false
+            ? { action: 'fail' as const, reason: 'usage-limit waiting is disabled for this caller' }
+            : decideUsageLimitWait({ error, nowMs: clock.now(), waitsSoFar });
+          const resumeCommand = `neal resume --run ${basename(finalState.runDir)}`;
+          if (decision.action === 'fail') {
+            const reset = usageLimit.resetsAt === null ? '' : `; resets at ${new Date(usageLimit.resetsAt).toLocaleString()}`;
+            const reason = `${usageLimit.provider} usage limit reached${reset}; ${decision.reason}. Resume later with ${resumeCommand}`;
+            await notifyBlocked(finalState, reason, logger, { maxMessageChars: 300 });
+            runFailureMessage = `${reason}\n${runFailureMessage}`;
+            break;
+          }
+          waitsSoFar += 1;
+          const wakeAt = new Date(decision.wakeAt).toISOString();
+          const reason = `${usageLimit.provider} usage limit reached; waiting until ${new Date(decision.wakeAt).toLocaleString()}, then resuming`;
+          const line = `[neal] ${basename(finalState.planDoc)}: ${reason}`;
+          await logger.event('run.usage_limit_wait_started', {
+            provider: usageLimit.provider,
+            role: usageLimit.role,
+            resetsAt: new Date(usageLimit.resetsAt!).toISOString(),
+            wakeAt,
+            waitsSoFar,
+          });
+          await footer.setState(finalState, displayedPhaseStartedAt, line);
+          await notifyBlocked(finalState, reason, logger, { maxMessageChars: 300 });
+          narrator.waitForUsageLimit(line, resumeCommand);
+          await clock.sleep(Math.max(0, decision.wakeAt - clock.now()));
+          await logger.event('run.usage_limit_wait_finished', { wakeAt });
+          const resumed = await loadRunForResume(statePath);
+          state = resumed.state;
+          runFailureMessage = null;
         }
-        runFailureMessage = error instanceof Error ? error.message : String(error);
       }
     } finally {
       stopController.cleanup();

@@ -18,6 +18,7 @@ type FooterContext = {
   phaseStartedAt: number;
   totalScopeCount: Awaited<ReturnType<typeof getExecutionPlanScopeCount>>;
   now?: number;
+  usageLimitWaitingLine?: string | null;
 };
 
 type StatusFooterOptions = {
@@ -69,6 +70,7 @@ function truncateForColumns(text: string, columns: number) {
 }
 
 export function renderStatusFooterLine(args: FooterContext) {
+  if (args.usageLimitWaitingLine) return args.usageLimitWaitingLine;
   const now = args.now ?? Date.now();
   const state = args.state;
   const displayStatus = getRunDisplayStatus(state);
@@ -137,6 +139,7 @@ export class StatusFooter {
   private lastRedrawAt = 0;
   private state: OrchestrationState | null = null;
   private phaseStartedAt = 0;
+  private usageLimitWaitingLine: string | null = null;
   private disposed = false;
 
   constructor(options: StatusFooterOptions = {}) {
@@ -158,12 +161,13 @@ export class StatusFooter {
     return this.stream.isTTY === true;
   }
 
-  async setState(state: OrchestrationState, phaseStartedAt: number) {
+  async setState(state: OrchestrationState, phaseStartedAt: number, usageLimitWaitingLine: string | null = null) {
     if (this.disposed) {
       return;
     }
 
     this.state = state;
+    this.usageLimitWaitingLine = usageLimitWaitingLine;
     this.phaseStartedAt = phaseStartedAt;
     this.currentLine = await this.buildFooterLine();
     this.ensureRefreshTimer();
@@ -251,6 +255,7 @@ export class StatusFooter {
 
     const line = renderStatusFooterLine({
       state: this.state,
+      usageLimitWaitingLine: this.usageLimitWaitingLine,
       phaseStartedAt: this.phaseStartedAt,
       totalScopeCount,
       now: this.now(),

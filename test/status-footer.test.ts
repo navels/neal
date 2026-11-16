@@ -502,3 +502,19 @@ test('StatusFooter dispose clears the footer and suppresses future redraws', asy
 
   assert.deepEqual(stream.writes, ['\r\x1b[2K', '[neal] ordinary log line after dispose\n']);
 });
+
+test('footer displays the usage-limit wait instead of the persisted failed state', async () => {
+  const { state } = await createState({ status: 'failed', phase: 'coder_scope' });
+  const line = '[neal] PLAN.md: openai-codex usage limit reached; waiting until 3:42 PM, then resuming';
+  const stream = new FakeStream({ isTTY: true, columns: 200 });
+  const footer = new StatusFooter({ stream });
+  try {
+    await footer.setState(state, Date.now(), line);
+    assert.ok(stream.writes.some((text) => text.includes(line)));
+    assert.ok(stream.writes.every((text) => !text.includes('status: failed')));
+    await footer.setState({ ...state, status: 'running' }, Date.now());
+    assert.ok(stream.writes.at(-1)?.includes('status: running'));
+  } finally {
+    footer.dispose();
+  }
+});

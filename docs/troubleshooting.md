@@ -150,6 +150,24 @@ appear as `provider.turn_liveness_*` events). On a live TTY, press `v` for the
 low-level detail view. `neal status --json --run <run-id>` carries the latest
 `providerError` classification.
 
+## Usage limits
+
+**Symptom:** `effectiveStatus: "waiting_for_usage_limit"`.
+**Cause:** the provider reported a reset within six hours, including neal's
+60-second buffer. The process keeps its writer lock while waiting.
+**Fix:** let neal resume automatically, or stop it with Ctrl-C and run
+`neal resume --run <run-id>` later. The saved status stays `failed` during
+this wait; a dead process or missing lock reports the normal failed state.
+
+**Symptom:** a usage-limit failure exits with code `3` immediately.
+**Cause:** the reset is unknown, past, beyond the six-hour cap, or three waits
+have already passed without phase, scope, or round progress. Weekly limits and
+billing exhaustion commonly fall outside automatic recovery.
+**Fix:** wait for the reported reset, restore credits or billing access, or
+contact the provider's account administrator as appropriate. Then run
+`neal resume --run <run-id>`. `neal compat` always fails immediately on a
+usage limit.
+
 ## Lock issues
 
 The writer lock is `.neal/active-run.lock`. Writer processes remove it on

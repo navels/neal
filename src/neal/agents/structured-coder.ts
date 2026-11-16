@@ -11,6 +11,7 @@ export class CoderRoundError extends Error {
   readonly providerError: NealProviderError;
   readonly kind: NealProviderError['kind'];
   readonly retryable: boolean;
+  readonly resetsAt: number | null;
 
   constructor(providerError: NealProviderError) {
     super(providerError.message);
@@ -19,6 +20,7 @@ export class CoderRoundError extends Error {
     this.providerError = providerError;
     this.kind = providerError.kind;
     this.retryable = providerError.retryable;
+    this.resetsAt = providerError.resetsAt;
   }
 }
 

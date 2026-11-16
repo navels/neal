@@ -91,6 +91,7 @@ export class ReviewerRoundError extends Error {
   readonly providerError: NealProviderError;
   readonly kind: NealProviderError['kind'];
   readonly retryable: boolean;
+  readonly resetsAt: number | null;
   readonly subtype: string | null;
 
   constructor(providerError: NealProviderError) {
@@ -100,6 +101,7 @@ export class ReviewerRoundError extends Error {
     this.providerError = providerError;
     this.kind = providerError.kind;
     this.retryable = providerError.retryable;
+    this.resetsAt = providerError.resetsAt;
     this.subtype = providerError.kind;
   }
 }

@@ -156,6 +156,8 @@ async function writeRunEvent(event: ResolvedProviderRuntimeEvent, options: Provi
         ...commonEventData(event),
         message: event.message,
         ...(event.errorKind ? { errorKind: event.errorKind } : {}),
+        resetsAt: event.resetsAt != null ? new Date(event.resetsAt).toISOString() : null,
+        ...(event.retryable !== undefined ? { retryable: event.retryable } : {}),
       });
       break;
   }

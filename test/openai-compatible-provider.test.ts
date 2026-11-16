@@ -2748,3 +2748,47 @@ test('advisor: a caller-signal abort surfaces as a non-retryable timeout and nev
   assert.equal(apiRetryEvents(events).length, 0);
   assert.equal(model.doGenerateCalls.length, 1);
 });
+
+for (const field of ['code', 'type']) {
+  for (const location of ['responseBody', 'data']) {
+    test(`HTTP 429 insufficient_quota (${location}.${field}) never consumes API retries`, async () => {
+      const cwd = await createWorkDir();
+      const body = { error: { [field]: 'insufficient_quota', message: 'You exceeded your current quota.' } };
+      const model = scriptedModel([() => {
+        throw { statusCode: 429, isRetryable: true, message: body.error.message,
+          [location]: location === 'responseBody' ? JSON.stringify(body) : body };
+      }]);
+      const sleeps: number[] = [];
+      const adapter = createAdapter({ model, sleeps });
+      const { events, sink } = collectEvents();
+      await assert.rejects(() => adapter.runStructuredPrompt({ ...structuredArgs(cwd, sink), apiRetryLimit: 3 }), (error: unknown) => {
+        assert.ok(error instanceof NealProviderError);
+        assert.equal(error.kind, 'usage_limit');
+        assert.equal(error.retryable, false);
+        assert.equal(error.resetsAt, null);
+        return true;
+      });
+      assert.deepEqual(sleeps, []);
+      assert.equal(apiRetryEvents(events).length, 0);
+    });
+  }
+}
+
+test('OpenAI-compatible advisor finalization quota failures remain usage_limit without retries', async () => {
+  const cwd = await createWorkDir();
+  const sleeps: number[] = [];
+  const model = scriptedModel([() => textResponse('Ready to finalize.'), () => {
+    throw { statusCode: 429, isRetryable: true, message: 'Quota exhausted', responseBody: JSON.stringify({ error: { code: 'insufficient_quota' } }) };
+  }]);
+  const adapter = createAdvisorAdapter({ model, sleeps });
+  const { events, sink } = collectEvents();
+  await assert.rejects(() => adapter.runStructuredRound({ ...advisorArgs(cwd, sink), apiRetryLimit: 3 }), (error: unknown) => {
+    assert.ok(error instanceof NealProviderError);
+    assert.equal(error.kind, 'usage_limit');
+    assert.equal(error.sessionHandle, null);
+    assert.equal(error.resetsAt, null);
+    return true;
+  });
+  assert.deepEqual(sleeps, []);
+  assert.equal(apiRetryEvents(events).length, 0);
+});

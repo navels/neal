@@ -2523,3 +2523,75 @@ test('Claude coder success results that mention failure vocabulary are never ret
     'no api_retry event for a successful result',
   );
 });
+
+test('Claude SDK keeps the usage-limit prefix export available', async () => {
+  const sdk = await import('@anthropic-ai/claude-agent-sdk');
+  assert.ok(Array.isArray(sdk.USAGE_LIMIT_ERROR_PREFIXES), 'SDK bump removed USAGE_LIMIT_ERROR_PREFIXES');
+  assert.ok(sdk.USAGE_LIMIT_ERROR_PREFIXES.includes("You've hit your"));
+});
+
+for (const path of ['advisor', 'structured-coder', 'plain-coder'] as const) {
+  for (const reset of [1774918800, null]) {
+    test(`Claude ${path} classifies usage limits before retry/JSON extraction (reset=${reset})`, async () => {
+      let calls = 0;
+      const handles: string[] = [];
+      const events: ProviderRuntimeEvent[] = [];
+      const stream = async function* () {
+        calls += 1;
+        if (reset !== null) {
+          for (const [status, resetsAt] of [['rejected', reset - 100], ['rejected', reset], ['allowed_warning', reset + 100]] as const) {
+            yield { type: 'rate_limit_event', rate_limit_info: { status, resetsAt }, session_id: 'claude-limit-session' } as SDKMessage;
+          }
+        }
+        yield resultMessage({ sessionId: 'claude-limit-session', isError: true, result: "You've hit your session limit · resets 3pm; try again", subtype: 'error_during_execution' });
+      };
+      const common = {
+        apiRetryLimit: 3,
+        events: (event: ProviderRuntimeEvent) => { events.push(event); },
+        onSessionStarted: (handle: string) => { handles.push(handle); },
+      };
+      const run = path === 'advisor'
+        ? () => anthropicClaudeProviderTestHooks.runClaudeStructuredAdvisorRound(structuredAdvisorArgs(common), null, stream)
+        : path === 'structured-coder'
+          ? () => anthropicClaudeProviderTestHooks.runClaudeStructuredCoderPrompt(coderStructuredArgs(common), null, stream)
+          : () => anthropicClaudeProviderTestHooks.runClaudeCoderPrompt(coderStructuredArgs(common), null, null, stream);
+      await assert.rejects(run, (error: unknown) => {
+        assert.ok(error instanceof NealProviderError);
+        assert.equal(error.kind, 'usage_limit');
+        assert.equal(error.retryable, false);
+        assert.equal(error.resetsAt, reset === null ? null : reset * 1000);
+        assert.equal(error.sessionHandle, 'claude-limit-session');
+        return true;
+      });
+      assert.equal(calls, 1);
+      if (path !== 'advisor') assert.deepEqual(handles, ['claude-limit-session']);
+      assert.equal(events.filter((event) => event.type === 'provider_error' && event.errorKind === 'usage_limit').length, 1);
+      assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
+    });
+  }
+}
+
+test('Claude successful text mentioning usage limits is not an error', async () => {
+  const result = await anthropicClaudeProviderTestHooks.runClaudeCoderPrompt(
+    coderStructuredArgs(), null, null,
+    async function* () { yield resultMessage({ result: "You've hit your session limit is an example error message." }); },
+  );
+  assert.match(result.finalResponse, /example error message/);
+});
+
+test('Claude preserves the usage-limit result when the stream later throws process-exit noise', async () => {
+  const handles: string[] = [];
+  await assert.rejects(() => anthropicClaudeProviderTestHooks.runClaudeStructuredCoderPrompt(
+    coderStructuredArgs({ onSessionStarted: (handle) => { handles.push(handle); } }), null,
+    async function* () {
+      yield resultMessage({ isError: true, result: "You've hit your session limit · resets 3pm", sessionId: 'work-before-limit', subtype: 'error_during_execution' });
+      throw new Error('Claude process exited with code 1');
+    },
+  ), (error: unknown) => {
+    assert.ok(error instanceof NealProviderError);
+    assert.equal(error.kind, 'usage_limit');
+    assert.equal(error.sessionHandle, 'work-before-limit');
+    return true;
+  });
+  assert.deepEqual(handles, ['work-before-limit']);
+});

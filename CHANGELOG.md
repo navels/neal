@@ -10,6 +10,19 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Added
+
+- Writer runs wait for provider-reported usage resets within six hours, then
+  resume automatically through the existing resume path. Status and terminal
+  output show the wait; three consecutive waits without progress stop the
+  run. Compat runs never wait (#115).
+
+### Changed
+
+- All three adapters classify usage limits as `usage_limit`, with an optional
+  reset timestamp in provider errors and status JSON. Codex usage-limit
+  messages no longer consume transient API retries (#115).
+
 ### Fixed
 
 - `neal review` no longer fails with "neal review is read-only but the

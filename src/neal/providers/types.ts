@@ -89,7 +89,13 @@ export type ProviderRuntimeEvent =
       costUsd?: number;
       costSource?: 'provider' | 'rate';
     })
-  | (ProviderRuntimeEventBase & { type: 'provider_error'; message: string; errorKind?: NealProviderErrorKind });
+  | (ProviderRuntimeEventBase & {
+      type: 'provider_error';
+      message: string;
+      errorKind?: NealProviderErrorKind;
+      resetsAt?: number | null;
+      retryable?: boolean;
+    });
 
 export type ProviderEventSink = (event: ProviderRuntimeEvent) => void | Promise<void>;
 
@@ -97,6 +103,7 @@ export type NealProviderErrorKind =
   | 'timeout'
   | 'no_progress_timeout'
   | 'api_error'
+  | 'usage_limit'
   | 'structured_output_missing'
   | 'structured_output_invalid'
   | 'permission_denied'
@@ -127,6 +134,7 @@ export class NealProviderError extends Error {
   readonly sessionHandle: string | null;
   readonly kind: NealProviderErrorKind;
   readonly retryable: boolean;
+  readonly resetsAt: number | null;
   readonly cause: unknown;
 
   constructor(args: {
@@ -136,6 +144,7 @@ export class NealProviderError extends Error {
     sessionHandle?: string | null;
     kind?: NealProviderErrorKind;
     retryable?: boolean;
+    resetsAt?: number | null;
     cause?: unknown;
   }) {
     super(args.message);
@@ -144,7 +153,9 @@ export class NealProviderError extends Error {
     this.role = args.role;
     this.sessionHandle = args.sessionHandle ?? null;
     this.kind = args.kind ?? 'unknown';
-    this.retryable = args.retryable ?? false;
+    this.retryable = this.kind === 'usage_limit' ? false : args.retryable ?? false;
+    this.resetsAt = args.resetsAt != null && Number.isFinite(args.resetsAt) &&
+      !Number.isNaN(new Date(args.resetsAt).getTime()) ? args.resetsAt : null;
     this.cause = args.cause;
   }
 }
