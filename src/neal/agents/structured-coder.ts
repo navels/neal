@@ -62,6 +62,9 @@ export async function runCoderStructuredPrompt<TStructured>(args: {
     allowRun?: boolean;
   };
   resumeHandle?: string | null;
+  // See CoderRunPromptArgs.ephemeralSession: set by read-only callers whose
+  // session is never resumed.
+  ephemeralSession?: boolean;
   telemetryLabel?: 'planner';
   logger?: RunLogger;
   onSessionStarted?: (sessionHandle: string) => void | Promise<void>;
@@ -97,6 +100,7 @@ export async function runCoderStructuredPrompt<TStructured>(args: {
           // fresh-session retry owns recovery.
           apiRetryLimit: args.resumeHandle ? 0 : getApiRetryLimit(args.cwd),
           resumeHandle: args.resumeHandle,
+          ...(args.ephemeralSession ? { ephemeralSession: true } : {}),
           // Guarded so an abandoned attempt's late session handle can never
           // overwrite a newer attempt's handle.
           onSessionStarted: attempt.guard(args.onSessionStarted),

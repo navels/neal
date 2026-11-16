@@ -236,7 +236,8 @@ function buildPersistentCoderSessionHandle() {
 }
 
 function buildSyntheticSessionHandle() {
-  // Structured-advisor sessions remain events-only and stateless.
+  // Structured-advisor sessions remain events-only and stateless. Ephemeral
+  // coder sessions (`ephemeralSession`) use the same events-only handle.
   return `${OPENAI_COMPATIBLE_PROVIDER_ID}:${new Date().toISOString()}:${randomBytes(4).toString('hex')}`;
 }
 
@@ -1410,12 +1411,17 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       const prepared = await this.prepareLoopState({
         cwd: args.cwd,
         resumeHandle: args.resumeHandle,
+        ephemeralSession: args.ephemeralSession,
         events: args.events,
         toolPolicy: args.toolPolicy,
       });
       sessionHandle = prepared.sessionHandle;
       if (prepared.isNewSession) {
-        await args.onSessionStarted?.(sessionHandle);
+        // An ephemeral session has no resumable handle for the caller to
+        // persist; the events-only handle still labels telemetry.
+        if (!prepared.ephemeral) {
+          await args.onSessionStarted?.(sessionHandle);
+        }
         await this.emitSessionStarted({ sessionHandle, events: args.events });
       }
 
@@ -1452,7 +1458,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
           persistentCompletion: 'clear_operation',
         },
       );
-      return { sessionHandle, finalResponse };
+      return { sessionHandle: prepared.ephemeral ? null : sessionHandle, finalResponse };
     } catch (error) {
       throw await this.surfaceError(error, {
         sessionHandle,
@@ -1496,13 +1502,16 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       const prepared = await this.prepareLoopState({
         cwd: args.cwd,
         resumeHandle: args.resumeHandle,
+        ephemeralSession: args.ephemeralSession,
         label: args.label,
         events: args.events,
         toolPolicy: args.toolPolicy,
       });
       sessionHandle = prepared.sessionHandle;
       if (prepared.isNewSession) {
-        await args.onSessionStarted?.(sessionHandle);
+        if (!prepared.ephemeral) {
+          await args.onSessionStarted?.(sessionHandle);
+        }
         await this.emitSessionStarted({ sessionHandle, label: args.label, events: args.events });
       }
 
@@ -1552,7 +1561,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
 
       prepared.state.persistentSession!.record.activeOperation = null;
       await persistAgentLoopSession(prepared.state);
-      return { sessionHandle, structured };
+      return { sessionHandle: prepared.ephemeral ? null : sessionHandle, structured };
     } catch (error) {
       throw await this.surfaceError(error, {
         sessionHandle,
@@ -1595,6 +1604,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
   private async prepareLoopState(args: {
     cwd: string;
     resumeHandle?: string | null;
+    ephemeralSession?: boolean | undefined;
     label?: string | undefined;
     events?: ProviderEventSink | undefined;
     toolPolicy?: CoderRunPromptArgs['toolPolicy'];
@@ -1602,6 +1612,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
     state: AgentLoopState;
     sessionHandle: string;
     isNewSession: boolean;
+    ephemeral: boolean;
     resumedActiveOperation: boolean;
   }> {
     const resolveSettings = this.options.resolveSettings ?? getOpenAICompatibleSettings;
@@ -1627,7 +1638,25 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
     });
 
     const isNewSession = !args.resumeHandle;
-    const sessionHandle = args.resumeHandle ?? buildPersistentCoderSessionHandle();
+    const ephemeral = args.ephemeralSession === true;
+    if (ephemeral && !isNewSession) {
+      throw createOpenAICompatibleProviderError({
+        message:
+          'openai-compatible coder session cannot be both ephemeral and resumed: an ephemeral ' +
+          'session has no saved history to resume from.',
+        role: 'coder',
+        sessionHandle: args.resumeHandle ?? null,
+        kind: 'provider_failed',
+        retryable: false,
+      });
+    }
+    // An ephemeral session keeps the same in-memory record, so the operation
+    // stages below behave identically, but nothing is written under
+    // `.neal/provider-sessions/`. Its handle is events-only: it labels
+    // telemetry and errors, does not match the persistent handle pattern, and
+    // is never returned to the caller as a resumable session.
+    const sessionHandle =
+      args.resumeHandle ?? (ephemeral ? buildSyntheticSessionHandle() : buildPersistentCoderSessionHandle());
     const now = new Date().toISOString();
     const sessionRecord = isNewSession
       ? {
@@ -1654,7 +1683,9 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       messages: sessionRecord.messages,
       persistentSession: {
         record: sessionRecord,
-        save: () => writePersistentCoderSession(args.cwd, sessionHandle, sessionRecord),
+        save: ephemeral
+          ? async () => {}
+          : () => writePersistentCoderSession(args.cwd, sessionHandle, sessionRecord),
       },
       structuredOutputMode: settings.structuredOutputMode,
       toolCalls: {},
@@ -1678,7 +1709,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
         }),
     });
 
-    if (isNewSession) {
+    if (isNewSession && !ephemeral) {
       await persistAgentLoopSession(state);
       await cleanupStalePersistentCoderSessions(
         args.cwd,
@@ -1690,6 +1721,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       state,
       sessionHandle,
       isNewSession,
+      ephemeral,
       resumedActiveOperation: !isNewSession && sessionRecord.activeOperation !== null,
     };
   }

@@ -8,8 +8,9 @@ name: Smoke (live model)
 # subscription auth that isn't available in CI, so native-SDK bumps still require
 # a local `neal compat` qualification (see docs/maintenance.md).
 #
-# Triggers: dependency-bump PRs (package.json / lockfile), a weekly schedule
-# (catches provider-side drift even with no code change), and manual dispatch.
+# Triggers: dependency-bump PRs (package.json / lockfile), PRs that change the
+# openai-compatible adapter the smoke drives, a weekly schedule (catches
+# provider-side drift even with no code change), and manual dispatch.
 # It is intentionally NOT run on every push (cost + LLM nondeterminism).
 
 on:
@@ -24,6 +25,12 @@ on:
       - examples/compat/**
       - scripts/smoke-aggregate.mjs
       - .github/workflows/smoke.yml
+      # The adapter every smoke cell runs through, and the `neal review`
+      # command the reviewer cells run. An adapter change that broke
+      # `neal review` for openai-compatible coders merged without a smoke run
+      # and was only caught by the next weekly cron.
+      - src/neal/providers/openai-compatible*.ts
+      - src/neal/review-findings/**
   schedule:
     - cron: "0 8 * * 1" # Mondays 08:00 UTC
   workflow_dispatch:
@@ -68,9 +75,10 @@ jobs:
     steps:
       - name: Guard — run only when something the smoke exercises changed
         id: guard
-        # The smoke drives the AI-SDK tier through openai-compatible, plus the
-        # compat command and its fixtures. A PR that changes none of that (a
-        # version bump, or a bump to the native SDK pins, which the smoke never
+        # The smoke drives the AI-SDK tier through the openai-compatible
+        # adapter, plus the compat and review commands and the compat
+        # fixtures. A PR that changes none of that (a version bump, or a bump
+        # to the native SDK pins, which the smoke never
         # drives; qualify-sdk.sh covers those) has nothing for it to test, and
         # it costs ~20 minutes, so skip it. Decided from the PR's actual diff
         # via the API, never from the branch name. Anything unclear runs.
@@ -91,7 +99,7 @@ jobs:
             exit 0
           fi
           files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
-          if printf '%s\n' "$files" | grep -qE '^(src/neal/commands/compat\.ts|examples/compat/|scripts/smoke-aggregate\.mjs|\.github/workflows/smoke\.yml)'; then
+          if printf '%s\n' "$files" | grep -qE '^(src/neal/commands/compat\.ts|src/neal/providers/openai-compatible[^/]*\.ts|src/neal/review-findings/|examples/compat/|scripts/smoke-aggregate\.mjs|\.github/workflows/smoke\.yml)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi

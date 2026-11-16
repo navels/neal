@@ -541,7 +541,10 @@ Role support and behavior:
   budget while preserving prior context. Existing scope-boundary resets still
   clear the coder handle, so each new scope starts with fresh context. The
   structured-advisor/reviewer role remains sessionless
-  (`supportsSessionResume: false`).
+  (`supportsSessionResume: false`). A caller that will never resume a coder
+  session passes `ephemeralSession: true`; the adapter then writes no mirror
+  and returns no session handle. `neal review` does this for its draft
+  turns, because it must leave the worktree unchanged.
 - Step caps: each coder prompt's tool loop is bounded by the exported
   `OPENAI_COMPATIBLE_MAX_STEPS` constant (currently `48` model turns per
   prompt). Structured-advisor/reviewer rounds use the smaller exported

@@ -10,6 +10,17 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- `neal review` no longer fails with "neal review is read-only but the
+  worktree changed outside its review artifacts" when the coder is
+  `openai-compatible` and the repository does not ignore `.neal/`. Since
+  0.7.0 the coder adapter wrote a resumable session mirror under
+  `.neal/provider-sessions/openai-compatible/` for every draft turn, which
+  the review's own unchanged-worktree check then rejected. Review draft
+  turns are never resumed, so they now run with an ephemeral session that
+  writes nothing.
+
 ## [0.7.0] - 2026-11-04
 
 ### Added
