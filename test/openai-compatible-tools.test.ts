@@ -21,6 +21,8 @@ import type { z } from 'zod';
 import {
   GREP_MAX_MATCHING_LINES,
   RESULT_BYTE_LIMIT,
+  READ_FILE_BYTE_LIMIT,
+  READ_FILE_PAGE_BYTE_LIMIT,
   createCoderToolset,
   createPlanAuthorToolset,
   createReadOnlyToolset,
@@ -107,6 +109,7 @@ describe('coder tool layer', () => {
     const result = await callTool(tools.read_file, { path: 'big.txt' });
     assert.ok(isToolErrorResult(result), `expected error result, got: ${result.slice(0, 100)}`);
     assert.match(result, /file too large/);
+    assert.match(result, /offset and length for paging/);
   });
 
   it('read_file rejects a binary file as an error result', async () => {
@@ -253,6 +256,15 @@ describe('coder tool layer', () => {
     assert.match(result, /grep-target\.txt:2:unique-marker-xyz/);
   });
 
+  it('grep searches an explicitly named dotted directory', async () => {
+    await fs.mkdir(path.join(rootDir, '.neal', 'diff'), { recursive: true });
+    await fs.writeFile(path.join(rootDir, '.neal', 'diff', '0001.patch'), 'artifact-only-marker\n');
+    assert.equal(await callTool(tools.grep, { pattern: 'artifact-only-marker' }),
+      'no matches for /artifact-only-marker/');
+    assert.equal(await callTool(tools.grep, { pattern: 'artifact-only-marker', path: '.neal' }),
+      '.neal/diff/0001.patch:1:artifact-only-marker');
+  });
+
   it('run surfaces a non-zero exit code in the result', async () => {
     const result = await callTool(tools.run, { command: 'echo out; echo err >&2; exit 7' });
     assert.match(result, /exit code: 7/);
@@ -276,10 +288,221 @@ describe('coder tool layer', () => {
     await fs.writeFile(path.join(rootDir, 'long.txt'), 'a'.repeat(size));
     const result = await callTool(tools.read_file, { path: 'long.txt' });
     assert.ok(
-      result.endsWith(`[truncated: showing ${RESULT_BYTE_LIMIT} of ${size} bytes]`),
+      result.endsWith(`[truncated: showing ${RESULT_BYTE_LIMIT} of ${size} bytes] Use read_file with offset and length for paging.`),
       `unexpected tail: ...${result.slice(-80)}`,
     );
     assert.ok(Buffer.byteLength(result, 'utf8') < size, 'result was not actually truncated');
+  });
+});
+
+function parseReadPage(result: string) {
+  assert.ok(Buffer.byteLength(result, 'utf8') <= RESULT_BYTE_LIMIT);
+  assert.doesNotMatch(result, /\[truncated:/);
+  const match = /^\[read_file bytes (\d+)\.\.(\d+) of (\d+); end exclusive; text bytes (\d+)\.\.(\d+); invalid UTF-8 bytes replaced with "\?": (\d+)\]\n([\s\S]*)\n\[next offset: (\d+|EOF)\]$/.exec(result);
+  assert.ok(match, result.slice(0, 200));
+  return {
+    offset: Number(match[1]), end: Number(match[2]), size: Number(match[3]),
+    textStart: Number(match[4]), textEnd: Number(match[5]), replacedBytes: Number(match[6]), text: match[7],
+    nextOffset: match[8] === 'EOF' ? null : Number(match[8]),
+  };
+}
+
+describe('read_file byte paging', () => {
+  let rootDir: string;
+  let tools: ReturnType<typeof createReadOnlyToolset>;
+
+  before(async () => {
+    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-read-pages-'));
+    tools = createReadOnlyToolset(rootDir);
+  });
+
+  after(async () => {
+    await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('reconstructs a file over both limits, including a long line, using bounded positioned reads', async (t) => {
+    const source = '+a'.repeat(READ_FILE_BYTE_LIMIT) + '\nlast line\n';
+    await fs.writeFile(path.join(rootDir, 'large.patch'), source);
+    const originalOpen = fs.open.bind(fs);
+    const readLengths: number[] = [];
+    let closes = 0;
+    t.mock.method(fs, 'readFile', () => { throw new Error('whole-file reads are forbidden'); });
+    t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+      const file = await originalOpen(...args);
+      const originalRead = file.read.bind(file);
+      const originalClose = file.close.bind(file);
+      t.mock.method(file, 'read', (buffer: Buffer, offset: number, length: number, position: number) => {
+        readLengths.push(length);
+        assert.ok(buffer.length <= READ_FILE_PAGE_BYTE_LIMIT + 6);
+        // Exercise short reads as well as the bounded allocation.
+        return originalRead(buffer, offset, Math.min(length, 997), position);
+      });
+      t.mock.method(file, 'close', async () => { closes += 1; await originalClose(); });
+      return file;
+    });
+    let offset: number | null = 0;
+    let reconstructed = '';
+    let pages = 0;
+    while (offset !== null) {
+      const page = parseReadPage(await callTool(tools.read_file, { path: 'large.patch', offset }));
+      assert.equal(page.offset, offset);
+      assert.equal(page.end, Math.min(offset + READ_FILE_PAGE_BYTE_LIMIT, source.length));
+      assert.equal(page.size, source.length);
+      reconstructed += page.text;
+      offset = page.nextOffset;
+      pages += 1;
+    }
+    assert.equal(reconstructed, source);
+    assert.equal(closes, pages);
+    assert.ok(readLengths.every((length) => length <= READ_FILE_PAGE_BYTE_LIMIT + 6));
+  });
+
+  it('reconstructs out-of-order windows with 2-, 3-, and 4-byte characters across boundaries', async () => {
+    for (const length of [1, 2, 3, 7, READ_FILE_PAGE_BYTE_LIMIT]) {
+      const source = 'é中🙂'.repeat(length + 2) + '\nend';
+      const bytes = Buffer.from(source);
+      await fs.writeFile(path.join(rootDir, 'unicode.txt'), bytes);
+      const offsets = Array.from({ length: Math.ceil(bytes.length / length) }, (_, i) => i * length);
+      const pages = new Map<number, string>();
+      for (const offset of [...offsets].reverse()) {
+        const page = parseReadPage(await callTool(tools.read_file, { path: 'unicode.txt', offset, length }));
+        assert.equal(page.offset, offset);
+        assert.equal(page.size, bytes.length);
+        assert.equal(page.end, Math.min(offset + length, bytes.length));
+        assert.equal(page.nextOffset, page.end === bytes.length ? null : page.end);
+        assert.equal(page.text, bytes.subarray(page.textStart, page.textEnd).toString('utf8'));
+        assert.doesNotMatch(page.text, /\uFFFD/);
+        assert.equal(page.replacedBytes, 0);
+        pages.set(offset, page.text);
+      }
+      assert.equal(offsets.map((offset) => pages.get(offset)).join(''), source);
+    }
+  });
+
+  it('handles length-only calls, empty files and EOF without truncating', async () => {
+    await fs.writeFile(path.join(rootDir, 'small.txt'), 'hello');
+    const first = parseReadPage(await callTool(tools.read_file, { path: 'small.txt', length: 3 }));
+    assert.equal(first.text, 'hel');
+    assert.equal(first.nextOffset, 3);
+    const eof = parseReadPage(await callTool(tools.read_file, { path: 'small.txt', offset: 5 }));
+    assert.equal(eof.text, '');
+    assert.equal(eof.nextOffset, null);
+    await fs.writeFile(path.join(rootDir, 'empty.txt'), '');
+    const empty = parseReadPage(await callTool(tools.read_file, { path: 'empty.txt', offset: 0 }));
+    assert.equal(empty.size, 0);
+    assert.equal(empty.text, '');
+    assert.equal(empty.nextOffset, null);
+  });
+
+  it('finishes multibyte characters at every maximum-size page boundary', async () => {
+    const length = READ_FILE_PAGE_BYTE_LIMIT;
+    const source = 'a'.repeat(length - 1) + 'é' + 'b'.repeat(length - 2) + '中' +
+      'c'.repeat(length - 3) + '🙂' + 'tail';
+    await fs.writeFile(path.join(rootDir, 'boundaries.txt'), source);
+    const pages = new Map<number, ReturnType<typeof parseReadPage>>();
+    for (const i of [3, 1, 2, 0]) {
+      pages.set(i, parseReadPage(await callTool(tools.read_file, {
+        path: 'boundaries.txt', offset: i * length, length,
+      })));
+    }
+    assert.equal(pages.get(0)?.text, 'a'.repeat(length - 1) + 'é');
+    assert.equal(pages.get(1)?.text, 'b'.repeat(length - 2) + '中');
+    assert.equal(pages.get(2)?.text, 'c'.repeat(length - 3) + '🙂');
+    assert.equal(pages.get(3)?.text, 'tail');
+    assert.equal([0, 1, 2, 3].map((i) => pages.get(i)?.text).join(''), source);
+  });
+
+  it('validates paging inputs and keeps errors as tool results', async () => {
+    await fs.writeFile(path.join(rootDir, 'bounds.txt'), 'bounds');
+    const schema = tools.read_file.inputSchema as unknown as z.ZodType;
+    for (const input of [
+      { offset: -1 }, { offset: 0.5 }, { offset: Number.MAX_SAFE_INTEGER + 1 },
+      { length: 0 }, { length: -1 }, { length: 1.5 }, { length: READ_FILE_PAGE_BYTE_LIMIT + 1 },
+    ]) {
+      assert.equal(schema.safeParse({ path: 'bounds.txt', ...input }).success, false);
+      assert.ok(isToolErrorResult(await callTool(tools.read_file, { path: 'bounds.txt', ...input })));
+    }
+    assert.match(await callTool(tools.read_file, { path: 'bounds.txt', offset: 7 }), /exceeds file size/);
+    assert.match(await callTool(tools.read_file, { path: '.', offset: 0 }), /not a regular file/);
+    assert.match(await callTool(tools.read_file, { path: 'missing', offset: 0 }), /Error:.*ENOENT/);
+  });
+
+  it('sniffs the first 8 KiB even when the requested page is later in a large binary file', async () => {
+    const bytes = Buffer.alloc(READ_FILE_BYTE_LIMIT + 1, 65);
+    bytes[8191] = 0;
+    await fs.writeFile(path.join(rootDir, 'binary'), bytes);
+    assert.match(await callTool(tools.read_file, { path: 'binary', offset: 9000, length: 10 }), /binary file/);
+  });
+
+  it('pages mixed UTF-8 and invalid bytes out of order without loss or truncation', async () => {
+    const length = READ_FILE_PAGE_BYTE_LIMIT;
+    const source = Buffer.concat([
+      Buffer.from('a'.repeat(length - 2)), Buffer.from([0xff, 0xc2]),
+      Buffer.from('é'), Buffer.from([0x80]), Buffer.from('b'.repeat(length - 4) + '🙂'),
+      Buffer.from([0xff]), Buffer.from('c'.repeat(length - 5)), Buffer.from([0xf0, 0x9f]),
+      Buffer.from('中tail'),
+    ]);
+    assert.ok(source.length > RESULT_BYTE_LIMIT);
+    await fs.writeFile(path.join(rootDir, 'mixed.patch'), source);
+    const expected = ['a'.repeat(length - 2) + '??', 'é?' + 'b'.repeat(length - 4) + '🙂',
+      '?' + 'c'.repeat(length - 5) + '?', '?中tail'];
+    const counts = [2, 1, 2, 1];
+    const pages = new Map<number, string>();
+    for (const i of [3, 1, 0, 2]) {
+      const page = parseReadPage(await callTool(tools.read_file, { path: 'mixed.patch', offset: i * length, length }));
+      assert.equal(page.text, expected[i]);
+      assert.equal(page.replacedBytes, counts[i]);
+      assert.equal(page.size, source.length);
+      assert.equal(page.nextOffset, i === 3 ? null : (i + 1) * length);
+      pages.set(i, page.text);
+    }
+    assert.equal([0, 1, 2, 3].map((i) => pages.get(i)).join(''), expected.join(''));
+  });
+
+  it('replaces every byte of malformed sequences in its own window', async () => {
+    const source = Buffer.concat([
+      Buffer.from([0x80, 0xc2]), Buffer.from('é中🙂'),
+      // Overlong, surrogate, out-of-range and incomplete encodings.
+      Buffer.from([0xc0, 0xaf, 0xed, 0xa0, 0x80, 0xf4, 0x90, 0x80, 0x80, 0xf0, 0x9f]),
+    ]);
+    await fs.writeFile(path.join(rootDir, 'malformed.txt'), source);
+    for (const length of [1, 2, 3, 7]) {
+      const pages = new Map<number, string>();
+      let replacedBytes = 0;
+      const offsets = Array.from({ length: Math.ceil(source.length / length) }, (_, i) => i * length);
+      for (const offset of [...offsets].reverse()) {
+        const page = parseReadPage(await callTool(tools.read_file, { path: 'malformed.txt', offset, length }));
+        replacedBytes += page.replacedBytes;
+        pages.set(offset, page.text);
+      }
+      assert.equal(offsets.map((offset) => pages.get(offset)).join(''), '??é中🙂' + '?'.repeat(11));
+      assert.equal(replacedBytes, 13);
+    }
+  });
+
+  it('keeps entirely invalid maximum-size pages inside the result budget', async () => {
+    const length = READ_FILE_PAGE_BYTE_LIMIT;
+    await fs.writeFile(path.join(rootDir, 'invalid.txt'), Buffer.alloc(length * 2, 0xff));
+    for (const offset of [length, 0]) {
+      const page = parseReadPage(await callTool(tools.read_file, { path: 'invalid.txt', offset, length }));
+      assert.equal(page.text, '?'.repeat(length));
+      assert.equal(page.replacedBytes, length);
+    }
+  });
+
+  it('preserves path jailing for paged reads', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-page-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'secret'), 'secret');
+      await fs.symlink(path.join(outside, 'secret'), path.join(rootDir, 'escape'));
+      for (const filePath of ['../outside', path.join(outside, 'secret'), 'escape']) {
+        const result = await callTool(tools.read_file, { path: filePath, offset: 0, length: 10 });
+        assert.ok(isToolErrorResult(result));
+        assert.match(result, /not allowed|escapes the working directory/);
+      }
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
