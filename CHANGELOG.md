@@ -22,6 +22,12 @@ dependency-update policy.
 - All three adapters classify usage limits as `usage_limit`, with an optional
   reset timestamp in provider errors and status JSON. Codex usage-limit
   messages no longer consume transient API retries (#115).
+- The block reason for a run stopped at final completion review no longer
+  suggests `neal resume --message`, which that state doesn't accept. It now
+  says the run can't be resumed, that its commits are intact, and, when the
+  continue-execution cap tripped, which config key sets the cap (#116).
+- README documents `neal.max_review_rounds` (per scope, not per plan) and
+  `neal.final_completion_continue_execution_max` (#116).
 
 ### Fixed
 

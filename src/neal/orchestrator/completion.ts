@@ -204,6 +204,12 @@ function getFinalizationExpectedScratchDirs(state: OrchestrationState): string[]
   return scratchDirs;
 }
 
+// A run blocked at final completion review is terminal: the resume planner
+// keeps it blocked and `neal resume` reports that it cannot be resumed, with or
+// without `--message`. The block reason therefore must not point at resume.
+const FINAL_COMPLETION_BLOCK_NEXT_STEP =
+  'This run cannot be resumed. Its commits are intact: inspect with `neal status`, then put any remaining work in a new plan.';
+
 function getFinalCompletionReviewBlockReason(args: {
   reviewerAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
   effectiveAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
@@ -221,11 +227,11 @@ function getFinalCompletionReviewBlockReason(args: {
       'final_completion_review: reviewer requested more execution, ' +
       `but the continue_execution cap (${args.continueExecutionLimit}) is already exhausted ` +
       `after ${args.continueExecutionCount} reopen cycle(s). ${args.rationale} ` +
-      'One available next step is to inspect with `neal status` and provide guidance with `neal resume --message "..."` only if the run is waiting for operator guidance.'
+      `${FINAL_COMPLETION_BLOCK_NEXT_STEP} The cap is \`neal.final_completion_continue_execution_max\`.`
     );
   }
 
-  return `final_completion_review: reviewer blocked completion for operator guidance. ${args.rationale} One available next step is to inspect with \`neal status\` and provide guidance with \`neal resume --message "..."\` only if the run is waiting for operator guidance.`;
+  return `final_completion_review: reviewer blocked completion and needs an operator decision. ${args.rationale} ${FINAL_COMPLETION_BLOCK_NEXT_STEP}`;
 }
 
 async function discardFinalCompletionReviewerWorktreeChanges(args: {

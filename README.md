@@ -523,6 +523,34 @@ including correctness regressions. Guidance that conflicts with that floor is
 ignored on that point. See [Custom guidance](#custom-guidance) for where the
 file lives.
 
+### Review limits
+
+Two limits stop a run that isn't converging. Both are config keys, set in the
+repo's `neal.yml` or in `~/.neal/config.yml`.
+
+```yaml
+neal:
+  max_review_rounds: 20
+  final_completion_continue_execution_max: 3
+```
+
+- `neal.max_review_rounds` (default `20`) is the number of reviewer rounds
+  allowed **per scope**, not per plan. The count starts over at every scope
+  boundary, so a 17-scope plan gets up to 20 rounds for each scope. Plan
+  refinement uses the same limit for its own rounds. A scope that reaches it
+  with blocking findings still open blocks the run. The value is
+  saved into the run when it starts, so changing it doesn't affect a run that's
+  already in progress.
+- `neal.final_completion_continue_execution_max` (default `3`) is how many
+  times the final whole-plan review may send execution back for a follow-on
+  scope. If the reviewer asks again after that, the run blocks. This value is
+  read each time the final review runs, so raising it takes effect on a run in
+  progress, as long as the cap hasn't already tripped.
+
+A run blocked at the final review is terminal. `neal resume` reports that it
+can't be resumed, with or without `--message`. Its commits are intact: inspect
+it with `neal status`, then put any remaining work in a new plan.
+
 ### Custom guidance
 
 neal supports additive guidance files for local preferences alongside the built-in protocol prompts:

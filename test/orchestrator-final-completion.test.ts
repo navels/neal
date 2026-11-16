@@ -9,6 +9,7 @@ import { runFinalCompletionReviewPhase, runExecuteFinalizationPhase, runOnePass 
 import { getFinalCompletionReviewArtifactPath } from '../src/neal/final-completion-review.js';
 import { getExecuteRunResultExitCode } from '../src/neal/commands/writer-exit-codes.js';
 import { createRunLogger } from '../src/neal/logger.js';
+import { planResumeActions } from '../src/neal/resume-planner.js';
 import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
 import { NealProviderError, type CoderStructuredPromptArgs, type StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
 import { getDefaultAgentConfig, loadState, saveState } from '../src/neal/state.js';
@@ -1613,12 +1614,24 @@ test('final completion review blocks with an explicit diagnostic hint when conti
     assert.equal(nextState.finalCompletionContinueExecutionCapReached, true);
     const notifyLog = await readFile(notifyLogPath, 'utf8');
     assert.match(notifyLog, /continue_execution cap \(1\) is already exhausted/);
-    // Operator guidance points at the recovery CLI tokens.
+    // A final-completion block is keep-blocked: `neal resume` rejects it with
+    // or without --message, so the guidance must not point at resume. It
+    // names the status command, the fact that the run is terminal, and the
+    // config key that sets the cap.
     assert.match(notifyLog, /neal status/);
-    assert.match(notifyLog, /neal resume --message/);
+    assert.match(notifyLog, /This run cannot be resumed/);
+    assert.match(notifyLog, /neal\.final_completion_continue_execution_max/);
+    assert.doesNotMatch(notifyLog, /neal resume/);
     const notifications = (await readRunEvents(state.runDir)).filter((event) => event.type === 'notify.blocked');
     assert.equal(notifications.length, 1);
-    assert.match(String(notifications[0].data?.reason), /neal resume --message/);
+    assert.match(String(notifications[0].data?.reason), /This run cannot be resumed/);
+    assert.doesNotMatch(String(notifications[0].data?.reason), /neal resume/);
+    // The promise in the message holds: the resume planner keeps this state
+    // blocked.
+    assert.deepEqual(
+      planResumeActions(nextState).map((action) => action.kind),
+      ['keep_blocked'],
+    );
     const progressMarkdown = await readFile(nextState.progressMarkdownPath, 'utf8');
     assert.match(progressMarkdown, /- Reviewer action: continue_execution/);
     assert.match(progressMarkdown, /- Resulting action: block_for_operator/);
@@ -1714,10 +1727,11 @@ test('final completion review supports a direct block_for_operator verdict', asy
       2,
     );
     const notifyLog = await readFile(notifyLogPath, 'utf8');
-    assert.match(notifyLog, /blocked completion for operator guidance/);
-    // Operator guidance points at the recovery CLI tokens.
+    assert.match(notifyLog, /blocked completion and needs an operator decision/);
+    // Terminal block: the guidance names status and a new plan, never resume.
     assert.match(notifyLog, /neal status/);
-    assert.match(notifyLog, /neal resume --message/);
+    assert.match(notifyLog, /This run cannot be resumed/);
+    assert.doesNotMatch(notifyLog, /neal resume/);
     const completionArtifact = await readFile(getFinalCompletionReviewArtifactPath(nextState.runDir), 'utf8');
     assert.match(completionArtifact, /- Execution shape: one_shot/);
     assert.match(completionArtifact, /- Reviewer action: block_for_operator/);
