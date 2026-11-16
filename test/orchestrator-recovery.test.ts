@@ -9,7 +9,7 @@ import { loadOrInitialize } from '../src/neal/orchestrator.js';
 import { createRunLogger } from '../src/neal/logger.js';
 import { recordRecoveryGuidanceForResolvedRun } from '../src/neal/commands/recovery-guidance.js';
 import { clearProviderCapabilitiesOverridesForTesting, setProviderCapabilitiesOverrideForTesting } from '../src/neal/providers/registry.js';
-import { type CoderRunPromptArgs, type CoderStructuredPromptArgs, type StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
+import { NealProviderError, type CoderRunPromptArgs, type CoderStructuredPromptArgs, type StructuredAdvisorRoundArgs } from '../src/neal/providers/types.js';
 import { normalizeCliStderr } from './helpers/cli.js';
 import { finalizeBlockedPlanReviewResponse, runCoderPlanPhase } from '../src/neal/orchestrator/phases/planning.js';
 import { getExecuteRunResultExitCode } from '../src/neal/commands/writer-exit-codes.js';
@@ -19,7 +19,7 @@ import { getCurrentExecutionScopeDescriptor } from '../src/neal/scopes.js';
 import { getDefaultAgentConfig, loadState, saveState } from '../src/neal/state.js';
 import { getPlanReviewGuidanceView, getPublicLifecycleView } from '../src/neal/state-views.js';
 import type { OrchestrationState } from '../src/neal/types.js';
-import { createResumeFixture, runGit, runNealCliResultInCwd, createExecuteFinalizationFixture, readEventTypes, readEvents, REVIEW_STUCK_REASON, recoverableConsultantVerdict, nonRecoverableConsultantVerdict, installConsultantAdvisorOverride, createConsultantRecoveryFixture, writeConsultantKnobConfig } from './helpers/orchestrator-harness.js';
+import { createResumeFixture, readRunEvents, runGit, runNealCliResultInCwd, createExecuteFinalizationFixture, readEventTypes, readEvents, REVIEW_STUCK_REASON, recoverableConsultantVerdict, nonRecoverableConsultantVerdict, installConsultantAdvisorOverride, createConsultantRecoveryFixture, writeConsultantKnobConfig } from './helpers/orchestrator-harness.js';
 
 process.env.HOME = join(tmpdir(), 'neal-test-home-orchestrator-recovery');
 
@@ -2697,3 +2697,51 @@ test('an operator message in a second same-scope recovery after the consultant b
   }
 });
 
+
+test('interactive recovery notifies once on a non-transient provider failure', async () => {
+  const { statePath, state } = await createResumeFixture({
+    phase: 'interactive_blocked_recovery',
+    status: 'running',
+    blockedFromPhase: 'coder_scope',
+    interactiveBlockedRecovery: {
+      enteredAt: '2026-11-15T00:00:00.000Z',
+      sourcePhase: 'coder_scope',
+      blockedReason: 'Need operator guidance',
+      maxTurns: 3,
+      lastHandledTurn: 0,
+      pendingDirective: null,
+      turns: [{
+        number: 1,
+        recordedAt: '2026-11-15T00:01:00.000Z',
+        operatorGuidance: 'Keep the scope.',
+        origin: 'operator',
+        disposition: null,
+      }],
+    },
+  });
+  const message = "You've hit your session limit · resets 3pm";
+  const logger = await createRunLogger({
+    cwd: state.cwd,
+    stateDir: join(state.cwd, '.neal'),
+    planDoc: state.planDoc,
+    topLevelMode: state.topLevelMode,
+    runDir: state.runDir,
+  });
+  const fail = async () => {
+    throw new NealProviderError({ message, kind: 'provider_failed', provider: 'openai-codex', role: 'coder' });
+  };
+  setProviderCapabilitiesOverrideForTesting('openai-codex', {
+    createCoderAdapter: () => ({ runPrompt: fail, runStructuredPrompt: fail }),
+  });
+  try {
+    await assert.rejects(() => runInteractiveBlockedRecoveryPhase(state, statePath, logger), { message });
+    const failedState = await loadState(statePath);
+    assert.equal(failedState.status, 'failed');
+    assert.equal(failedState.phase, 'interactive_blocked_recovery');
+    const notifications = (await readRunEvents(state.runDir)).filter((event) => event.type === 'notify.blocked');
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].data?.reason, message);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+});

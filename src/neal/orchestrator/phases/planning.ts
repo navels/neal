@@ -38,7 +38,7 @@ import {
   filterWrapperOwnedWorktreeStatus,
 } from '../../worktree-status.js';
 import { writeExecutionArtifacts } from '../artifacts.js';
-import { isCoderTimeoutError, REVIEWER_CONTENT_REFUSED_BLOCK_REASON, shouldNotifyFailure } from '../failures.js';
+import { isCoderTimeoutError, REVIEWER_CONTENT_REFUSED_BLOCK_REASON, notifyRunFailure } from '../failures.js';
 import {
   flushDerivedPlanNotifications,
   notifyBlocked,
@@ -297,9 +297,7 @@ export async function runCoderPlanPhase(state: OrchestrationState, statePath: st
         await bestEffortCleanupTimedOutCoder(error.sessionHandle ?? workingState.plannerSessionHandle, logger);
       }
       const failedState = await persistCoderFailureState(workingState, statePath, 'coder_plan', error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }
@@ -409,9 +407,7 @@ export async function runPlanReviewPhase(state: OrchestrationState, statePath: s
         subtype: error.subtype,
         message: error.message,
       });
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }
@@ -569,9 +565,7 @@ export async function runPlanningResponsePhase(
         await bestEffortCleanupTimedOutCoder(error.sessionHandle ?? state.plannerSessionHandle, logger);
       }
       const failedState = await persistCoderFailureState(state, statePath, retryPhase, error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }

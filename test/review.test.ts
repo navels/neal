@@ -33,7 +33,7 @@ import { clearConfigCache } from '../src/neal/config.js';
 import { CONFLICTING_OUTPUT_FORMAT_MARKERS } from '../src/neal/agents/structured-json.js';
 import { completionJsonOutputFormatLines } from '../src/neal/prompts/specialized.js';
 import { clearUserGuidanceCache } from '../src/neal/prompts/guidance.js';
-import type { RunLogger } from '../src/neal/logger.js';
+import { RunLogger } from '../src/neal/logger.js';
 import {
   clearProviderCapabilitiesOverridesForTesting,
   clearProviderDefinitionRegistrationsForTesting,
@@ -60,6 +60,7 @@ import { renderRecoveryMarkdown } from '../src/neal/support.js';
 import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
 import { getFinalCompletionReviewArtifactPath, renderFinalCompletionReviewMarkdown } from '../src/neal/final-completion-review.js';
 import { notifyBlocked, notifyInteractiveBlockedRecovery } from '../src/neal/orchestrator/notifications.js';
+import { notifyRunFailure } from '../src/neal/orchestrator/failures.js';
 import { appendCompletedScope } from '../src/neal/orchestrator/transitions.js';
 import { renderPlanProgressMarkdown, writePlanProgressArtifacts } from '../src/neal/progress.js';
 import { getPromptSpec, PROMPT_SPECS } from '../src/neal/prompts/specs.js';
@@ -283,6 +284,44 @@ test('blocked notification omits consultant advice for a terminal block with no 
   const notifyLog = await readFile(notifyLogPath, 'utf8');
   assert.match(notifyLog, /Coder reported a terminal blocker/);
   assert.doesNotMatch(notifyLog, /consultant advice/);
+});
+
+test('provider-failure notifications cap command text and preserve the full event reason', async () => {
+  const { root, state } = await createState({});
+  const notifyLogPath = await installNotifyCapture(state, root);
+  const logger = new RunLogger(state.runDir);
+  const prefix = '[neal] PLAN.md: ';
+  const reasons = [
+    'Short provider failure',
+    'x'.repeat(300 - prefix.length),
+    'x'.repeat(301 - prefix.length),
+    'Provider failure: ' + 'x'.repeat(2000),
+  ];
+  for (const reason of reasons) {
+    await notifyRunFailure(state, new Error(reason), logger);
+  }
+  const messages = (await readFile(notifyLogPath, 'utf8')).trimEnd().split('\n');
+  assert.deepEqual(messages, reasons.map((reason) => {
+    const message = prefix + reason;
+    return message.length > 300 ? message.slice(0, 299) + '…' : message;
+  }));
+  const events = (await readFile(join(state.runDir, 'events.ndjson'), 'utf8'))
+    .trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(events.filter((event) => event.type === 'notify.blocked').map((event) => event.data.reason), reasons);
+});
+
+test('non-failure blocked notifications preserve long reasons and consultant advice', async () => {
+  const { root, state } = await createState({
+    interactiveBlockedRecovery: recoveryStateWithAdvice(),
+  });
+  const notifyLogPath = await installNotifyCapture(state, root);
+  const reason = 'Review needs operator guidance. '.repeat(20) + 'Resume with neal resume --message "Proceed".';
+
+  await notifyBlocked(state, reason);
+
+  assert.equal(await readFile(notifyLogPath, 'utf8'),
+    `[neal] PLAN.md: ${reason} | consultant advice (read-only): triage misunderstanding; ` +
+    'suggested directive: Re-read the acceptance criteria and re-run the failing test.\n');
 });
 
 test('execute reviewer prompt includes coder justification and recent parent-objective history', () => {
@@ -1444,6 +1483,7 @@ test('final completion packet includes git-backed aggregate review context', asy
   await runGit(state.cwd, ['init', '-q']);
   await runGit(state.cwd, ['config', 'user.name', 'Neal Test']);
   await runGit(state.cwd, ['config', 'user.email', 'neal-test@example.com']);
+  await runGit(state.cwd, ['config', 'commit.gpgsign', 'false']);
   await runGit(state.cwd, ['add', 'PLAN.md', 'neal.yml']);
   await runGit(state.cwd, ['commit', '-m', 'base plan']);
   const baseCommit = await runGit(state.cwd, ['rev-parse', 'HEAD']);

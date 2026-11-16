@@ -25,7 +25,7 @@ import { saveState } from '../../state.js';
 import { getDerivedPlanView } from '../../state-views.js';
 import type { ExecuteScopeProgressJustification, OrchestrationState, ScopeMarker } from '../../types.js';
 import { writeExecutionArtifacts, writeManualGateArtifact } from '../artifacts.js';
-import { isCoderTimeoutError, shouldNotifyFailure } from '../failures.js';
+import { isCoderTimeoutError, notifyRunFailure } from '../failures.js';
 import { notifyBlocked, notifyInteractiveBlockedRecovery, notifyManualGate } from '../notifications.js';
 import { persistSplitPlanRecovery } from '../split-plan.js';
 import { enterInteractiveBlockedRecovery, shouldNotifyInteractiveBlockedRecoveryEntry } from './recovery.js';
@@ -255,9 +255,7 @@ export async function runCoderScopePhase(state: OrchestrationState, statePath: s
         return recoveredState;
       }
       const failedState = await persistCoderFailureState(workingState, statePath, 'coder_scope', error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }
@@ -448,9 +446,7 @@ export async function runExecuteResponsePhase(
         return recoveredState;
       }
       const failedState = await persistCoderFailureState(state, statePath, retryPhase, error, logger);
-      if (shouldNotifyFailure(error)) {
-        await notifyBlocked(failedState, error.message, logger);
-      }
+      await notifyRunFailure(failedState, error, logger);
     }
     throw error;
   }

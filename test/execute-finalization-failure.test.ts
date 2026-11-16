@@ -22,32 +22,9 @@ import { createInitialState, getRunStatePath, saveState } from '../src/neal/stat
 import type { OrchestrationState } from '../src/neal/types.js';
 import { hermeticAgentConfig } from './helpers/hermetic-agent-config.js';
 
-// Characterization baseline for the two summary-adjudication failure branches
-// of runExecuteFinalizationPhase (P5 plan, Scope 8), pinned before Scope 9
-// extracts shared execute-finalization helpers. This file is immutable through
-// that refactor: if the extracted helpers cannot reproduce a behavior pinned
-// here, the refactor is wrong, not this file.
-//
-// The two branches, in orchestrator/completion.ts:
-//   Scenario A — the coder final-completion summary round throws a provider
-//     error, translated to CoderRoundError by runCoderFinalCompletionSummaryRound.
-//     The branch persists the error's session handle (with derived protocol),
-//     writes the failed final-completion review artifact (source
-//     'coder_summary'), writes the failed checkpoint retrospective, emits a
-//     session-bearing phase.error, and notifies blocked when
-//     shouldNotifyFailure(error) holds.
-//   Scenario B — the round throws an ordinary non-provider error (a
-//     payload-parse failure rethrown unchanged by translateCoderProviderError).
-//     The generic branch persists the failed state with the coder session
-//     fields left exactly as seeded, writes the retrospective and phase.error,
-//     and writes NO failed final-completion review artifact and NO notification.
-//
-// Both scenarios share a pre-state that seeds coderSessionHandle /
-// coderSessionProtocol with distinguishable non-default values (the protocol
-// deliberately differs from the branch's 'structured_json_v1' fallback so the
-// derivation is pinned) and satisfies the notification conditions (notify_bin
-// capture script; Scenario A's provider error has kind 'timeout', for which
-// shouldNotifyFailure returns true).
+// Pin both summary-adjudication failure branches, including persistence and
+// artifact ordering. Both notify after phase.error; only CoderRoundError
+// overrides the session and writes the failed final-completion review artifact.
 
 // This file pins notify behavior through its own fixture script; the
 // suite-wide NEAL_NOTIFY_BIN= kill switch (pnpm test script) must not shadow
@@ -321,9 +298,6 @@ test('execute finalization CoderRoundError failure pins session override, failed
   const { calls, record } = createOrderRecorder(fixture);
   const logger = new OrderRecordingRunLogger(runDir, record);
   const runtime = createRecordingRuntime(record);
-  // kind 'timeout' makes isCoderTimeoutError — and therefore
-  // shouldNotifyFailure — true, so this scenario exercises the gated
-  // notifyBlocked call.
   const providerErrorMessage = 'final completion summary round timed out before structured output';
 
   setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
@@ -563,7 +537,7 @@ test('execute finalization CoderRoundError failure pins session override, failed
   }
 });
 
-test('execute finalization generic failure pins seeded session preservation, no failed artifact, no notification (Scenario B)', async () => {
+test('execute finalization generic failure pins seeded session preservation, no failed artifact, and notification last (Scenario B)', async () => {
   const fixture = await createExecuteFinalizationFailureFixture('neal-exec-final-fail-generic-');
   const { cwd, runDir, statePath, state, baseCommit, notifyLogPath } = fixture;
   const { calls, record } = createOrderRecorder(fixture);
@@ -660,14 +634,13 @@ test('execute finalization generic failure pins seeded session preservation, no 
       message: parseErrorMessage,
     });
 
-    // No notification of any kind on the generic branch.
-    assert.equal(events.some((event) => event.type.startsWith('notify.')), false);
-    assert.equal(existsSync(notifyLogPath), false);
+    assert.equal(events.filter((event) => event.type === 'notify.blocked').length, 1);
+    assert.equal(events.find((event) => event.type === 'notify.blocked')?.data?.reason, parseErrorMessage);
+    assert.equal(await readFile(notifyLogPath, 'utf8'), `[neal] PLAN.md: ${parseErrorMessage}\n`);
 
     // Observable ordering, exactly as the fakes recorded it: state save, then
-    // execution artifacts, then retrospective, then phase.error — with the
-    // failed final-completion artifact never appearing and no notification
-    // milestone at all.
+    // execution artifacts, then retrospective, then phase.error, then notification.
+    // The failed final-completion artifact never appears.
     assert.deepStrictEqual(calls, [
       {
         call: 'event:phase.start',
@@ -698,6 +671,15 @@ test('execute finalization generic failure pins seeded session preservation, no 
       },
       {
         call: 'event:phase.error',
+        persistedStatus: 'failed',
+        archivedReviewCount: 1,
+        completionArtifactExists: false,
+        failedRetrospectiveExists: true,
+        currentRetrospectiveExists: true,
+        notifyLog: '',
+      },
+      {
+        call: 'event:notify.blocked',
         persistedStatus: 'failed',
         archivedReviewCount: 1,
         completionArtifactExists: false,
