@@ -477,14 +477,13 @@ test('execute reviewer prompt points at the index even for an empty range', () =
 
 test('review doctrine builders render read-only inspection phrasing without execution instructions', () => {
   const falsification = getCodeReviewFalsificationLines({
-    rangeLabel: 'commit range',
-    gitInspectionExamples: 'Use git commands against the repository, for example: git diff a..b.',
+    rangeDiffArtifact: { indexPath: '.neal/runs/example/range-diff/index.md' },
     reviewTarget: 'scope diff',
     includeExecuteFailureClasses: true,
     mode: 'read-only',
   }).join('\n');
-  // Read-only mode references the read-only git_diff/read tools, not shell git commands.
-  assert.match(falsification, /git_diff/);
+  assert.match(falsification, /Commit-range diff index/);
+  assert.doesNotMatch(falsification, /git_diff/);
   assert.match(falsification, /read tools/);
   assert.doesNotMatch(falsification, /git diff/);
   assert.doesNotMatch(falsification, /Use git commands/);
@@ -505,8 +504,8 @@ test('review doctrine builders render read-only inspection phrasing without exec
   assert.doesNotMatch(preexisting, /inlined/);
 });
 
-// The read-only doctrine and the review-findings read-only inspection
-// section name concrete tools (git_diff, read_file, ...) while the access
+// The read-only doctrine and review-findings artifact instructions must
+// stay compatible with the read-only toolset while the access
 // mode is derived from capability flags, not toolset contents. This contract
 // test ties the two together: every snake_case tool name those read-only
 // instructions reference must exist in the read-only toolset, so a future
@@ -515,8 +514,7 @@ test('review doctrine builders render read-only inspection phrasing without exec
 test('read-only doctrine instructions only reference tools the read-only toolset provides', () => {
   const doctrineText = [
     ...getCodeReviewFalsificationLines({
-      rangeLabel: 'commit range',
-      gitInspectionExamples: 'Use git commands against the repository.',
+      rangeDiffArtifact: { indexPath: '.neal/runs/example/range-diff/index.md' },
       reviewTarget: 'scope diff',
       includeExecuteFailureClasses: true,
       mode: 'read-only',
@@ -529,7 +527,8 @@ test('read-only doctrine instructions only reference tools the read-only toolset
 
   const toolsetNames = Object.keys(createReadOnlyToolset(tmpdir()));
   const mentionedToolNames = [...new Set([...doctrineText.matchAll(/\b([a-z]+_[a-z_]+)\b/g)].map((match) => match[1]))];
-  assert.ok(mentionedToolNames.includes('git_diff'), 'the read-only doctrine must direct reviewers to git_diff');
+  assert.match(doctrineText, /Commit-range diff index/);
+  assert.doesNotMatch(doctrineText, /git_diff|git diff/);
   for (const name of mentionedToolNames) {
     assert.ok(
       toolsetNames.includes(name),

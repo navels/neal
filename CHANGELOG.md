@@ -19,6 +19,12 @@ dependency-update policy.
 
 ### Changed
 
+- Scope review, final completion review, and `neal review` now deliver
+  commit-range diffs as an index and numbered patch files for every reviewer
+  provider. The reviewer `git_diff` tool and pasted range diffs are removed;
+  OpenAI-compatible `read_file` supports byte-offset paging. Git 2.30 or newer
+  is required for artifact creation (#116).
+
 - All three adapters classify usage limits as `usage_limit`, with an optional
   reset timestamp in provider errors and status JSON. Codex usage-limit
   messages no longer consume transient API retries (#115).
@@ -30,6 +36,10 @@ dependency-update policy.
   `neal.final_completion_continue_execution_max` (#116).
 
 ### Fixed
+
+- Whole-plan reviewers receive the complete aggregate diff even when it exceeds
+  the former 200,000-character inline limit, avoiding final review loops caused
+  by truncated evidence (#116).
 
 - `neal review` no longer fails with "neal review is read-only but the
   worktree changed outside its review artifacts" when the coder is

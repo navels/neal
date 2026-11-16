@@ -53,8 +53,8 @@ with artifacts under `.neal/reviews/<review-id>/`.
   - validated allowed transition outcomes declared per spec
 - Adjudicator helpers (`planning.ts`, `execute.ts`, `final-completion.ts`):
   - per-family context resolution from run state
-  - reviewer/coder round invocation, including supplying the commit-range diff
-    to read-only reviewers that lack their own range-diff tool
+  - reviewer/coder round invocation, including writing the range-diff artifact
+    and passing its index path to the reviewer round
   - execute-family findings synthesis, reopened-finding and stuck-window
     detection, and disposition resolution
 - Transition layer (`src/neal/orchestrator.ts`, `src/neal/orchestrator/run-loop.ts`,

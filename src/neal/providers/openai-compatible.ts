@@ -28,7 +28,7 @@
  *   `resumeHandle` contract; scope boundaries still clear the handle, so each
  *   new scope starts with fresh context;
  * - a structured-advisor adapter running the same outer loop over the
- *   read-only toolset (`read_file`, `list_dir`, `grep`, `git_diff`) with its own smaller
+ *   read-only toolset (`read_file`, `list_dir`, `grep`) with its own smaller
  *   step cap (`OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS`), the same settings
  *   resolution, retry semantics, and cancellation contract, so the coder
  *   role passes the final-completion structured-advisor gate and a generic
@@ -1810,7 +1810,7 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
 /**
  * Structured-advisor adapter with a bounded read-only tool loop: rounds run
  * the shared outer loop over `createReadOnlyToolset` (`read_file`,
- * `list_dir`, `grep`, `git_diff`; never write or shell) until a zero-tool-call turn,
+ * `list_dir`, `grep`; never write or shell) until a zero-tool-call turn,
  * then exactly one SDK-native structured-output finalization turn produces
  * the round payload (`runStructuredFinalizationTurn`, shared with the coder
  * structured path). Settings resolution, transient retry,
@@ -2018,10 +2018,6 @@ export const openAICompatibleProviderDefinition = {
     'structured-advisor': {
       supported: true,
       toolAccess: { read: true, write: false, shell: false },
-      // The read-only advisor tool loop exposes a real commit-range diff tool
-      // (git_diff in createReadOnlyToolset), so the read-only review doctrine
-      // instructs that tool directly instead of having Neal inline the diff.
-      providesRangeDiffTool: true,
       supportsSessionResume: false,
       supportsModelOverride: true,
       supportsStructuredOutput: true,

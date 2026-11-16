@@ -10,18 +10,8 @@
  *   records are self-sufficient;
  * - role-scoped factories: `createCoderToolset` (all six writer tools),
  *   `createPlanAuthorToolset` (read plus plan-artifact writes, no shell), and
- *   `createReadOnlyToolset` (`read_file`, `list_dir`, `grep`, plus the read-only
- *   `git_diff` range inspector) so the Phase 2 tool-capable reviewer is a
- *   registration change, not a tool change.
- *
- * `git_diff` exists because reviewer prompts name a commit range as the
- * source of truth, but plain file reads can only see the head state: they
- * cannot reveal deletions, renames, or what specifically changed in the
- * range. The tool is a neal-owned read-only query (a fixed `git diff`
- * argv — never a shell string), with refs validated against a conservative
- * pattern and the optional path filter jailed lexically (lexically only:
- * deleted paths must remain addressable, and git only ever resolves the
- * filter against repository-relative paths).
+ *   `createReadOnlyToolset` (`read_file`, `list_dir`, `grep`) for reviewers
+ *   reading the range-diff artifacts and repository files.
  *
  * Cross-cutting constraints are enforced in code, not prompting:
  *
@@ -36,7 +26,7 @@
  * tool — shell commands execute with the same trust as vendor writers.
  */
 import { isUtf8 } from 'node:buffer';
-import { exec, execFile } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tool } from 'ai';
@@ -49,17 +39,6 @@ export const READ_FILE_BYTE_LIMIT = 256 * 1024;
 export const READ_FILE_PAGE_BYTE_LIMIT = RESULT_BYTE_LIMIT - 512;
 export const GREP_MAX_MATCHING_LINES = 200;
 export const DEFAULT_RUN_TIMEOUT_MS = 120_000;
-export const GIT_DIFF_TIMEOUT_MS = 30_000;
-
-/**
- * Conservative git revision pattern for `git_diff` arguments: SHAs, branch
- * and tag names, `HEAD`, and suffix operators (`~`, `^`). Must start with an
- * alphanumeric so a revision can never be parsed as a git option, and must
- * not contain whitespace, `..`, or shell metacharacters. The tool composes
- * `base..head` itself, so range syntax in a single argument is rejected.
- */
-const GIT_REVISION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/^~-]*$/;
-
 const BINARY_SNIFF_BYTES = 8 * 1024;
 const TOOL_ERROR_PREFIX = 'Error: ';
 
@@ -519,83 +498,6 @@ async function grepBody(
   return lines.join('\n');
 }
 
-function assertGitRevision(value: string, label: 'base' | 'head'): string {
-  if (!GIT_REVISION_PATTERN.test(value) || value.includes('..')) {
-    throw new Error(
-      `invalid git ${label} revision: ${JSON.stringify(value)}. Pass a single commit SHA, branch, tag, or HEAD-relative revision; the tool composes the base..head range itself.`,
-    );
-  }
-  return value;
-}
-
-/**
- * Read-only committed-range diff: a fixed `git diff` argv (never a shell
- * string) against the repository at `rootDir`. The optional path filter is
- * jailed lexically only — a deleted file does not exist on disk, so the
- * realpath checks used by the read tools would wrongly reject exactly the
- * paths this tool exists to reveal; git resolves the filter against
- * repository-relative paths, never the wider filesystem. The no-command
- * guarantee is enforced in code, not configuration: `--no-ext-diff` and
- * `--no-textconv` suppress operator-configured diff drivers, `GIT_`
- * environment overrides (GIT_EXTERNAL_DIFF, GIT_DIR, GIT_WORK_TREE, ...)
- * are stripped from the child environment, pathspec magic (`:`-prefixed
- * filters) is rejected, and the `--` separator is always emitted so a
- * revision can never be reparsed as a path.
- */
-function gitDiffBody(
-  rootDir: string,
-  base: string,
-  head: string,
-  relativePath: string | undefined,
-  stat: boolean | undefined,
-): Promise<string> {
-  const range = `${assertGitRevision(base, 'base')}..${assertGitRevision(head, 'head')}`;
-  const gitArgs = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--find-renames'];
-  if (stat) {
-    gitArgs.push('--stat');
-  }
-  gitArgs.push(range, '--');
-  if (relativePath !== undefined) {
-    if (relativePath.startsWith(':')) {
-      throw new Error(`pathspec magic is not allowed: ${relativePath}`);
-    }
-    resolveJailedPath(rootDir, relativePath);
-    gitArgs.push(relativePath);
-  }
-  const childEnv: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith('GIT_')) {
-      childEnv[key] = value;
-    }
-  }
-  return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      gitArgs,
-      {
-        cwd: path.resolve(rootDir),
-        env: childEnv,
-        timeout: GIT_DIFF_TIMEOUT_MS,
-        maxBuffer: 10 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const detail = stderr.trim() || error.message;
-          reject(new Error(`git diff ${range} failed: ${detail}`));
-          return;
-        }
-        if (stdout.length === 0) {
-          resolve(
-            `(no differences for ${range}${relativePath === undefined ? '' : ` -- ${relativePath}`})`,
-          );
-          return;
-        }
-        resolve(stdout);
-      },
-    );
-  });
-}
-
 type RunOutcome = { text: string; exitCode: number | null };
 
 function runBody(rootDir: string, command: string, timeoutMs: number): Promise<RunOutcome> {
@@ -759,31 +661,6 @@ function buildTools(rootDir: string, options?: OpenAICompatibleToolsetOptions) {
             } entries)`,
         ),
     }),
-    git_diff: tool({
-      description:
-        'Show the committed git diff between two commits of the working-directory repository (read-only). This is the only way to see exactly what a commit range changed, including deletions and renames that reading head-state files cannot reveal. Output is truncated to 16 KiB: call with stat:true first for the changed-file overview of a large range, then request per-path diffs.',
-      inputSchema: z.object({
-        base: z.string().describe('Base revision of the range (commit SHA, branch, tag, or HEAD-relative revision)'),
-        head: z.string().describe('Head revision of the range (commit SHA, branch, tag, or HEAD-relative revision)'),
-        path: z
-          .string()
-          .optional()
-          .describe('Limit the diff to one file or directory, relative to the working directory; deleted paths are valid here'),
-        stat: z
-          .boolean()
-          .optional()
-          .describe('When true, return the diffstat summary instead of the patch — use this first on large ranges'),
-      }),
-      execute: (input) =>
-        instrumented(
-          'git_diff',
-          () => gitDiffBody(rootDir, input.base, input.head, input.path, input.stat),
-          (result) =>
-            `git_diff ${input.base}..${input.head}${input.path === undefined ? '' : ` -- ${input.path}`}${
-              input.stat ? ' --stat' : ''
-            } (${Buffer.byteLength(result, 'utf8')} bytes)`,
-        ),
-    }),
     grep: tool({
       description:
         'Search file contents recursively with a JavaScript regular expression, skipping node_modules and dotted directories. Output is capped at 200 matching lines.',
@@ -849,9 +726,7 @@ function buildTools(rootDir: string, options?: OpenAICompatibleToolsetOptions) {
 
 /**
  * The full coder toolset: the six writer tools (`read_file`, `write_file`,
- * `edit_file`, `list_dir`, `grep`, `run`) jailed to `rootDir`. The coder has
- * shell access through `run`, so it does not get the reviewer-oriented
- * `git_diff` query tool — coder behavior is byte-stable across Phase 2.
+ * `edit_file`, `list_dir`, `grep`, `run`) jailed to `rootDir`.
  */
 export function createCoderToolset(rootDir: string, options?: OpenAICompatibleToolsetOptions) {
   const { read_file, write_file, edit_file, list_dir, grep, run } = buildTools(rootDir, options);
@@ -869,12 +744,10 @@ export function createPlanAuthorToolset(rootDir: string, options?: OpenAICompati
 }
 
 /**
- * The read-only toolset: exactly `read_file`, `list_dir`, `grep`, and
- * `git_diff` — no write or shell access. `git_diff` gives reviewers actual
- * commit-range visibility (deletions included) without shell access; see the
- * module doc.
+ * The read-only toolset: exactly `read_file`, `list_dir`, and `grep`.
+ * Reviewers read commit-range indexes and patches with these tools.
  */
 export function createReadOnlyToolset(rootDir: string, options?: OpenAICompatibleToolsetOptions) {
-  const { read_file, list_dir, grep, git_diff } = buildTools(rootDir, options);
-  return { read_file, list_dir, grep, git_diff };
+  const { read_file, list_dir, grep } = buildTools(rootDir, options);
+  return { read_file, list_dir, grep };
 }

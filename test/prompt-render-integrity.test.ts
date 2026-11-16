@@ -620,11 +620,11 @@ const EXPECTED_KEYS: Record<PromptSpecId, string[]> = {
 
 const EXPECTED_MODULE_SHAS: Record<(typeof MATRIX_BUILDER_MODULES)[number], string> = {
   'src/neal/prompts/planning.ts': '602857121d8b3c1dea023ef1156b7f7259c298a378ab7f4b74503b675b91b1fe',
-  'src/neal/prompts/execute.ts': 'd5ffb129860d6527f59d97966a1422e491a17d0e58bfb25944985e3e23a5d5ec',
+  'src/neal/prompts/execute.ts': 'a1bc3cc6ee8d877e69f811d9895722cc3b8a311cb588daf7f147a8c0a1b1b38f',
   'src/neal/prompts/specialized.ts': '39ae6bdb2e6a18d12fc48232e4718f2a3b5e86d3d95378ddca9f468b6d0096bd',
   'src/neal/agents/prompts.ts': 'c9b8b6bd135206ec8c7055aa887d65003490b8fdef95c3a662797018d01a667e',
   'src/neal/context/reviewer-context.ts': '93c3aff16ed614f96e626c296b3984c8efcded5f4db1e333774d69f4c015faad',
-  'src/neal/context/inline-review-context.ts': '707a75dec9712158b14c9b15ccac19491a6b0d3221089545b4b2c3431458bbe7',
+  'src/neal/context/inline-review-context.ts': '75e5691be0eae369dfd820292c70a1cf99ec0925d6c0d025cfaa587bd0925707',
 };
 
 function assertModuleShaMatches(relPath: (typeof MATRIX_BUILDER_MODULES)[number], expectedSha: string): void {

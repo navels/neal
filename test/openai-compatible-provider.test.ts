@@ -1694,7 +1694,7 @@ test('a string-form protocol schema throws provider_failed naming the schema lab
 // --- Structured-advisor battery ----------------------------------------------
 //
 // The advisor adapter runs reviewer rounds through the bounded read-only tool
-// loop (read_file, list_dir, grep, git_diff; OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS) and the
+// loop (read_file, list_dir, grep; OPENAI_COMPATIBLE_ADVISOR_MAX_STEPS) and the
 // final-completion round when the coder is openai-compatible, so its loop,
 // retry, and cancellation behavior is what keeps reviews and run completion
 // from stalling.
@@ -1788,12 +1788,11 @@ test('advisor: a valid round returns the structured verdict with the ordered eve
   assert.deepEqual(received.providerData, { schemaLabel: 'test_payload' });
 
   // The advisor loop turn carries exactly the read-only toolset on the SDK
-  // call: no write or shell tools, ever. git_diff is the read-only
-  // commit-range inspector (deletion visibility without shell access).
+  // call: no write or shell tools, ever.
   assert.equal(model.doGenerateCalls.length, 2);
   assert.deepEqual(
     (model.doGenerateCalls[0].tools ?? []).map((tool) => tool.name).sort(),
-    ['git_diff', 'grep', 'list_dir', 'read_file'],
+    ['grep', 'list_dir', 'read_file'],
   );
   const initialPrompt = JSON.stringify(model.doGenerateCalls[0].prompt);
   assert.ok(!initialPrompt.includes('neal-json'), 'the base prompt must not carry fence instructions');

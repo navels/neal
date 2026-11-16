@@ -137,7 +137,7 @@ replaced by a derived plan are skipped), it collects that earlier scope's diff
 restricted to the file (`git diff <scope.baseCommit>..<scope.finalCommit> --
 <file>`, a fixed-argv helper in `src/neal/git.ts`). `buildReviewerPrompt`
 renders them under "Earlier-scope changes to files in this diff", bounded by
-the same inline-section limit as the inlined range diff, and renders nothing
+`INLINE_SECTION_MAX_CHARS` (200,000 characters), and renders nothing
 when there is no overlap. The prompt always carries the matching doctrine line:
 a change to a file an earlier accepted scope signed off must preserve what that
 review accepted, and weakening or removing a test, assertion, or check an
@@ -149,8 +149,21 @@ an earlier scope owned.
 Execute-scope and final-completion reviewer context includes a deterministic
 run-local `scratchDir` under `.neal/runs/<run-id>/scratch/`. A `tool-access`
 prompt tells the reviewer to use that directory for temporary verification
-artifacts. A `read-only` prompt omits the directory and forbids scratch work.
-Every built-in reviewer currently uses `read-only` mode.
+artifacts. A `read-only` prompt forbids scratch work but names neal-written diff
+indexes under that directory for read access. Every built-in reviewer currently uses
+`read-only` mode.
+
+All three code-review surfaces use the same file delivery wording for every
+provider and both doctrine access modes. The scope reviewer receives an index
+for `baseCommit..headCommit`, plus a since-previous index when the previous
+reviewer head differs. Final completion receives an index for
+`initialBaseCommit..finalCommit`; an unavailable range keeps explicit unavailable
+wording and writes no artifact. `neal review` receives an index for its selected
+range, written once before adjudication. Each index lists every changed entry
+and its numbered patch, byte and line counts, status, paths, and binary flag.
+Reviewers read the patches in full, paging as needed; diff stats and changed-file
+lists in prompts are only previews. The range diff itself has no inline cap.
+See [storage.md](storage.md) for artifact paths and privacy.
 
 The goal is for reviewers to be able to answer two questions quickly:
 
@@ -197,9 +210,10 @@ helpers live in `src/neal/context/inline-review-context.ts` and truncation is
 render-time only: stored state, persisted artifacts, and schema-validated
 coder outputs are never mutated to satisfy a bound.
 
-- Inlined range-diff sections: `INLINE_SECTION_MAX_CHARS` (200,000
-  characters) via `truncateInlineSectionBody`, with an explicit truncation
-  marker.
+- Earlier-scope changes and other inline review context sections:
+  `INLINE_SECTION_MAX_CHARS` (200,000 characters) via
+  `truncateInlineSectionBody`, with an explicit truncation marker. Current
+  commit-range diffs are delivered as files and aren't subject to this cap.
 - Operator guidance: `USER_GUIDANCE_MAX_CHARS` (20,000 characters) applies
   per role file (`src/neal/prompts/guidance.ts`; `neal check` warns when a
   guidance file exceeds the cap), to the persisted plan-review recovery

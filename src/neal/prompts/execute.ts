@@ -237,7 +237,6 @@ export function buildReviewerPrompt(args: {
     args.changedFiles.length > 0 ? boundChangedFileList(args.changedFiles).join('\n') : '(no changed files)';
   const commitsText = args.commits.length > 0 ? boundCommitSubjectList(args.commits).join('\n') : '(no commits recorded)';
   const falsificationLines = getCodeReviewFalsificationLines({
-    rangeLabel: 'commit range',
     rangeDiffArtifact: {
       indexPath: args.rangeDiffIndexPath,
       sincePreviousIndexPath: args.sincePreviousIndexPath,

@@ -387,7 +387,6 @@ test('openai-compatible is registered and passes coder, planner, and reviewer ca
   assert.equal(capabilities['structured-advisor'].supported, true);
   assert.equal(capabilities['structured-advisor'].supportsSessionResume, false);
   assert.equal(capabilities['structured-advisor'].toolAccess.read, true);
-  assert.equal(capabilities['structured-advisor'].providesRangeDiffTool, true);
 
   assert.doesNotThrow(() =>
     assertProviderSupportsCoder(

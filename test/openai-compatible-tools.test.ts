@@ -8,12 +8,10 @@
  * API keys.
  */
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { promisify } from 'node:util';
 import { generateText, stepCountIs, type ToolExecutionOptions } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import type { z } from 'zod';
@@ -31,8 +29,6 @@ import {
   truncateResult,
   type OpenAICompatibleToolEvent,
 } from '../src/neal/providers/openai-compatible-tools.js';
-
-const execFileAsync = promisify(execFile);
 
 const callOptions = { toolCallId: 'test-call', messages: [] } as unknown as ToolExecutionOptions<never>;
 
@@ -780,11 +776,11 @@ describe('role-scoped toolsets', () => {
     }
   });
 
-  it('the read-only toolset contains exactly read_file, list_dir, grep, git_diff', async () => {
+  it('the read-only toolset contains exactly read_file, list_dir, grep', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-roles-ro-'));
     try {
       const tools = createReadOnlyToolset(rootDir);
-      assert.deepEqual(Object.keys(tools).sort(), ['git_diff', 'grep', 'list_dir', 'read_file']);
+      assert.deepEqual(Object.keys(tools).sort(), ['grep', 'list_dir', 'read_file']);
       const keys = Object.keys(tools);
       assert.ok(!keys.includes('write_file'));
       assert.ok(!keys.includes('edit_file'));
@@ -794,17 +790,7 @@ describe('role-scoped toolsets', () => {
     }
   });
 
-  it('the coder toolset does not gain the reviewer git_diff tool', async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-roles-coder-gd-'));
-    try {
-      const tools = createCoderToolset(rootDir);
-      assert.ok(!Object.keys(tools).includes('git_diff'));
-    } finally {
-      await fs.rm(rootDir, { recursive: true, force: true });
-    }
-  });
-
-  it('the plan-author toolset omits shell and diff tools but keeps bounded writers', async () => {
+  it('the plan-author toolset omits shell tools but keeps bounded writers', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-roles-plan-'));
     try {
       const tools = createPlanAuthorToolset(rootDir, { allowedWritePaths: ['PLAN.md'] });
@@ -830,159 +816,6 @@ describe('role-scoped toolsets', () => {
       assert.ok(isToolErrorResult(escape));
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
-    }
-  });
-});
-
-/**
- * git_diff battery: actual commit-range visibility for read-only reviewers.
- * The fixture repository has one modified file and one deleted file between
- * base and head, so the battery proves the deletion-detection contract that
- * head-state file reads cannot provide.
- */
-describe('git_diff tool', () => {
-  let rootDir: string;
-  let base: string;
-  let head: string;
-
-  async function git(...gitArgs: string[]): Promise<string> {
-    const { stdout } = await execFileAsync('git', gitArgs, { cwd: rootDir });
-    return stdout.trim();
-  }
-
-  before(async () => {
-    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neal-ga-git-diff-'));
-    await git('init', '--quiet');
-    // Pin identity and signing locally so the fixture commits succeed
-    // regardless of the operator's global git configuration.
-    await git('config', 'user.email', 'neal-test@example.invalid');
-    await git('config', 'user.name', 'Neal Test');
-    await git('config', 'commit.gpgsign', 'false');
-    await fs.writeFile(path.join(rootDir, 'kept.txt'), 'line one\n');
-    await fs.writeFile(path.join(rootDir, 'doomed.txt'), 'doomed content\n');
-    await git('add', '-A');
-    await git('commit', '--quiet', '-m', 'base commit');
-    base = await git('rev-parse', 'HEAD');
-    await fs.writeFile(path.join(rootDir, 'kept.txt'), 'line one\nline two\n');
-    await fs.rm(path.join(rootDir, 'doomed.txt'));
-    await git('add', '-A');
-    await git('commit', '--quiet', '-m', 'head commit');
-    head = await git('rev-parse', 'HEAD');
-    // Configure an external diff driver for the whole battery: --no-ext-diff
-    // must suppress it on every call, so every patch assertion below also
-    // proves operator git config cannot execute commands through this tool.
-    await git('config', 'diff.external', 'echo EXTERNAL-DIFF-RAN');
-  });
-
-  after(async () => {
-    await fs.rm(rootDir, { recursive: true, force: true });
-  });
-
-  it('shows the committed range patch, including deletions head-state reads cannot reveal', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /\+line two/);
-    assert.match(result, /deleted file mode/);
-    assert.match(result, /-doomed content/);
-    assert.ok(!result.includes('EXTERNAL-DIFF-RAN'), 'configured external diff driver must be suppressed');
-  });
-
-  it('strips GIT_ environment overrides from the child process', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    process.env.GIT_EXTERNAL_DIFF = 'echo ENV-EXTERNAL-DIFF-RAN';
-    try {
-      const result = await callTool(tools.git_diff, { base, head });
-      assert.ok(!isToolErrorResult(result));
-      assert.match(result, /\+line two/);
-      assert.ok(!result.includes('ENV-EXTERNAL-DIFF-RAN'), 'GIT_EXTERNAL_DIFF must not reach the child');
-    } finally {
-      delete process.env.GIT_EXTERNAL_DIFF;
-    }
-  });
-
-  it('rejects pathspec magic in the path filter', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head, path: ':(top)kept.txt' });
-    assert.ok(isToolErrorResult(result));
-    assert.match(result, /pathspec magic is not allowed/);
-  });
-
-  it('returns the diffstat overview with stat:true', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head, stat: true });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /kept\.txt/);
-    assert.match(result, /doomed\.txt/);
-    assert.match(result, /2 files changed/);
-    assert.ok(!result.includes('+line two'), 'stat mode must not include patch hunks');
-  });
-
-  it('filters to a single path, including a deleted path that no longer exists on disk', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base, head, path: 'doomed.txt' });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /deleted file mode/);
-    assert.ok(!result.includes('kept.txt'), 'path filter must exclude other files');
-  });
-
-  it('reports an empty range as a no-differences result, not an error', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base: head, head });
-    assert.ok(!isToolErrorResult(result));
-    assert.match(result, /no differences for /);
-  });
-
-  it('rejects revisions that could be parsed as options or ranges', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    for (const bad of ['--all', '-p', `${base}..${head}`, 'two words', '']) {
-      const result = await callTool(tools.git_diff, { base: bad, head });
-      assert.ok(isToolErrorResult(result), `expected error for base ${JSON.stringify(bad)}`);
-      assert.match(result, /invalid git base revision/);
-    }
-    const badHead = await callTool(tools.git_diff, { base, head: '--cached' });
-    assert.ok(isToolErrorResult(badHead));
-    assert.match(badHead, /invalid git head revision/);
-  });
-
-  it('returns unknown revisions as bounded error results', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const result = await callTool(tools.git_diff, { base: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', head });
-    assert.ok(isToolErrorResult(result));
-    assert.match(result, /git diff .* failed/);
-  });
-
-  it('jails the optional path filter lexically', async () => {
-    const tools = createReadOnlyToolset(rootDir);
-    const absolute = await callTool(tools.git_diff, { base, head, path: '/etc/passwd' });
-    assert.ok(isToolErrorResult(absolute));
-    assert.match(absolute, /absolute paths are not allowed/);
-    const escape = await callTool(tools.git_diff, { base, head, path: '../outside.txt' });
-    assert.ok(isToolErrorResult(escape));
-    assert.match(escape, /escapes the working directory/);
-  });
-
-  it('emits the shared tool event grammar with per-tool error attribution', async () => {
-    const events: OpenAICompatibleToolEvent[] = [];
-    const tools = createReadOnlyToolset(rootDir, { emitToolEvent: (event) => events.push(event) });
-
-    const ok = await callTool(tools.git_diff, { base, head });
-    assert.ok(!isToolErrorResult(ok));
-    assert.deepEqual(events[0], { type: 'tool_started', toolName: 'git_diff' });
-    assert.equal(events[1].type, 'tool_progress');
-    assert.equal(events[1].toolName, 'git_diff');
-    if (events[1].type === 'tool_progress') {
-      assert.equal(events[1].isError, false);
-      assert.match(events[1].message, /git_diff .* bytes\)/);
-    }
-
-    events.length = 0;
-    const bad = await callTool(tools.git_diff, { base: '--all', head });
-    assert.ok(isToolErrorResult(bad));
-    assert.equal(events[1].type, 'tool_progress');
-    if (events[1].type === 'tool_progress') {
-      assert.equal(events[1].isError, true);
-      assert.equal(events[1].message, bad);
     }
   });
 });

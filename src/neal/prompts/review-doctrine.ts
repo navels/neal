@@ -12,16 +12,14 @@ export type AdversarialReviewDoctrineContext = {
 // 'tool-access' is the default doctrine for reviewers that can inspect AND
 // execute against the repository directly (git commands, test runs, scratch
 // directories). 'read-only' is for reviewers that can read and search the
-// repository through read tools — including the read-only git_diff
-// commit-range tool — but cannot run commands; it must not instruct command
-// execution, test runs, shell git-command usage, or scratch-directory work.
+// repository and range-diff artifacts through read tools but cannot run
+// commands; it must not instruct command execution, test runs, shell
+// git-command usage, or scratch-directory work.
 // Every reviewer provider has repository read access; there is no reviewer
 // doctrine for providers without read tools.
 export type ReviewDoctrineAccessMode = 'tool-access' | 'read-only';
 
 export type CodeReviewFalsificationContext = {
-  rangeLabel?: string | null;
-  gitInspectionExamples?: string;
   reviewTarget?: string;
   includeExecuteFailureClasses?: boolean;
   mode?: ReviewDoctrineAccessMode;
@@ -103,12 +101,6 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
 
   if (context.rangeDiffArtifact) {
     lines.push(...getRangeDiffArtifactLines(context.rangeDiffArtifact));
-  } else if (context.rangeLabel) {
-    lines.push(
-      mode === 'read-only'
-        ? `Review that ${context.rangeLabel} directly with your read-only repository tools: use the git_diff tool to see exactly what the ${context.rangeLabel} changed (including deletions and renames), and your read tools to verify the surrounding code. The ${context.rangeLabel} is the source of truth for this review.`
-        : `Review that ${context.rangeLabel} directly with repository tools. The ${context.rangeLabel} is the source of truth for this review.`,
-    );
   }
 
   if (mode === 'read-only') {
@@ -116,16 +108,6 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
       'A diff shows only changed hunks; declarations such as imports, struct fields, or helpers may exist in unchanged parts of the file. Absence from the diff is not evidence of absence from the repository — open the affected file with your read tools and verify before claiming a missing import or missing declaration.',
       'Your read tools may be dedicated read and search tools, or a shell running in a read-only sandbox. If your only repository tool is that shell, use it to read files and search the tree (for example cat, sed -n, grep, ls); it cannot write, and you must not try to.',
     );
-  }
-
-  if (context.gitInspectionExamples && !context.rangeDiffArtifact) {
-    if (mode === 'tool-access') {
-      lines.push(context.gitInspectionExamples);
-    } else if (mode === 'read-only') {
-      lines.push(
-        'Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.',
-      );
-    }
   }
 
   lines.push(
