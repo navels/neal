@@ -5,7 +5,7 @@ import { runCoderResponseRound, runReviewerRound } from '../agents.js';
 import { OPEN_FINDINGS_PROMPT_ITEM_LIMIT } from '../context/inline-review-context.js';
 import { buildAndPersistReviewerContextPacket } from '../context/reviewer-context.js';
 import { getReviewStuckWindow } from '../config.js';
-import { getDiffForRangePaths } from '../git.js';
+import { getDiffForRangePaths, resolveCommitRef } from '../git.js';
 import { EXECUTE_FINALIZATION_PHASE, type ExecuteFinalizationPhase } from '../execute-finalization.js';
 import type { RunLogger } from '../logger.js';
 import type { EarlierScopeFileChange } from '../prompts/execute.js';
@@ -420,6 +420,15 @@ function validateExecuteResponseCoverage(args: {
   }
 }
 
+async function commitResolves(cwd: string, ref: string): Promise<boolean> {
+  try {
+    await resolveCommitRef(cwd, ref);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runExecuteReviewerAdjudication(args: {
   state: OrchestrationState;
   logger?: RunLogger;
@@ -455,7 +464,22 @@ export async function runExecuteReviewerAdjudication(args: {
     head: headCommit,
     dir: join(scratchDir, 'range-diff'),
   });
-  const sincePrevious = previousHeadCommit && previousHeadCommit !== headCommit
+  // The since-previous delta is a convenience on top of the cumulative
+  // artifact, which stays the source of truth. A previous head that no longer
+  // resolves to a commit (history rewritten and pruned, or state carried from
+  // elsewhere) must not fail the review round, so the delta is skipped then.
+  const previousHeadResolves =
+    previousHeadCommit !== null &&
+    previousHeadCommit !== headCommit &&
+    (await commitResolves(args.state.cwd, previousHeadCommit));
+  if (previousHeadCommit !== null && previousHeadCommit !== headCommit && !previousHeadResolves) {
+    await args.logger?.event('review.since_previous_unavailable', {
+      round: context.round,
+      previousHeadCommit,
+      headCommit,
+    });
+  }
+  const sincePrevious = previousHeadResolves && previousHeadCommit !== null
     ? await writeArtifact({
         cwd: args.state.cwd,
         base: previousHeadCommit,

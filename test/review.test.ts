@@ -2982,6 +2982,33 @@ for (const provider of ['anthropic-claude', 'openai-codex', 'openai-compatible']
   });
 }
 
+// A previous round's head that no longer resolves to a commit must not fail
+// the review round: the since-previous delta is a convenience and the
+// cumulative artifact is the source of truth. The all-zero id fails to resolve
+// on every platform. (A placeholder like `head` does not: a case-insensitive
+// filesystem resolves it to HEAD, which is how this first surfaced only on
+// Linux CI.)
+test('scope review skips the since-previous delta when the previous head does not resolve', async () => {
+  const { state } = await createScopeReviewCaptureFixture('anthropic-claude');
+  const captured = installCapturingScopeReviewAdvisor('anthropic-claude');
+  state.rounds.push({
+    round: 1, reviewerSessionHandle: null, reviewedPlanPath: state.planDoc,
+    commitRange: { base: state.baseCommit!, head: '0'.repeat(40) },
+    openBlockingCanonicalCount: 0, findings: [],
+    normalizationApplied: false, normalizationOperations: [], normalizationScopeLabelMappings: [],
+  });
+
+  const result = await runRealScopeReviewAdjudication(state);
+
+  const roundDir = getScopeReviewerScratchDir(state.runDir, '1', 2);
+  const index = await readFile(join(roundDir, 'range-diff/index.md'), 'utf8');
+  assert.ok(index.includes(`${state.baseCommit}..${result.reviewInput.headCommit}`));
+  await assert.rejects(access(join(roundDir, 'since-previous')), { code: 'ENOENT' });
+  assert.equal(captured.length, 1);
+  assert.ok(captured[0]!.prompt.includes(`${relative(state.cwd, roundDir)}/range-diff/index.md`));
+  assert.doesNotMatch(captured[0]!.prompt, /since-previous/);
+});
+
 test('derived sub-scopes of one parent retain distinct diff artifact paths', async () => {
   const { state } = await createScopeReviewCaptureFixture('anthropic-claude');
   const captured = installCapturingScopeReviewAdvisor('anthropic-claude');
