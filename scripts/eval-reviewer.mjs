@@ -53,6 +53,9 @@ async function evaluateFixture(fixture) {
     git(cwd, 'init');
     git(cwd, 'config', 'user.email', 'eval@neal.local');
     git(cwd, 'config', 'user.name', 'neal-eval');
+    // The fixture commits use a made-up identity, so a machine with global
+    // commit signing has no key for them. Same opt-out as the test repos.
+    git(cwd, 'config', 'commit.gpgsign', 'false');
     git(cwd, 'add', '-A');
     git(cwd, 'commit', '-m', 'base');
     execFileSync('git', ['apply', fixture.diffPath], { cwd, stdio: ['ignore', 'ignore', 'inherit'] });
