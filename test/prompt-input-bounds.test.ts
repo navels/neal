@@ -355,6 +355,7 @@ test('completion prompts bound the packet changed-file arrays while the packet k
     packet,
     summary: COMPLETION_SUMMARY,
     scratchDir: '/tmp/repo/.neal/runs/run-1/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   });
 
   for (const prompt of [summaryPrompt, reviewerPrompt]) {
@@ -379,6 +380,7 @@ test('completion reviewer prompt bounds an oversized coder summary field and kee
     packet: buildPacket(),
     summary,
     scratchDir: '/tmp/repo/.neal/runs/run-1/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   });
 
   // The oversized field renders truncated with a marker; the fields after it
@@ -439,6 +441,7 @@ test('completion prompts bound the aggregate commit subjects, diff stat, and com
     packet,
     summary: COMPLETION_SUMMARY,
     scratchDir: '/tmp/repo/.neal/runs/run-1/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   });
 
   for (const prompt of [summaryPrompt, reviewerPrompt]) {
@@ -541,6 +544,7 @@ test('completion prompts bound the last-scope commit subject and scope-accountin
     packet,
     summary: COMPLETION_SUMMARY,
     scratchDir: '/tmp/repo/.neal/runs/run-1/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   });
 
   for (const prompt of [summaryPrompt, reviewerPrompt]) {
@@ -636,6 +640,7 @@ test('remainingKnownGaps sections stay under one constant as the gap count grows
       packet: buildPacket(),
       summary,
       scratchDir: '/tmp/repo/.neal/runs/run-1/scratch/final-completion-review',
+      rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
     });
 
   const oneFifty = buildPrompt(makeSummary(150));

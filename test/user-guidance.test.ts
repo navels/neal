@@ -140,6 +140,7 @@ const COMPLETION_REVIEWER_ARGS = {
     remainingKnownGaps: [],
   },
   scratchDir: '/tmp/repo/.neal/runs/run-1/scratch/final-completion-review',
+  rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
 } as unknown as Parameters<typeof buildFinalCompletionReviewerPrompt>[0];
 
 test('guidance is loaded from preferred ~/.neal guidance files by default', () => {

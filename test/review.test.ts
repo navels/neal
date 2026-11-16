@@ -1700,6 +1700,7 @@ test('final completion prompts stay bounded regardless of verification command c
         packet,
         summary,
         scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+        rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
       }),
     };
   }
@@ -1864,13 +1865,14 @@ test('final completion reviewer prompt requires a structured whole-plan verdict'
       remainingKnownGaps: ['Reviewer completion verdict is still needed.'],
     },
     scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   });
 
   assert.match(prompt, /whole-plan final completion review/i);
   assert.match(prompt, /Evaluate the totality of the work completed for this plan/);
   assert.match(prompt, /ordinary code review standards/);
   assert.match(prompt, /Treat the whole-plan completion claim as hostile input/);
-  assert.match(prompt, /aggregate range abc123\.\.final-3/);
+  assert.match(prompt, /abc123\.\.final-3/);
   assert.match(prompt, /Trace the changed runtime path far enough to prove the happy path is reachable/);
   assert.match(prompt, /Temporary verification scratch directory: \/tmp\/repo\/\.neal\/runs\/run-123\/scratch\/final-completion-review/);
   assert.match(prompt, /Do not create project-root scratch directories such as build_review\//);
@@ -1975,9 +1977,10 @@ test('final completion reviewer prompt default variant instructs repository insp
     packet,
     summary,
     scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   };
   const readCapablePrompt = buildFinalCompletionReviewerPrompt(baseArgs);
-  assert.match(readCapablePrompt, /Use git commands against the repository, for example: git diff abc123\.\.final-3/);
+  assert.match(readCapablePrompt, /Commit-range diff index.*range-diff\/index\.md/);
   assert.match(readCapablePrompt, /Temporary verification scratch directory: /);
   assert.doesNotMatch(readCapablePrompt, /## Inlined review context from Neal/);
 });
@@ -2026,12 +2029,13 @@ test('final completion reviewer prompt read-only variant instructs read-tool ins
     packet,
     summary,
     scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   };
 
   const readOnlyPrompt = buildFinalCompletionReviewerPrompt({ ...baseArgs, accessMode: 'read-only' });
-  // Read-only variant names the read-only git_diff/read tools over the injected
-  // aggregate range, and drops execution, scratch, and shell-git instructions.
-  assert.match(readOnlyPrompt, /git_diff/);
+  // File delivery stays the same; read-only mode omits execution and scratch work.
+  assert.match(readOnlyPrompt, /Commit-range diff index.*range-diff\/index\.md/);
+  assert.doesNotMatch(readOnlyPrompt, /git_diff|git diff /);
   assert.match(readOnlyPrompt, /read tools/);
   assert.match(readOnlyPrompt, /abc123\.\.final-3/);
   assert.doesNotMatch(readOnlyPrompt, /Use git commands against the repository/);
@@ -2048,22 +2052,7 @@ test('final completion reviewer prompt read-only variant instructs read-tool ins
     buildFinalCompletionReviewerPrompt(baseArgs),
   );
 
-  // An empty-string aggregate diff is a present (collected) diff, so it still
-  // rides the inlined channel rather than falling back to git_diff.
-  const emptyDiffPrompt = buildFinalCompletionReviewerPrompt({
-    ...baseArgs,
-    accessMode: 'read-only',
-    inlinedRangeDiff: '',
-  });
-  assert.match(emptyDiffPrompt, /## Inlined commit-range diff from Neal \(abc123\.\.final-3\)/);
-  assert.match(emptyDiffPrompt, /\(empty diff\)/);
-  assert.match(
-    emptyDiffPrompt,
-    /The commit-range diff for that aggregate range abc123\.\.final-3 is inlined below and is the source of truth/,
-  );
-  assert.match(emptyDiffPrompt, /Inspect the change using the inlined commit-range diff below for what changed/);
-  assert.doesNotMatch(emptyDiffPrompt, /git_diff/);
-  assert.doesNotMatch(emptyDiffPrompt, /Use git commands against the repository/);
+
 });
 
 test('final completion review artifact records coder summary, reviewer verdict, and resulting action', async () => {
@@ -3258,6 +3247,7 @@ async function createReviewLevelCompletionArgs() {
       remainingKnownGaps: [],
     },
     scratchDir: '/tmp/repo/.neal/runs/run-123/scratch/final-completion-review',
+    rangeDiffIndexPath: '.neal/runs/run-123/scratch/final-completion-review/range-diff/index.md',
   };
 }
 

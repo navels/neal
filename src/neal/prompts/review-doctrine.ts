@@ -25,13 +25,6 @@ export type CodeReviewFalsificationContext = {
   reviewTarget?: string;
   includeExecuteFailureClasses?: boolean;
   mode?: ReviewDoctrineAccessMode;
-  // Only meaningful with mode === 'read-only'. When true, Neal has inlined the
-  // commit-range diff into the reviewer prompt (the reviewer has read tools but
-  // no commit-range diff tool), so the doctrine references that inlined diff as
-  // the source of truth and must not name a `git_diff` tool.
-  // When false (the default, e.g. openai-compatible), the doctrine keeps the
-  // existing `git_diff`-tool phrasing.
-  rangeDiffInlined?: boolean;
   rangeDiffArtifact?: {
     indexPath: string;
     sincePreviousIndexPath?: string | null;
@@ -106,7 +99,6 @@ export function getRangeDiffArtifactLines(context: {
 export function getCodeReviewFalsificationLines(context: CodeReviewFalsificationContext) {
   const mode = context.mode ?? 'tool-access';
   const reviewTarget = context.reviewTarget ?? 'changed behavior';
-  const rangeDiffInlined = mode === 'read-only' && context.rangeDiffInlined === true;
   const lines: string[] = [];
 
   if (context.rangeDiffArtifact) {
@@ -114,9 +106,7 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
   } else if (context.rangeLabel) {
     lines.push(
       mode === 'read-only'
-        ? rangeDiffInlined
-          ? `The commit-range diff for that ${context.rangeLabel} is inlined below and is the source of truth for exactly what the ${context.rangeLabel} changed (including deletions and renames). Use your read tools to verify the surrounding code; you have no commit-range diff tool, so rely on the inlined diff for what changed.`
-          : `Review that ${context.rangeLabel} directly with your read-only repository tools: use the git_diff tool to see exactly what the ${context.rangeLabel} changed (including deletions and renames), and your read tools to verify the surrounding code. The ${context.rangeLabel} is the source of truth for this review.`
+        ? `Review that ${context.rangeLabel} directly with your read-only repository tools: use the git_diff tool to see exactly what the ${context.rangeLabel} changed (including deletions and renames), and your read tools to verify the surrounding code. The ${context.rangeLabel} is the source of truth for this review.`
         : `Review that ${context.rangeLabel} directly with repository tools. The ${context.rangeLabel} is the source of truth for this review.`,
     );
   }
@@ -133,9 +123,7 @@ export function getCodeReviewFalsificationLines(context: CodeReviewFalsification
       lines.push(context.gitInspectionExamples);
     } else if (mode === 'read-only') {
       lines.push(
-        rangeDiffInlined
-          ? 'Inspect the change using the inlined commit-range diff below for what changed (including deletions and renames), then read the changed files in full with your read tools and search the tree for affected symbols and callers to verify claims.'
-          : 'Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.',
+        'Inspect the change with your read-only tools: call git_diff with the base and head commits named in this prompt (stat:true first for the changed-file overview, then per-path diffs), read the changed files in full, and search the tree for affected symbols and callers to verify claims.',
       );
     }
   }

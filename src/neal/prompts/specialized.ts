@@ -6,7 +6,6 @@ import {
   boundCommitSubjectList,
   boundFreeTextValues,
   GIT_SUMMARY_SECTION_MAX_CHARS,
-  renderInlinedRangeDiffSection,
   truncateInlineSectionBody,
 } from '../context/inline-review-context.js';
 import type { ReviewerContextPacket } from '../context/reviewer-context.js';
@@ -184,10 +183,8 @@ export function buildFinalCompletionReviewerPrompt(args: {
   summary: FinalCompletionSummary;
   scratchDir: string;
   reviewerContext?: ReviewerContextPacket | null;
-  // Neal-inlined aggregate commit-range diff for a read-only reviewer that has
-  // read tools but no commit-range diff tool. Only rendered when accessMode is
-  // 'read-only'.
-  inlinedRangeDiff?: string | null;
+  // Repository-relative index, or null when the aggregate range is unavailable.
+  rangeDiffIndexPath: string | null;
   // Explicit reviewer doctrine access mode. Defaults to 'tool-access'.
   accessMode?: ReviewDoctrineAccessMode;
   // Reviewer strictness from `neal.review_level`, resolved by rounds.ts via
@@ -202,25 +199,16 @@ export function buildFinalCompletionReviewerPrompt(args: {
 
   const accessMode = args.accessMode ?? 'tool-access';
   const reviewLevel = args.reviewLevel ?? 'moderate';
-  // A collected diff may legitimately be the empty string (a range with no
-  // changes); distinguish "collected" (any string, including '') from "not
-  // collected" (null/undefined) so an empty diff still rides the inlined channel
-  // instead of falling back to git_diff-tool phrasing the reviewer cannot use.
-  const rangeDiffInlined =
-    accessMode === 'read-only' && args.inlinedRangeDiff !== null && args.inlinedRangeDiff !== undefined;
   const completionSummary = args.summary;
   const boundedLastScope = boundLastImplementationScope(args.packet.lastNonEmptyImplementationScope);
   const lastImplementationScope = boundedLastScope ? JSON.stringify(boundedLastScope, null, 2) : 'null';
-  const aggregateRange = args.packet.aggregateReviewContext.range;
   const falsificationLines = getCodeReviewFalsificationLines({
-    rangeLabel: aggregateRange ? `aggregate range ${aggregateRange}` : null,
-    gitInspectionExamples: aggregateRange
-      ? `Use git commands against the repository, for example: git diff ${aggregateRange}, git log --oneline ${aggregateRange}, and targeted path diffs or file reads for changed files.`
+    rangeDiffArtifact: args.rangeDiffIndexPath
+      ? { indexPath: args.rangeDiffIndexPath }
       : undefined,
     reviewTarget: 'aggregate implementation',
     includeExecuteFailureClasses: true,
     mode: accessMode,
-    rangeDiffInlined,
   });
   // Scratch-directory work requires command execution; only the full
   // tool-access mode may instruct it.
@@ -323,15 +311,6 @@ export function buildFinalCompletionReviewerPrompt(args: {
     '',
     'Last non-empty implementation scope reference:',
     lastImplementationScope,
-    ...(rangeDiffInlined
-      ? [
-          '',
-          renderInlinedRangeDiffSection({
-            rangeLabel: aggregateRange ?? 'aggregate range',
-            diff: args.inlinedRangeDiff!,
-          }),
-        ]
-      : []),
   ].join('\n');
 }
 

@@ -1,12 +1,12 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 
 import {
   runCoderFinalCompletionSummaryRound,
   runReviewerFinalCompletionRound,
 } from '../agents.js';
-import { readOnlyReviewerNeedsInlinedDiff } from '../context/inline-review-context.js';
 import { buildAndPersistReviewerContextPacket } from '../context/reviewer-context.js';
-import { getDiffForRange } from '../git.js';
+import { writeRangeDiffArtifact } from '../range-diff-artifact.js';
 import type { RunLogger } from '../logger.js';
 import { getFinalCompletionView } from '../state-views.js';
 import { getFinalCompletionReviewerScratchDir } from '../storage-paths.js';
@@ -69,7 +69,7 @@ export async function runFinalCompletionReviewerAdjudication(args: {
   packet: FinalCompletionPacket;
   logger?: RunLogger;
   runReviewerRound?: FinalCompletionReviewerRoundRunner;
-  getDiffForRange?: (cwd: string, baseCommit: string, headCommit: string) => Promise<string>;
+  writeRangeDiffArtifact?: typeof writeRangeDiffArtifact;
 }) {
   const finalCompletion = getFinalCompletionView(args.state);
   if (!finalCompletion?.summary) {
@@ -82,18 +82,19 @@ export async function runFinalCompletionReviewerAdjudication(args: {
   });
   const scratchDir = getFinalCompletionReviewerScratchDir(args.state.runDir);
   await mkdir(scratchDir, { recursive: true });
-  // Read-only reviewers with read tools but no commit-range diff tool (native
-  // Claude/Codex) get the aggregate commit-range diff inlined directly when the
-  // aggregate range is available; read-only reviewers that expose their own
-  // commit-range diff tool (openai-compatible) inspect the range with that tool.
   const aggregate = context.packet.aggregateReviewContext;
-  const inlinedRangeDiff =
-    readOnlyReviewerNeedsInlinedDiff(args.state.agentConfig.reviewer) &&
-    aggregate.unavailableReason === null &&
-    aggregate.baseCommit &&
-    aggregate.headCommit
-      ? await (args.getDiffForRange ?? getDiffForRange)(args.state.cwd, aggregate.baseCommit, aggregate.headCommit)
-      : null;
+  const artifactDir = join(scratchDir, 'range-diff');
+  const rangeDiff = aggregate.unavailableReason === null && aggregate.baseCommit && aggregate.headCommit
+    ? await (args.writeRangeDiffArtifact ?? writeRangeDiffArtifact)({
+        cwd: args.state.cwd,
+        base: aggregate.baseCommit,
+        head: aggregate.headCommit,
+        dir: artifactDir,
+      })
+    : null;
+  if (!rangeDiff) {
+    await rm(artifactDir, { recursive: true, force: true });
+  }
   const reviewerResult = await (args.runReviewerRound ?? runReviewerFinalCompletionRound)({
     reviewer: args.state.agentConfig.reviewer,
     cwd: args.state.cwd,
@@ -102,7 +103,7 @@ export async function runFinalCompletionReviewerAdjudication(args: {
     summary: finalCompletion.summary,
     scratchDir,
     reviewerContext: await buildAndPersistReviewerContextPacket({ state: args.state }),
-    inlinedRangeDiff,
+    rangeDiffIndexPath: rangeDiff ? relative(args.state.cwd, rangeDiff.indexPath) : null,
     logger: args.logger,
   });
 
