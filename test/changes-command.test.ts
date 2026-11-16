@@ -24,6 +24,7 @@ async function createFixture() {
   await git(cwd, ['init']);
   await git(cwd, ['config', 'user.email', 'neal@example.test']);
   await git(cwd, ['config', 'user.name', 'Neal Test']);
+  await git(cwd, ['config', 'commit.gpgsign', 'false']);
 
   const planDoc = join(cwd, 'PLAN.md');
   await writeFile(planDoc, '# Plan\n\n## Execution Shape\n\nexecutionShape: one_shot\n', 'utf8');
