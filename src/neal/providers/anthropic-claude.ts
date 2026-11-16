@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import {
   query,
+  USAGE_LIMIT_ERROR_PREFIXES,
   type HookCallback,
   type Options,
   type SDKMessage,
@@ -138,6 +139,7 @@ type CollectedClaudeResult = {
   lastResult: SDKResultMessage | null;
   firstStructuredResult: SDKResultMessage | null;
   assistantText: string;
+  usageLimitResetsAt: number | null;
 };
 
 class ClaudeInactivityTimeoutError extends Error {
@@ -610,6 +612,7 @@ function createClaudeProviderError(args: {
   retryable?: boolean;
   cause?: unknown;
   subtype?: string | null;
+  resetsAt?: number | null;
 }) {
   const kind = args.kind ?? inferClaudeErrorKind(args.cause, args.message, 'provider_failed', args.subtype);
   return new NealProviderError({
@@ -618,6 +621,7 @@ function createClaudeProviderError(args: {
     role: args.role,
     sessionHandle: args.sessionHandle,
     kind,
+    resetsAt: args.resetsAt,
     retryable: args.retryable ?? isRetryableClaudeError(kind),
     cause: args.cause,
   });
@@ -643,6 +647,7 @@ function normalizeClaudeProviderError(
       sessionHandle: args.sessionHandle,
       kind: error.kind,
       retryable: error.retryable,
+      resetsAt: error.resetsAt,
       cause: error,
     });
   }
@@ -666,6 +671,8 @@ async function emitClaudeProviderError(events: ProviderEventSink | undefined, er
     sessionHandle: error.sessionHandle,
     message: error.message,
     errorKind: error.kind,
+    resetsAt: error.resetsAt,
+    retryable: error.retryable,
   });
 }
 
@@ -692,6 +699,7 @@ async function collectClaudeResult(
   let sessionHandle: string | null = null;
   let lastResult: SDKResultMessage | null = null;
   let firstStructuredResult: SDKResultMessage | null = null;
+  let usageLimitResetsAt: number | null = null;
   const logState: ClaudeLogState = {
     textBuffer: '',
     sawTextDelta: false,
@@ -710,6 +718,10 @@ async function collectClaudeResult(
       // no manual iterator.return() is needed (mirroring the Codex adapter).
       next = await nextWithTimeout(iterator.next(), inactivityTimeoutMs, label, () => abortController?.abort());
     } catch (error) {
+      const usageLimit = getClaudeUsageLimitError({ lastResult, sessionHandle, usageLimitResetsAt }, role);
+      // Keep the result when the SDK follows it with process-exit noise.
+      // Callers adopt the primary session before classifying the result.
+      if (usageLimit) break;
       throw normalizeClaudeProviderError(error, {
         role,
         sessionHandle,
@@ -720,6 +732,12 @@ async function collectClaudeResult(
     }
 
     const message = next.value;
+    if (message.type === 'rate_limit_event' && message.rate_limit_info.status === 'rejected') {
+      // CLI events use Unix seconds, as captured in anthropics/claude-code#41185:
+      // https://github.com/anthropics/claude-code/issues/41185
+      const seconds = message.rate_limit_info.resetsAt;
+      usageLimitResetsAt = typeof seconds === 'number' && Number.isFinite(seconds) ? seconds * 1000 : null;
+    }
     const previousSessionHandle = sessionHandle;
     sessionHandle = sessionHandle ?? message.session_id ?? null;
     if (!previousSessionHandle && sessionHandle) {
@@ -753,6 +771,7 @@ async function collectClaudeResult(
     sessionHandle,
     lastResult,
     firstStructuredResult,
+    usageLimitResetsAt,
     assistantText: assistantTexts.join('\n\n').trim(),
   };
 }
@@ -1007,6 +1026,25 @@ function getClaudeResultErrorMessage(result: SDKResultMessage | null) {
   }
 
   return null;
+}
+
+function getClaudeUsageLimitError(
+  result: Pick<CollectedClaudeResult, 'lastResult' | 'sessionHandle' | 'usageLimitResetsAt'>,
+  role: ProviderRole,
+  sessionHandle = result.sessionHandle,
+): NealProviderError | null {
+  const message = getClaudeResultErrorMessage(result.lastResult);
+  if (result.lastResult?.is_error !== true || !message ||
+      !USAGE_LIMIT_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix))) {
+    return null;
+  }
+  return createClaudeProviderError({
+    message,
+    role,
+    sessionHandle,
+    kind: 'usage_limit',
+    resetsAt: result.usageLimitResetsAt,
+  });
 }
 
 // Callers classifying SDK result messages must gate on `is_error` before
@@ -1330,6 +1368,8 @@ async function repairClaudeJsonBlockResponse<TStructured>(args: {
           'structured-advisor',
           repairAbortController,
         );
+        const usageLimit = getClaudeUsageLimitError(result, 'structured-advisor');
+        if (usageLimit) throw usageLimit;
         return {
           assistantText: getClaudeAssistantTextForLocalJson(result),
           sessionHandle: result.sessionHandle,
@@ -1487,6 +1527,8 @@ async function validateOrRepairClaudeJsonBlockResponse<TStructured>(args: {
           'structured-advisor',
           repairAbortController,
         );
+        const usageLimit = getClaudeUsageLimitError(result, 'structured-advisor');
+        if (usageLimit) throw usageLimit;
         return {
           assistantText: getClaudeAssistantTextForLocalJson(result),
           sessionHandle: result.sessionHandle,
@@ -1681,6 +1723,11 @@ async function runClaudeStructuredAdvisorRoundLoop<TStructured>(
     }
 
     sessionHandle = result.sessionHandle ?? sessionHandle;
+    const usageLimit = getClaudeUsageLimitError(result, 'structured-advisor', sessionHandle);
+    if (usageLimit) {
+      await emitClaudeProviderError(args.events, usageLimit, args.label);
+      throw usageLimit;
+    }
     const lastResult = result.lastResult;
     const subtype = lastResult?.subtype ?? null;
     const resultErrorMessage = getClaudeResultErrorMessage(lastResult);
@@ -2016,6 +2063,12 @@ async function runClaudeStructuredCoderPrompt<TStructured>(
             'coder',
             turnAbortController,
           );
+          const usageLimit = getClaudeUsageLimitError(result, 'coder', result.sessionHandle ?? sessionHandle);
+          if (usageLimit) {
+            sessionHandle = usageLimit.sessionHandle;
+            if (sessionHandle && sessionHandle !== args.resumeHandle) await args.onSessionStarted?.(sessionHandle);
+            throw usageLimit;
+          }
           throwIfRetryableTransientResult(result, args.label);
           sessionHandle = result.sessionHandle ?? sessionHandle;
           if (sessionHandle && sessionHandle !== args.resumeHandle) {
@@ -2037,6 +2090,8 @@ async function runClaudeStructuredCoderPrompt<TStructured>(
             'coder',
             repairAbortController,
           );
+          const usageLimit = getClaudeUsageLimitError(result, 'coder', sessionHandle);
+          if (usageLimit) throw usageLimit;
           throwIfRetryableTransientResult(result, `${args.label}:structured-json-repair`);
           return {
             assistantText: getClaudeAssistantTextForLocalJson(result),
@@ -2086,90 +2141,71 @@ async function runClaudeStructuredCoderPrompt<TStructured>(
   }
 }
 
-class AnthropicClaudeCoderAdapter implements CoderAdapter {
-  constructor(private readonly options: { model?: string | null; effort?: string | null } = {}) {}
+async function runClaudeCoderPrompt(
+  args: CoderRunPromptArgs,
+  defaultModel?: string | null,
+  defaultEffort?: string | null,
+  createStream: ClaudeCoderStreamFactory = buildClaudeCoderQueryStream,
+): Promise<CoderRunPromptResult> {
+  let sessionHandle: string | null = args.resumeHandle ?? null;
+  let result: CollectedClaudeResult;
+  try {
+    const turnAbortController = createClaudeTurnAbortController(args.signal);
+    const stream = createStream(
+      args,
+      defaultModel,
+      defaultEffort,
+      turnAbortController,
+    );
+    result = await collectClaudeResult(
+      stream,
+      args.cwd,
+      'coder',
+      args.inactivityTimeoutMs,
+      args.events,
+      'coder',
+      turnAbortController,
+    );
+    sessionHandle = result.sessionHandle ?? sessionHandle;
+  } catch (error) {
+    const providerError = normalizeClaudeProviderError(error, {
+      role: 'coder',
+      sessionHandle,
+    });
+    await emitClaudeProviderError(args.events, providerError, 'coder');
+    throw providerError;
+  }
 
-  async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
-    let sessionHandle: string | null = args.resumeHandle ?? null;
-    let result: CollectedClaudeResult;
-    try {
-      const turnAbortController = createClaudeTurnAbortController(args.signal);
-      const stream = buildClaudeCoderQueryStream(
-        args,
-        this.options.model,
-        this.options.effort ?? undefined,
-        turnAbortController,
-      );
-      result = await collectClaudeResult(
-        stream,
-        args.cwd,
-        'coder',
-        args.inactivityTimeoutMs,
-        args.events,
-        'coder',
-        turnAbortController,
-      );
-      sessionHandle = result.sessionHandle ?? sessionHandle;
-    } catch (error) {
-      const providerError = normalizeClaudeProviderError(error, {
-        role: 'coder',
-        sessionHandle,
-      });
-      await emitClaudeProviderError(args.events, providerError, 'coder');
-      throw providerError;
-    }
+  if (sessionHandle && sessionHandle !== args.resumeHandle) {
+    await args.onSessionStarted?.(sessionHandle);
+  }
 
-    if (sessionHandle && sessionHandle !== args.resumeHandle) {
-      await args.onSessionStarted?.(sessionHandle);
-    }
+  const usageLimit = getClaudeUsageLimitError(result, 'coder', sessionHandle);
+  if (usageLimit) {
+    await emitClaudeProviderError(args.events, usageLimit, 'coder');
+    throw usageLimit;
+  }
+  const statusResult = args.outputSchema && result.firstStructuredResult ? result.firstStructuredResult : result.lastResult;
+  const subtype = statusResult?.subtype ?? null;
+  const resultErrorMessage = getClaudeResultErrorMessage(statusResult);
+  if (subtype && subtype !== 'success') {
+    const providerError = createClaudeProviderError({
+      message: resultErrorMessage
+        ? `Claude coder did not return a successful result (${subtype}): ${resultErrorMessage}`
+        : `Claude coder did not return a successful result (${subtype})`,
+      sessionHandle,
+      subtype,
+      role: 'coder',
+    });
+    await emitClaudeProviderError(args.events, providerError, 'coder');
+    throw providerError;
+  }
 
-    const statusResult = args.outputSchema && result.firstStructuredResult ? result.firstStructuredResult : result.lastResult;
-    const subtype = statusResult?.subtype ?? null;
-    const resultErrorMessage = getClaudeResultErrorMessage(statusResult);
-    if (subtype && subtype !== 'success') {
+  if (args.outputSchema) {
+    const structuredOutput = getPreferredStructuredOutput<unknown>(result);
+    if (structuredOutput === undefined) {
       const providerError = createClaudeProviderError({
-        message: resultErrorMessage
-          ? `Claude coder did not return a successful result (${subtype}): ${resultErrorMessage}`
-          : `Claude coder did not return a successful result (${subtype})`,
-        sessionHandle,
-        subtype,
-        role: 'coder',
-      });
-      await emitClaudeProviderError(args.events, providerError, 'coder');
-      throw providerError;
-    }
-
-    if (args.outputSchema) {
-      const structuredOutput = getPreferredStructuredOutput<unknown>(result);
-      if (structuredOutput === undefined) {
-        const providerError = createClaudeProviderError({
-          message: 'Claude coder did not return structured output',
-          role: 'coder',
-          sessionHandle,
-          kind: 'structured_output_missing',
-          subtype,
-        });
-        await emitClaudeProviderError(args.events, providerError, 'coder');
-        throw providerError;
-      }
-
-      await emitProviderEvent(args.events, {
-        type: 'structured_output_received',
-        provider: ANTHROPIC_CLAUDE_PROVIDER_ID,
-        role: 'coder',
-        label: 'coder',
-        sessionHandle,
-      });
-      return {
-        sessionHandle: sessionHandle,
-        finalResponse: JSON.stringify(structuredOutput),
-      };
-    }
-
-    const finalResponse = result.assistantText || getClaudeResultErrorMessage(result.lastResult) || '';
-    if (!finalResponse.trim()) {
-      const providerError = createClaudeProviderError({
-        message: 'Claude coder returned no final response',
+        message: 'Claude coder did not return structured output',
         role: 'coder',
         sessionHandle,
         kind: 'structured_output_missing',
@@ -2179,10 +2215,44 @@ class AnthropicClaudeCoderAdapter implements CoderAdapter {
       throw providerError;
     }
 
+    await emitProviderEvent(args.events, {
+      type: 'structured_output_received',
+      provider: ANTHROPIC_CLAUDE_PROVIDER_ID,
+      role: 'coder',
+      label: 'coder',
+      sessionHandle,
+    });
     return {
       sessionHandle: sessionHandle,
-      finalResponse,
+      finalResponse: JSON.stringify(structuredOutput),
     };
+  }
+
+  const finalResponse = result.assistantText || getClaudeResultErrorMessage(result.lastResult) || '';
+  if (!finalResponse.trim()) {
+    const providerError = createClaudeProviderError({
+      message: 'Claude coder returned no final response',
+      role: 'coder',
+      sessionHandle,
+      kind: 'structured_output_missing',
+      subtype,
+    });
+    await emitClaudeProviderError(args.events, providerError, 'coder');
+    throw providerError;
+  }
+
+  return {
+    sessionHandle: sessionHandle,
+    finalResponse,
+  };
+}
+
+
+class AnthropicClaudeCoderAdapter implements CoderAdapter {
+  constructor(private readonly options: { model?: string | null; effort?: string | null } = {}) {}
+
+  async runPrompt(args: CoderRunPromptArgs): Promise<CoderRunPromptResult> {
+    return runClaudeCoderPrompt(args, this.options.model, this.options.effort);
   }
 
   async runStructuredPrompt<TStructured>(
@@ -2261,5 +2331,6 @@ export const anthropicClaudeProviderTestHooks = {
   THINKING_PROGRESS_EMIT_INTERVAL_MS,
   runClaudeJsonBlockStructuredAdvisorRound,
   runClaudeStructuredCoderPrompt,
+  runClaudeCoderPrompt,
   runClaudeStructuredAdvisorRound,
 };

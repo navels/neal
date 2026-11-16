@@ -526,3 +526,15 @@ test('review diagnostics route full reviewer detail away from default terminal o
     resetDiagnosticStateForTests();
   }
 });
+
+test('narrator announces each usage-limit wait and the interrupt/resume command', () => {
+  const lines: string[] = [];
+  const narrator = createTerminalNarrator({ write: (line) => { lines.push(line); } });
+  const line = '[neal] PLAN.md: openai-codex usage limit reached; waiting until 3:42 PM, then resuming';
+  narrator.waitForUsageLimit(line, 'neal resume --run test-run');
+  narrator.waitForUsageLimit(line, 'neal resume --run test-run');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /Ctrl-C stops the wait; resume later with neal resume --run test-run/);
+  assert.ok(lines[0].startsWith(line));
+  assert.doesNotMatch(lines[0], /Run failed/);
+});

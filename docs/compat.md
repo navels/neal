@@ -191,6 +191,10 @@ operator notifier for its child runs (it sets the defined-but-empty
 `NEAL_NOTIFY_BIN` override at startup), so a blocked fixture run never pings
 the operator's configured notify helper mid-matrix.
 
+Compat writer runs never wait for usage-limit resets. They fail immediately,
+even when the provider reports a near reset, so qualification cannot pause
+for hours inside the matrix.
+
 ## Failure-mode taxonomy
 
 Each FAIL records a mode derived from **structural run state**

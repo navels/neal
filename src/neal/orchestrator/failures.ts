@@ -1,6 +1,7 @@
 import type { CoderRoundError } from '../agents.js';
 import type { RunLogger } from '../logger.js';
 import type { OrchestrationState } from '../types.js';
+import { getUsageLimitError } from '../usage-limits.js';
 import { notifyBlocked } from './notifications.js';
 
 // Shared, durable blocked reason for a reviewer content-safety refusal
@@ -45,6 +46,7 @@ export function isCoderFreshSessionRetryableError(error: CoderRoundError) {
 const FAILURE_NOTIFICATION_MAX_CHARS = 300;
 
 export async function notifyRunFailure(state: OrchestrationState, error: unknown, logger?: RunLogger) {
+  if (getUsageLimitError(error)) return;
   await notifyBlocked(state, error instanceof Error ? error.message : String(error), logger, {
     maxMessageChars: FAILURE_NOTIFICATION_MAX_CHARS,
   });

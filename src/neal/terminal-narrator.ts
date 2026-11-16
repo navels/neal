@@ -29,6 +29,7 @@ type TerminalNarratorOptions = {
 };
 
 export type TerminalNarrator = {
+  waitForUsageLimit: (line: string, resumeCommand: string) => void;
   start: (state: OrchestrationState) => Promise<void>;
   observe: (state: OrchestrationState) => Promise<void>;
 };
@@ -98,6 +99,9 @@ export function createTerminalNarrator(options: TerminalNarratorOptions = {}): T
   }
 
   return {
+    waitForUsageLimit(line, resumeCommand) {
+      write(`${line}\nCtrl-C stops the wait; resume later with ${resumeCommand}\n`, options.logger);
+    },
     async start(state) {
       await observeState(state, true);
     },

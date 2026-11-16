@@ -147,6 +147,28 @@ function truncateCodexStreamParseFailureMessage(message: string) {
   return `${message.slice(0, CODEX_STREAM_PARSE_FAILURE_MESSAGE_LIMIT)}… (${omitted} more characters omitted)`;
 }
 
+function isCodexUsageLimitMessage(message: string) {
+  return /you['’]ve hit your usage limit|usage limit reached|out of credits|spend cap reached/i.test(message);
+}
+
+// Codex formats local wall time, including a date only for another day.
+// Reject invalid dates rather than letting Date normalize them into a new day.
+export function parseCodexUsageLimitReset(message: string, now = new Date()): number | null {
+  const match = /try again at (?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2})(?:st|nd|rd|th)?, (\d{4}) )?(\d{1,2}):(\d{2}) (AM|PM)(?=\.|$|\s)/i.exec(message);
+  if (!match) return null;
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const year = match[3] ? Number(match[3]) : now.getFullYear();
+  const month = match[1] ? months.indexOf(match[1].toLowerCase()) : now.getMonth();
+  const day = match[2] ? Number(match[2]) : now.getDate();
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  if (hour < 1 || hour > 12 || minute > 59) return null;
+  const localHour = hour % 12 + (match[6].toLowerCase() === 'pm' ? 12 : 0);
+  const date = new Date(year, month, day, localHour, minute);
+  return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day &&
+    date.getHours() === localHour && date.getMinutes() === minute ? date.getTime() : null;
+}
+
 function inferCodexErrorKind(error: unknown, message: string, fallback: NealProviderErrorKind): NealProviderErrorKind {
   // Checked first: the message embeds a raw stream line whose content could
   // match any of the keyword heuristics below (and the line can be large, so
@@ -158,6 +180,9 @@ function inferCodexErrorKind(error: unknown, message: string, fallback: NealProv
     return 'timeout';
   }
   const text = message.toLowerCase();
+  if (isCodexUsageLimitMessage(message)) {
+    return 'usage_limit';
+  }
   // Placed before the permission check so a content-safety refusal is never
   // misread as permission_denied when OpenAI phrases it with the word
   // "authorized".
@@ -207,6 +232,7 @@ function createCodexProviderError(args: {
   sessionHandle?: string | null;
   kind?: NealProviderErrorKind;
   retryable?: boolean;
+  resetsAt?: number | null;
   cause?: unknown;
 }) {
   const kind = args.kind ?? inferCodexErrorKind(args.cause, args.message, 'provider_failed');
@@ -219,6 +245,7 @@ function createCodexProviderError(args: {
     role: args.role,
     sessionHandle: args.sessionHandle,
     kind,
+    resetsAt: args.resetsAt !== undefined ? args.resetsAt : kind === 'usage_limit' ? parseCodexUsageLimitReset(args.message) : null,
     retryable: args.retryable ?? isRetryableCodexError(kind, args.message),
     cause: args.cause,
   });
@@ -303,6 +330,7 @@ function normalizeCodexProviderError(
       sessionHandle: args.sessionHandle,
       kind: error.kind,
       retryable: error.retryable,
+      resetsAt: error.resetsAt,
       cause: error,
     });
   }
@@ -853,6 +881,8 @@ class OpenAICodexCoderAdapter implements CoderAdapter {
         sessionHandle: providerError.sessionHandle,
         message: providerError.message,
         errorKind: providerError.kind,
+        resetsAt: providerError.resetsAt,
+        retryable: providerError.retryable,
       });
       throw providerError;
     }
@@ -1004,6 +1034,8 @@ class OpenAICodexCoderAdapter implements CoderAdapter {
           sessionHandle: providerError.sessionHandle,
           message: providerError.message,
           errorKind: providerError.kind,
+          resetsAt: providerError.resetsAt,
+          retryable: providerError.retryable,
         });
         throw providerError;
       }
@@ -1196,6 +1228,8 @@ class OpenAICodexStructuredAdvisorAdapter implements StructuredAdvisorAdapter {
           sessionHandle: providerError.sessionHandle,
           message: providerError.message,
           errorKind: providerError.kind,
+          resetsAt: providerError.resetsAt,
+          retryable: providerError.retryable,
         });
         throw providerError;
       }

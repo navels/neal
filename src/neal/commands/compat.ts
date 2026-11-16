@@ -525,7 +525,7 @@ export async function runWriterFixture(options: CompatWriterRunOptions): Promise
     const realStdoutWrite = process.stdout.write.bind(process.stdout);
     process.stdout.write = (() => true) as typeof process.stdout.write;
     try {
-      const result = await executeRun(loaded.state, loaded.statePath, loaded.logger);
+      const result = await executeRun(loaded.state, loaded.statePath, loaded.logger, { waitForUsageLimit: false });
       finalStatus = result.finalState.status;
       finalState = result.finalState;
     } catch (error) {

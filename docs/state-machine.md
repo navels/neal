@@ -199,6 +199,22 @@ continuation still belongs to `continuePlanAndExecuteQueueFromChildRun` after
 the resumed child run finishes. Selecting a child run for resume does not
 advance or repair the parent queue by itself.
 
+## Usage-limit waits
+
+A provider `usage_limit` failure stays `status: 'failed'` on disk. When the
+reported reset plus a 60-second buffer is within six hours, `executeRun`
+holds the writer lock, records `run.usage_limit_wait_started`, notifies once,
+and waits. It records `run.usage_limit_wait_finished` before calling
+`loadRunForResume` and dispatching the existing phase again. No new persisted
+status, state field, or resume action is involved.
+
+Status derives `waiting_for_usage_limit` only from an unfinished wait and a
+live same-run lock. A stopped process leaves an ordinary failed run that
+`neal resume` can recover. SIGINT and SIGTERM release the lock through the
+existing writer cleanup. Three consecutive waits without a persisted phase,
+scope number, or review-round change exhaust the wait budget; progress resets
+that in-process counter. Missing, past, or distant resets fail immediately.
+
 ## Derived plans
 
 Derived-plan fields are child-run state because they describe replacement execution for the active child run, not the parent queue. The invariant layer enforces these ownership rules:

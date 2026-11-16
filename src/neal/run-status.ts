@@ -4,7 +4,7 @@ import {
   hasPendingOperatorGuidance as hasPendingOperatorGuidanceFromStateView,
 } from './state-views.js';
 
-export type EffectiveRunStatus = OrchestrationState['status'] | 'waiting_for_operator' | 'waiting_for_manual_gate';
+export type EffectiveRunStatus = OrchestrationState['status'] | 'waiting_for_operator' | 'waiting_for_manual_gate' | 'waiting_for_usage_limit';
 
 export type RunDisplayStatus = {
   effectiveStatus: EffectiveRunStatus;

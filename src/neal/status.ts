@@ -28,6 +28,7 @@ import { largestSectionNameFromInputTooLargeMessage } from './providers/input-bu
 import type { NealProviderErrorKind, ProviderRole } from './providers/types.js';
 import type { SquashResultArtifact } from './squash.js';
 import type { OrchestrationState, PlanReviewFindingClass, ResidualReviewDebtItem } from './types.js';
+import { formatUsageLimitWaitingReason } from './usage-limits.js';
 import { getNealBuildMetadata, type NealBuildMetadata } from './version.js';
 
 export { formatPublicPhase } from './phase-display.js';
@@ -40,6 +41,7 @@ export type NealHealthClassification =
   | 'timed_out'
   | 'blocked'
   | 'paused'
+  | 'waiting_for_usage_limit'
   | 'unknown';
 
 export type NealStatusSnapshot = {
@@ -197,6 +199,7 @@ export type NealProviderErrorStatusSummary = {
   kind: NealProviderErrorKind | null;
   message: string;
   retryable: boolean | null;
+  resetsAt: string | null;
   diagnostic: Record<string, unknown> | null;
 };
 
@@ -295,6 +298,7 @@ const PROVIDER_ERROR_KINDS = new Set<NealProviderErrorKind>([
   'timeout',
   'no_progress_timeout',
   'api_error',
+  'usage_limit',
   'structured_output_missing',
   'structured_output_invalid',
   'permission_denied',
@@ -337,6 +341,8 @@ const MEANINGFUL_EVENT_TYPES = new Set([
   'phase.complete',
   'phase.retry',
   'run.paused_after_scope',
+  'run.usage_limit_wait_started',
+  'run.usage_limit_wait_finished',
 ]);
 const STATUS_INTERNAL_EVENT_TYPES = new Set(['narrative.updated']);
 
@@ -363,6 +369,9 @@ export async function buildStatusSnapshot(args: {
   });
   const blocker = summarizeBlocker(state, tail.events, invalidDerivedPlanPayloadPath, blockedGuidance);
   const lock = await inspectActiveRunLock(state.cwd, runId);
+  const usageLimitWait = state.status === 'failed' && lock.kind === 'live_same_run'
+    ? summarizeUsageLimitWait(tail.events) : null;
+  if (usageLimitWait) displayStatus.effectiveStatus = 'waiting_for_usage_limit';
   const finalCompletionStaleness = classifyFinalCompletionStaleness({
     state,
     events: tail.events,
@@ -383,11 +392,11 @@ export async function buildStatusSnapshot(args: {
     ? getPlanAndExecuteQueueSummaryPath(state.cwd, queue.queueId)
     : null;
   const manualGate = summarizeManualGate(state, runId);
-  const health = classifyHealth(state, eventSummary, nowMs, finalCompletionStaleness);
+  const health = classifyHealth(state, eventSummary, nowMs, finalCompletionStaleness, usageLimitWait);
   const publicStatus = formatPublicStatusForDisplayStatus(displayStatus, health);
   const publicPhase = formatPublicPhase(state.phase);
   const providerError = summarizeProviderError(tail.events);
-  const nextAction = formatNextAction({
+  const nextAction = usageLimitWait ?? formatNextAction({
     manualGate,
     resumeDecision,
     finalCompletionStaleness,
@@ -600,6 +609,7 @@ export function renderHumanStatusSnapshot(snapshot: NealStatusSnapshot): string 
     const provider = snapshot.providerError.provider ?? 'unclassified';
     const kind = snapshot.providerError.kind ?? 'unclassified';
     lines.push(`- Provider error: ${provider} ${kind} - ${snapshot.providerError.message}`);
+    if (snapshot.providerError.resetsAt) lines.push(`- Provider reset: ${snapshot.providerError.resetsAt}`);
   }
 
   lines.push(
@@ -1308,6 +1318,7 @@ function classifyHealth(
   events: ReturnType<typeof summarizeEvents>,
   nowMs: number,
   finalCompletionStaleness: NealFinalCompletionStalenessSummary,
+  usageLimitWait: string | null,
 ): NealStatusSnapshot['health'] {
   const phaseStartMs = getPhaseStartMs(state, events);
   const phaseElapsedMs = phaseStartMs === null ? null : Math.max(0, nowMs - phaseStartMs);
@@ -1321,6 +1332,8 @@ function classifyHealth(
     heartbeatOnly,
     reason,
   });
+
+  if (usageLimitWait) return makeHealth('waiting_for_usage_limit', usageLimitWait);
 
   if (isBlockedState(state)) {
     return makeHealth('blocked', 'state is blocked or failed');
@@ -1568,6 +1581,24 @@ function isProviderErrorActive(events: ParsedEvent[]): boolean {
   return false;
 }
 
+function isoTimestampValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+function summarizeUsageLimitWait(events: ParsedEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.type === 'run.usage_limit_wait_finished' || event.type === 'run.resumed' || event.type === 'phase.start') return null;
+    if (event.type !== 'run.usage_limit_wait_started') continue;
+    const resetsAt = isoTimestampValue(event.data.resetsAt);
+    const wakeAt = isoTimestampValue(event.data.wakeAt);
+    return resetsAt && wakeAt ? formatUsageLimitWaitingReason(resetsAt, wakeAt) : null;
+  }
+  return null;
+}
+
 function summarizeProviderError(events: ParsedEvent[]): NealProviderErrorStatusSummary | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -1584,6 +1615,7 @@ function summarizeProviderError(events: ParsedEvent[]): NealProviderErrorStatusS
       kind: providerErrorKindValue(event.data.errorKind),
       message: truncateStatusMessage(stringValue(event.data.message) ?? 'Provider failed.'),
       retryable: typeof event.data.retryable === 'boolean' ? event.data.retryable : null,
+      resetsAt: isoTimestampValue(event.data.resetsAt),
       diagnostic: providerErrorDiagnosticValue(event.data.providerData),
     };
   }
@@ -1603,6 +1635,7 @@ function summarizeProviderError(events: ParsedEvent[]): NealProviderErrorStatusS
       kind: null,
       message: truncateStatusMessage(stringValue(event.data.message) ?? 'Run phase failed.'),
       retryable: null,
+      resetsAt: null,
       diagnostic: null,
     };
   }

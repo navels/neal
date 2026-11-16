@@ -616,3 +616,17 @@ A `blocked` notification is also sent when a provider failure ends the run, incl
 `NEAL_NOTIFY_BIN` overrides the configured command. Set it to another path to use that command, or set it to an empty value to disable notifications for the process. Notification command failures never fail or change the result of a run.
 
 `neal check` reports the resolved notification command and, in an interactive terminal, can send a test notification after confirmation.
+
+### Usage limits
+
+When Claude or Codex reports a future usage reset within six hours (including a
+60-second buffer), neal waits and resumes automatically. There isn't a flag or
+config key. It sends one notification per stop:
+`[neal] <plan>: <provider> usage limit reached; waiting until <local time>, then resuming`.
+After three waits without a phase, scope, or review-round change, neal stops.
+Unknown, past, or more distant resets fail immediately with a notification.
+
+During a wait, `neal status` reports `waiting_for_usage_limit`. The writer keeps
+its lock and the saved run stays `failed`. Ctrl-C stops the wait; use
+`neal resume --run <id>` later. Weekly limits outside the cap and billing
+exhaustion need operator action. `neal compat` never waits.

@@ -30,7 +30,8 @@ The stable JSON classification fields are:
   timeouts, and stale or live writer-lock evidence.
 - `providerError` for the latest provider or phase failure. Provider failures
   expose provider id, role, label, session handle, normalized kind, bounded
-  message, retryability, and timestamp without raw provider payloads.
+  message, retryability, timestamp, and `resetsAt` (ISO timestamp or `null`)
+  without raw provider payloads.
 - `commits`, `squash`, and `patch` for patch selection. `patch` includes the
   default-submission decision, reason, base/head/range, source, commit count,
   changed-file count, changed files, and unavailable reason.
@@ -65,3 +66,15 @@ after termination and record the wrapper timeout as the primary classification.
 Status JSON stays readable for interrupted runs and includes `lock.kind`, so a
 wrapper can distinguish a cleaned-up timeout (`none`) from a still-active or
 stale writer lock.
+
+Writer commands can wait up to six hours per provider-reported usage reset,
+including a 60-second buffer, before resuming through the normal resume path.
+At most three consecutive waits are allowed without a phase, scope, or round
+change. Unknown, past, or more distant resets fail with exit code `3`.
+
+During a live wait, raw `status` remains `failed`, while `effectiveStatus`,
+`publicStatus`, and `health.classification` are `waiting_for_usage_limit`.
+`nextAction` says neal will resume automatically. This derived status requires
+an unfinished wait event and a live writer lock for that run. Harness
+wall-clock timeouts still apply. A run killed mid-wait is an ordinary failed,
+resumable run, with no new persisted state or special recovery command.

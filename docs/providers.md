@@ -411,6 +411,7 @@ Normalized error kinds are:
 - `no_progress_timeout` (emitted by neal's turn liveness supervisor, not by
   adapters, as described under Turn liveness above)
 - `api_error`
+- `usage_limit` (non-retryable within a provider round; optional reset time)
 - `structured_output_missing`
 - `structured_output_invalid`
 - `permission_denied`
@@ -425,16 +426,35 @@ Normalized error kinds are:
 - `unknown`
 
 Each normalized error carries the provider id, role, optional session handle,
-kind, retryability, and cause. Round code wraps normalized provider errors into
-round-level failures only when it needs round-specific context.
+kind, retryability, optional `resetsAt` (epoch milliseconds), and cause. Round
+code wraps normalized provider errors into round-level failures only when it
+needs round-specific context.
+
+Usage-limit classification runs before transient-error checks:
+
+- Claude matches the SDK's `USAGE_LIMIT_ERROR_PREFIXES` against an error
+  result's raw message. It takes the reset from the latest rejected
+  `rate_limit_event`, converting CLI epoch seconds to milliseconds. Successful
+  output that discusses limits isn't classified as a failure.
+- Codex recognizes usage-limit, out-of-credits, and spend-cap failures. It
+  parses `try again at 3:42 PM.` and `try again at Nov 16th, 2026 3:42 PM.`
+  as local time. Missing or unparseable times produce `null`.
+- OpenAI-compatible HTTP 429 errors with code or type `insufficient_quota`
+  report `usage_limit` with no reset. Ordinary 429s remain transient
+  `api_error` failures.
+
+The command runtime owns waiting and notification, then uses the ordinary
+resume path. Adapters never wait for a usage reset or spend API retry budget
+on it.
 
 ## Status-visible errors
 
 Provider failures are visible to automation through `neal status --json` and
 `neal status --json --all` as `providerError`. neal derives that summary from
 the latest `provider.provider_error` event when present, including timestamp,
-provider id, role, label, session handle, normalized kind, bounded message, and
-retryability. If a run failed before a provider event was available, status may
+provider id, role, label, session handle, normalized kind, bounded message,
+`resetsAt` (ISO timestamp or `null`), and retryability. If a run failed before a
+provider event was available, status may
 fall back to the latest `phase.error` as an unclassified run error with
 `provider`, `role`, and `kind` set to `null`.
 

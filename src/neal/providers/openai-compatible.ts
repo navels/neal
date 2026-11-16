@@ -504,6 +504,21 @@ function providerErrorData(error: NealProviderError): Record<string, unknown> {
   };
 }
 
+function isInsufficientQuota(error: object) {
+  const data = readErrorProperty(error, 'data');
+  const responseBody = readErrorProperty(error, 'responseBody');
+  let body: unknown = data;
+  if (typeof responseBody === 'string') {
+    try { body = JSON.parse(responseBody); } catch { /* Fall back to SDK data. */ }
+  }
+  if (typeof body !== 'object' || body === null) return false;
+  const detail = 'error' in body ? body.error : body;
+  return typeof detail === 'object' && detail !== null && (
+    ('code' in detail && detail.code === 'insufficient_quota') ||
+    ('type' in detail && detail.type === 'insufficient_quota')
+  );
+}
+
 /**
  * Normalizes any thrown value into a NealProviderError with the same
  * classification table as the bespoke openai-compatible adapter plus the
@@ -514,6 +529,7 @@ function providerErrorData(error: NealProviderError): Record<string, unknown> {
  * - abort without a caller abort -> inactivity expiry -> `timeout`,
  *   retryable: true;
  * - HTTP 401/403 -> `permission_denied`, non-retryable;
+ * - HTTP 429 insufficient_quota -> `usage_limit`, non-retryable;
  * - HTTP 408/429/5xx, explicit isRetryable, network codes -> `api_error`,
  *   retryable;
  * - everything else -> `provider_failed`, non-retryable.
@@ -577,6 +593,16 @@ function normalizeOpenAICompatibleError(
         role: ctx.role,
         sessionHandle: ctx.sessionHandle,
         kind: 'permission_denied',
+        retryable: false,
+        cause: error,
+      });
+    }
+    if (status === 429 && isInsufficientQuota(error)) {
+      return createOpenAICompatibleProviderError({
+        message: `openai-compatible ${ctx.label} usage limit reached: ${describeError(error)}`,
+        role: ctx.role,
+        sessionHandle: ctx.sessionHandle,
+        kind: 'usage_limit',
         retryable: false,
         cause: error,
       });
@@ -1773,6 +1799,8 @@ class OpenAICompatibleCoderAdapter implements CoderAdapter {
       sessionHandle: providerError.sessionHandle ?? ctx.sessionHandle,
       message: providerError.message,
       errorKind: providerError.kind,
+      resetsAt: providerError.resetsAt,
+      retryable: providerError.retryable,
       providerData: providerErrorData(providerError),
     });
     return providerError;
@@ -1942,6 +1970,8 @@ class OpenAICompatibleStructuredAdvisorAdapter implements StructuredAdvisorAdapt
         sessionHandle: providerError.sessionHandle ?? sessionHandle,
         message: providerError.message,
         errorKind: providerError.kind,
+      resetsAt: providerError.resetsAt,
+      retryable: providerError.retryable,
         providerData: providerErrorData(providerError),
       });
       // Strip the events-only handle before throwing: the final-completion

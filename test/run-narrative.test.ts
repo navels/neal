@@ -113,6 +113,7 @@ test('buildRunNarrativeSummary adds benchmark trace fields from supplied status 
       kind: 'api_error',
       message: 'model capacity reached',
       retryable: true,
+      resetsAt: null,
       diagnostic: null,
     },
     build: {

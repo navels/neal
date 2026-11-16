@@ -2148,3 +2148,66 @@ test('Codex oversized repair prompt creates no repair thread and surfaces one in
   assert.equal(errors[0].errorKind, 'input_too_large');
   assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
 });
+
+for (const message of [
+  "You've hit your usage limit. Try again at 3:42 PM.",
+  "You've hit your usage limit. To get more access now, send a request to your admin",
+  'Your workspace is out of credits',
+  'Spend cap reached',
+  'Usage limit reached',
+]) {
+  test(`Codex usage limit does not retry: ${message}`, async () => {
+    const fake = fakeStructuredAdvisorThreadFactory([{ id: 'limited', errorMessage: message }]);
+    const adapter = openAICodexProviderTestHooks.createStructuredAdvisorAdapterWithThreadFactory(fake.createThread);
+    const events: ProviderRuntimeEvent[] = [];
+    await assert.rejects(() => adapter.runStructuredRound({
+      label: 'review', cwd: process.cwd(), prompt: 'review', schema: buildReviewerSchema(),
+      inactivityTimeoutMs: 600_000, apiRetryLimit: 3, structuredJsonProtocol: reviewerProtocol(),
+      events: (event) => { events.push(event); },
+    }), (error: unknown) => {
+      assert.ok(error instanceof NealProviderError);
+      assert.equal(error.kind, 'usage_limit');
+      assert.equal(error.retryable, false);
+      if (!message.includes('3:42')) assert.equal(error.resetsAt, null);
+      return true;
+    });
+    assert.equal(fake.calls.length, 1);
+    assert.equal(events.some((event) => event.type === 'tool_progress' && event.toolName === 'api_retry'), false);
+  });
+}
+
+test('Codex reset parsing handles local same-day and dated times without inventing a reset', async () => {
+  const { parseCodexUsageLimitReset } = await import('../src/neal/providers/openai-codex.js');
+  const now = new Date(2026, 10, 15, 9);
+  for (const text of ['try again at 3:42 PM.', 'TRY AGAIN AT 3:42 pm.']) {
+    assert.equal(parseCodexUsageLimitReset(text, now), new Date(2026, 10, 15, 15, 42).getTime());
+  }
+  for (const day of ['16th', '16']) {
+    assert.equal(parseCodexUsageLimitReset(`try again at Nov ${day}, 2026 3:42 PM.`, now), new Date(2026, 10, 16, 15, 42).getTime());
+  }
+  assert.equal(parseCodexUsageLimitReset('try again at 12:00 AM.', now), new Date(2026, 10, 15).getTime());
+  for (const text of ['try again later', 'try again at 25:01 PM.', 'try again at Feb 31st, 2026 3:42 PM.', 'try again at 3:99 PM.']) {
+    assert.equal(parseCodexUsageLimitReset(text, now), null);
+  }
+});
+
+test('Codex structured coder preserves the usage-limit reset and session without retrying', async () => {
+  const fake = fakeStructuredAdvisorThreadFactory([{ id: 'limited-coder', errorMessage: "You've hit your usage limit. Try again at Nov 16th, 2026 3:42 PM." }]);
+  const adapter = openAICodexProviderTestHooks.createCoderAdapterWithThreadFactory(fake.createThread);
+  const logger = new FakeLogger();
+  const events = createProviderTelemetrySink({ logger: logger.asRunLogger(), provider: 'openai-codex', role: 'coder', cwd: process.cwd() });
+  await assert.rejects(() => adapter.runStructuredPrompt({
+    cwd: process.cwd(), prompt: 'implement', label: 'Coder scope round',
+    schema: coderProtocol().schema as Record<string, unknown>,
+    structuredJsonProtocol: coderProtocol(), inactivityTimeoutMs: 600_000, apiRetryLimit: 3, events,
+  }), (error: unknown) => {
+    assert.ok(error instanceof NealProviderError);
+    assert.equal(error.kind, 'usage_limit');
+    assert.equal(error.sessionHandle, 'limited-coder');
+    assert.equal(error.resetsAt, new Date(2026, 10, 16, 15, 42).getTime());
+    return true;
+  });
+  assert.equal(fake.calls.length, 1);
+  const failure = logger.events.filter((event) => event.type === 'provider.provider_error').at(-1);
+  assert.equal(failure?.data?.resetsAt, new Date(2026, 10, 16, 15, 42).toISOString());
+});
