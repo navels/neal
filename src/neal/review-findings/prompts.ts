@@ -1,3 +1,4 @@
+import { getRangeDiffArtifactLines } from '../prompts/review-doctrine.js';
 import type { ReviewFindingsContext, ReviewFindingsDraft } from './types.js';
 
 const DIFF_PREVIEW_LIMIT = 12000;
@@ -24,51 +25,12 @@ export const REVIEW_FINDINGS_READ_ONLY_RULES = [
   'Produce findings only; do not perform repair work.',
 ];
 
-/**
- * Read-only range-inspection section appended to the adjudication prompt for
- * reviewers with read tool access but no shell (the 'read-only' doctrine
- * access mode). The base adjudication prompt previews at most
- * DIFF_PREVIEW_LIMIT characters of the resolved-range diff; a read-only
- * reviewer cannot run git commands, so the read-only git_diff tool is its
- * only source of truth for what the range actually changed (deletions and
- * renames included). The section names the exact resolved revisions so the
- * reviewer does not have to parse them back out of the context summary, and
- * only claims the preview is truncated when it actually is.
- */
-export function buildReviewFindingsReadOnlyInspectionSection(context: ReviewFindingsContext) {
-  const previewTruncated = context.diff.trim() !== '' && context.diff.length > DIFF_PREVIEW_LIMIT;
-  const sourceOfTruthLine = previewTruncated
-    ? 'You have read-only repository tools: read_file, list_dir, grep, and git_diff. The diff preview above is truncated; the git_diff tool is the source of truth for what the resolved range actually changed, including deletions and renames that head-state file reads cannot reveal.'
-    : 'You have read-only repository tools: read_file, list_dir, grep, and git_diff. The git_diff tool is the source of truth for what the resolved range actually changed, including deletions and renames that head-state file reads cannot reveal.';
+export function buildReviewFindingsRangeDiffSection(indexPath: string) {
   return [
-    '## Read-Only Range Inspection',
+    '## Selected-Range Diff Files',
     '',
-    sourceOfTruthLine,
-    `Before returning a verdict, inspect the resolved range with git_diff: first call git_diff with base ${context.externalBaseCommit}, head ${context.externalHeadCommit}, and stat:true for the changed-file overview, then request per-path diffs for the files the draft findings cite.`,
-    'Verify draft claims against the surrounding code with read_file and grep; absence from a diff hunk is not evidence of absence from the repository.',
-  ].join('\n');
-}
-
-/**
- * Inlined-diff section appended to the adjudication prompt for a read-only
- * reviewer that has read tools but no commit-range diff tool (native
- * Claude/Codex). The base adjudication prompt only previews at most
- * DIFF_PREVIEW_LIMIT characters of the resolved-range diff and such a reviewer
- * can neither run git commands nor call a git_diff tool, so Neal inlines the
- * full selected-range diff here as the source of truth and instructs only the
- * read tools the provider actually has. Reviewers that expose a commit-range
- * diff tool get buildReviewFindingsReadOnlyInspectionSection instead.
- */
-export function buildReviewFindingsInlinedDiffSection(context: ReviewFindingsContext) {
-  return [
-    '## Inlined Selected-Range Diff',
-    '',
-    'You have read-only repository access but no commit-range diff tool, so the full selected-range diff is inlined below. That access may be dedicated read and search tools, or a shell running in a read-only sandbox; if it is a shell, use it only to read files and search the tree, never to write.',
-    'This inlined diff is the source of truth for what the resolved range actually changed, including deletions and renames that head-state file reads cannot reveal.',
-    `Resolved range: ${context.externalBaseCommit}..${context.externalHeadCommit}.`,
+    ...getRangeDiffArtifactLines({ indexPath }),
     'Verify draft claims against the surrounding code with your read tools; absence from a diff hunk is not evidence of absence from the repository.',
-    '',
-    context.diff.trim() === '' ? '(empty diff)' : context.diff,
   ].join('\n');
 }
 
@@ -116,13 +78,18 @@ export function buildReviewFindingsDraftPrompt(
     '',
     '## Review Target',
     '',
-    renderContextSummary(context),
+    renderDraftContextSummary(context),
     '',
     'Return a summary, concrete findings, and warnings only. Each finding needs severity, files, claim, evidence, and requiredAction. Write the summary, every claim, evidence, requiredAction, and warning under the Plain Language rules above. Do not suggest that Neal applied fixes.',
   ].join('\n');
 }
 
-export function buildReviewFindingsReviewPrompt(context: ReviewFindingsContext, draft: ReviewFindingsDraft, round = 1) {
+export function buildReviewFindingsReviewPrompt(
+  context: ReviewFindingsContext,
+  draft: ReviewFindingsDraft,
+  rangeDiffIndexPath: string,
+  round = 1,
+) {
   return [
     '# Neal Review Findings Review',
     '',
@@ -143,6 +110,8 @@ export function buildReviewFindingsReviewPrompt(context: ReviewFindingsContext, 
     '## Review Target',
     '',
     renderContextSummary(context),
+    '',
+    buildReviewFindingsRangeDiffSection(rangeDiffIndexPath),
     '',
     '## Draft Findings',
     '',
@@ -167,6 +136,12 @@ function renderContextSummary(context: ReviewFindingsContext) {
     '',
     'Diff stat:',
     context.diffStat.trim() || '(none)',
+  ].join('\n');
+}
+
+function renderDraftContextSummary(context: ReviewFindingsContext) {
+  return [
+    renderContextSummary(context),
     '',
     'Diff preview:',
     renderDiffPreview(context.diff),

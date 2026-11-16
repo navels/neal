@@ -21,8 +21,6 @@ import type {
 } from '../src/neal/providers/types.js';
 import { createAgentReviewFindingsProviderAdapter } from '../src/neal/review-findings/provider.js';
 import {
-  buildReviewFindingsInlinedDiffSection,
-  buildReviewFindingsReadOnlyInspectionSection,
   buildReviewFindingsReviewPrompt,
 } from '../src/neal/review-findings/prompts.js';
 import type { ReviewFindingsContext, ReviewFindingsDraft } from '../src/neal/review-findings/types.js';
@@ -219,97 +217,29 @@ test('review-findings capability gate rejects a structured-output-capable review
   );
 });
 
-// A native read-only reviewer (read tools, no shell, no commit-range diff tool —
-// anthropic-claude/openai-codex) cannot run git commands or call a git_diff tool
-// and the base adjudication prompt only previews the diff, so the provider
-// adapter appends the inlined full selected-range diff and must not name a
-// git_diff tool — and must not inline the removed Neal review context.
-test('review-findings adjudication prompt reaching a native read-only structured advisor inlines the selected diff with no git_diff instruction', async () => {
-  const cwd = await createReviewFindingsCwd();
-  const captured = installCapturingStructuredAdvisor('anthropic-claude');
-  const { context, draft } = createReviewFindingsFixtures();
-  const provider = createAgentReviewFindingsProviderAdapter({
-    cwd,
-    agentConfig: agentConfig('anthropic-claude'),
+for (const reviewerProvider of ['anthropic-claude', 'openai-codex', 'openai-compatible']) {
+  test(`review-findings delivers the same file-only prompt to ${reviewerProvider}`, async () => {
+    const cwd = await createReviewFindingsCwd();
+    const captured = installCapturingStructuredAdvisor(reviewerProvider);
+    const { context, draft } = createReviewFindingsFixtures();
+    const provider = createAgentReviewFindingsProviderAdapter({
+      cwd,
+      agentConfig: agentConfig(reviewerProvider),
+    });
+    const indexPath = '.neal/reviews/capture/range-diff/index.md';
+    const builtPrompt = buildReviewFindingsReviewPrompt(context, draft, indexPath, 1);
+
+    const review = await provider.reviewDraft({ context, round: 1, draft, prompt: builtPrompt });
+
+    assert.equal(captured.length, 1);
+    const round = captured[0]!;
+    assert.equal(round.label, 'review-findings');
+    assert.equal(round.prompt, builtPrompt);
+    assert.ok(round.prompt.includes(indexPath));
+    assert.ok(round.prompt.includes(DRAFT_CLAIM_SENTINEL));
+    assert.ok(!round.prompt.includes(DIFF_SENTINEL));
+    assert.doesNotMatch(round.prompt, /Diff preview:|diff --git|git_diff|git diff/);
+    assert.doesNotMatch(round.prompt, /## Inlined Selected-Range Diff|## Read-Only Range Inspection/);
+    assert.equal(review.verdict, 'accepted');
   });
-  const builtPrompt = buildReviewFindingsReviewPrompt(context, draft, 1);
-
-  const review = await provider.reviewDraft({ context, round: 1, draft, prompt: builtPrompt });
-
-  assert.equal(captured.length, 1);
-  const round = captured[0]!;
-  assert.equal(round.label, 'review-findings');
-  const prompt = round.prompt;
-
-  // The appended section is exactly the exported inlined-diff builder over the
-  // same context, so the full selected diff is the source of truth.
-  assert.equal(prompt, `${builtPrompt}\n\n${buildReviewFindingsInlinedDiffSection(context)}`);
-  assert.match(prompt, /## Inlined Selected-Range Diff/);
-  assert.ok(prompt.includes(DIFF_SENTINEL), 'native read-only review-findings prompt should inline the selected diff');
-  assert.match(prompt, /no commit-range diff tool, so the full selected-range diff is inlined below/);
-
-  // No git_diff-tool instruction and no removed Neal inline-review-context framing.
-  assert.doesNotMatch(prompt, /git_diff/);
-  assert.doesNotMatch(prompt, /## Read-Only Range Inspection/);
-  assert.doesNotMatch(prompt, /## Inlined review context from Neal/);
-
-  assert.equal(review.verdict, 'accepted');
-});
-
-// A read-only reviewer with its own commit-range diff tool (openai-compatible)
-// cannot run git commands and the base adjudication prompt only previews the
-// diff, so the provider adapter must append the read-only range-inspection
-// section directing it to the git_diff tool with the exact resolved revisions —
-// and must not inline Neal context.
-test('review-findings adjudication prompt reaching a read-only structured advisor instructs git_diff range inspection with no inline sections', async () => {
-  const cwd = await createReviewFindingsCwd();
-  const captured = installCapturingStructuredAdvisor('openai-compatible');
-  const { context, draft } = createReviewFindingsFixtures();
-  const provider = createAgentReviewFindingsProviderAdapter({
-    cwd,
-    agentConfig: agentConfig('openai-compatible'),
-  });
-  const builtPrompt = buildReviewFindingsReviewPrompt(context, draft, 1);
-
-  const review = await provider.reviewDraft({ context, round: 1, draft, prompt: builtPrompt });
-
-  assert.equal(captured.length, 1);
-  const round = captured[0]!;
-  assert.equal(round.label, 'review-findings');
-  const prompt = round.prompt;
-
-  // The appended section is exactly the exported builder over the same
-  // context, so the resolved revisions are named verbatim.
-  assert.equal(prompt, `${builtPrompt}\n\n${buildReviewFindingsReadOnlyInspectionSection(context)}`);
-  // Assert the section header, the git_diff tool token, the resolved
-  // base/head revisions, and the stat:true option are named — not the verbatim
-  // inspection-instruction sentences.
-  assert.match(prompt, /## Read-Only Range Inspection/);
-  assert.match(prompt, /git_diff/);
-  assert.match(prompt, /base base123, head head456/);
-  assert.match(prompt, /stat:true/);
-  // The fixture diff fits inside the preview, so the section must not claim
-  // the preview was truncated.
-  assert.doesNotMatch(prompt, /diff preview above is truncated/);
-
-  // No Neal-inlined context on the read-only path.
-  assert.doesNotMatch(prompt, /## Inlined review context from Neal/);
-  assert.doesNotMatch(prompt, /Full selected diff for range/);
-  assert.doesNotMatch(prompt, /Draft findings artifact under adjudication/);
-
-  assert.equal(review.verdict, 'accepted');
-});
-
-test('read-only range-inspection section claims preview truncation only when the diff exceeds the preview limit', () => {
-  const { context } = createReviewFindingsFixtures();
-
-  const small = buildReviewFindingsReadOnlyInspectionSection(context);
-  assert.doesNotMatch(small, /diff preview above is truncated/);
-  assert.match(small, /git_diff tool is the source of truth/);
-
-  const large = buildReviewFindingsReadOnlyInspectionSection({
-    ...context,
-    diff: `diff --git a/big.ts b/big.ts\n${'+x\n'.repeat(8000)}`,
-  });
-  assert.match(large, /The diff preview above is truncated; the git_diff tool is the source of truth/);
-});
+}

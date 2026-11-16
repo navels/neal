@@ -10,10 +10,6 @@ import {
 } from '../config.js';
 import type { RunLogger } from '../logger.js';
 import { runCoderStructuredPrompt } from '../agents/structured-coder.js';
-import {
-  getReviewerDoctrineAccessMode,
-  readOnlyReviewerNeedsInlinedDiff,
-} from '../context/inline-review-context.js';
 import { runWithAgentTurnLiveness } from '../providers/liveness.js';
 import {
   assertProviderSupportsCoder,
@@ -22,10 +18,6 @@ import {
 } from '../providers/registry.js';
 import { createProviderTelemetrySink } from '../providers/telemetry.js';
 import type { StructuredJsonProtocolSpec } from '../providers/types.js';
-import {
-  buildReviewFindingsInlinedDiffSection,
-  buildReviewFindingsReadOnlyInspectionSection,
-} from './prompts.js';
 import type { AgentConfig } from '../types.js';
 import type {
   ReviewFindingItem,
@@ -91,22 +83,6 @@ class AgentReviewFindingsProviderAdapter implements ReviewFindingsProviderAdapte
   async reviewDraft(args: ReviewFindingsProviderReviewArgs): Promise<ReviewFindingsReview> {
     const reviewer = getStructuredAdvisorAdapter(this.args.agentConfig.reviewer);
     const schema = buildReviewFindingsReviewSchema();
-    // The base adjudication prompt only previews the diff. A read-only
-    // reviewer (read tools, no shell) that exposes its own commit-range diff
-    // tool gets the read-only range-inspection section directing it to the
-    // git_diff tool with the exact resolved revisions; a read-only reviewer
-    // without a commit-range diff tool (native Claude/Codex) instead gets the
-    // full selected diff inlined and no git_diff-tool instruction, because it
-    // can neither run git commands, call a git_diff tool, nor rely on the
-    // truncated preview. Tool-access reviewers keep the built prompt
-    // byte-identical.
-    const accessMode = getReviewerDoctrineAccessMode(this.args.agentConfig.reviewer);
-    const prompt =
-      accessMode === 'read-only'
-        ? readOnlyReviewerNeedsInlinedDiff(this.args.agentConfig.reviewer)
-          ? `${args.prompt}\n\n${buildReviewFindingsInlinedDiffSection(args.context)}`
-          : `${args.prompt}\n\n${buildReviewFindingsReadOnlyInspectionSection(args.context)}`
-        : args.prompt;
     const result = await runWithAgentTurnLiveness({
       provider: this.args.agentConfig.reviewer.provider,
       role: 'structured-advisor',
@@ -130,7 +106,7 @@ class AgentReviewFindingsProviderAdapter implements ReviewFindingsProviderAdapte
         reviewer.runStructuredRound<ReviewFindingsReview>({
           label: 'review-findings',
           cwd: this.args.cwd,
-          prompt,
+          prompt: args.prompt,
           schema,
           structuredJsonProtocol: buildReviewFindingsProtocolSpec({
             schemaLabel: 'review_findings_review_payload',

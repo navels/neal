@@ -25,8 +25,9 @@ finding-quality wording, and the two-way reviewer access mode
 (`tool-access` / `read-only`). It does not own schemas, provider
 selection, adjudication, or transition behavior. Its consumers are
 execute-scope review, plan review, and final completion review. The read-only
-`neal review` findings loop uses its own prompts in
-`src/neal/review-findings/prompts.ts`.
+`neal review` findings loop keeps its own prompts in
+`src/neal/review-findings/prompts.ts` and reuses the shared diff-artifact
+delivery wording.
 
 ## Ownership boundary
 
@@ -223,16 +224,14 @@ coder outputs are never mutated to satisfy a bound.
   `GIT_SUMMARY_SECTION_MAX_CHARS` (20,000 characters) via
   `truncateInlineSectionBody`.
 
-Every bound is a module constant, not configuration. Three sections are
+Every bound is a module constant, not configuration. Two sections are
 intentionally unbounded and rely on the provider input budget below as their
-backstop: the inlined plan text, the progress text, and the review-findings
-selected-range diff (`buildReviewFindingsInlinedDiffSection` in
-`src/neal/review-findings/prompts.ts` inlines the full resolved-range diff
-for read-only reviewers because it is the source of truth for what the range
-changed — only the separate draft-prompt preview is capped, at
-`DIFF_PREVIEW_LIMIT`). The `INLINE_SECTION_MAX_CHARS` cap applies to the
-inlined range-diff sections built through `truncateInlineSectionBody`, not to
-every diff that reaches a prompt.
+backstop: the inlined plan text and the progress text. The `neal review`
+adjudication prompt reads the selected-range diff from an index and patch files
+under `.neal/reviews/<review-id>/range-diff/`, with the same delivery wording
+for every reviewer provider. It contains no inline diff or diff preview. The
+draft coder's prompt keeps its preview capped at `DIFF_PREVIEW_LIMIT` (12,000
+characters).
 
 **Providers with a hard limit reject oversized prompts before the SDK call.**
 A capability role that declares `maxInputChars` gets an adapter-boundary

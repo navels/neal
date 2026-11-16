@@ -54,7 +54,7 @@ import {
   getHeadCommit,
 } from '../src/neal/git.js';
 import { createReadOnlyToolset } from '../src/neal/providers/openai-compatible-tools.js';
-import { buildReviewFindingsReadOnlyInspectionSection } from '../src/neal/review-findings/prompts.js';
+import { buildReviewFindingsRangeDiffSection } from '../src/neal/review-findings/prompts.js';
 import { createFakeProviderDefinition } from './helpers/fake-provider.js';
 import { renderRecoveryMarkdown } from '../src/neal/support.js';
 import { buildFinalCompletionPacket } from '../src/neal/final-completion.js';
@@ -524,27 +524,12 @@ test('read-only doctrine instructions only reference tools the read-only toolset
     ...getVerificationSkepticismLines({ reviewTarget: 'scope diff', mode: 'read-only' }),
     ...getRegressionPreservationLines({ reviewTarget: 'scope diff', mode: 'read-only' }),
     ...getPreexistingFailureContractLines({ reviewTarget: 'scope diff', mode: 'read-only' }),
-    buildReviewFindingsReadOnlyInspectionSection({
-      version: 1,
-      instruction: 'Review the selected committed range.',
-      instructionSource: 'default',
-      selector: { kind: 'last', count: 1 },
-      baseRef: 'HEAD~1',
-      headRef: 'HEAD',
-      externalBaseCommit: 'base123',
-      externalHeadCommit: 'head456',
-      externalCommits: ['head456'],
-      externalCommitSubjects: ['head456 subject'],
-      externalChangedFiles: ['a.ts'],
-      diffStat: ' a.ts | 1 +',
-      diff: 'diff --git a/a.ts b/a.ts\n+1\n',
-    }),
+    buildReviewFindingsRangeDiffSection('.neal/reviews/example/range-diff/index.md'),
   ].join('\n');
 
   const toolsetNames = Object.keys(createReadOnlyToolset(tmpdir()));
   const mentionedToolNames = [...new Set([...doctrineText.matchAll(/\b([a-z]+_[a-z_]+)\b/g)].map((match) => match[1]))];
   assert.ok(mentionedToolNames.includes('git_diff'), 'the read-only doctrine must direct reviewers to git_diff');
-  assert.ok(mentionedToolNames.includes('read_file'), 'the review-findings read-only section must reference read_file');
   for (const name of mentionedToolNames) {
     assert.ok(
       toolsetNames.includes(name),
