@@ -8,8 +8,24 @@ on:
 
 jobs:
   verify:
-    name: Verify
+    # The first entry is the development version from .nvmrc and keeps the
+    # plain "Verify" name, which the main-branch ruleset requires and
+    # scripts/release-sdk-bump.sh waits on. The others prove the supported
+    # Node range that package.json `engines.node` promises: its floor, and
+    # the LTS line between the floor and the development version. Raise the
+    # floor here and in `engines.node` together, as a deliberate change.
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Verify
+            node-version-file: .nvmrc
+          - name: Verify (Node 22)
+            node-version: '22'
+          - name: Verify (Node 24)
+            node-version: '24'
 
     steps:
       - name: Check out repository
@@ -18,7 +34,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ matrix.node-version }}
+          node-version-file: ${{ matrix.node-version-file }}
 
       - name: Enable pnpm
         run: |

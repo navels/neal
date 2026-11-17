@@ -29,7 +29,8 @@ is gated on it as a whole.
    `needs-qualification`), and, monthly, separate library-majors and
    GitHub-Actions-majors buckets (both labelled `needs-review`).
 2. **Verify (automatic).** CI (`.github/workflows/ci.yml`) runs typecheck + lint
-   + unit tests + package verification on Node 26.13.0, which catches
+   + unit tests + package verification on the `.nvmrc` Node version and on
+   Node 22 and 24, which catches
    **API-shape / contract** breaks. The live smoke
    (`.github/workflows/smoke.yml`) runs on package.json / lockfile PRs that change something it exercises (a version bump or a native-SDK pin bump skips it): a
    real `neal compat` run against a cheap OpenRouter model through
@@ -107,3 +108,28 @@ Agentic-SDK bumps get an explicit line with the from→to versions and a one-lin
 behavior note ("re-qualified with `neal compat`, no behavior change", or the
 specific change observed). The dependency churn *is* the risk surface, so it is
 recorded, not buried.
+
+## Supported Node versions
+
+Two different things carry a Node version, and they move differently.
+
+- **What neal supports** is `engines.node` in `package.json`. It is a promise
+  to users, written as a major-version floor (`>=22`), and npm enforces it at
+  install time. npm does not fail when the newest release needs a newer Node:
+  it quietly installs the newest older release that fits. So raising the floor
+  strands users on an old neal without telling them.
+- **What neal is developed on** is `.nvmrc`, the Node version in the workflow
+  files, and `packageManager`. Renovate keeps these current.
+
+The floor changes only by hand, as a deliberate change with its own changelog
+line: a minor release before `1.0.0`, a major one after. Raise it when a Node
+line reaches end of life or a dependency drops it, and change `engines.node`
+and the CI matrix in `.github/workflows/ci.yml` together. That matrix runs the
+full verify job on the floor and on each LTS line up to the development
+version, so the promise is tested rather than assumed.
+
+Renovate is told not to touch `engines` (`matchDepTypes: ["engines"]` in
+`renovate.json`). Before that rule, the repository's `rangeStrategy: "bump"`
+rewrote `engines.node` to the newest Node release in every weekly PR, which
+moved the floor from 24.18.0 to 26.13.1 between August and November 2026
+without anyone deciding to.

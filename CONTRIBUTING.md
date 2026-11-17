@@ -5,9 +5,11 @@ improvements are welcome.
 
 ## Local Setup
 
-Use Node.js 26.13.0 or newer. The checked-in `.nvmrc` selects 26.13.0 for
-local development, and Corepack should activate the pnpm version pinned in
-`packageManager`.
+Develop on the Node.js version in the checked-in `.nvmrc`; `nvm use` selects
+it. Corepack should activate the pnpm version pinned in `packageManager`. The
+published package supports Node.js 22 and newer (`engines.node`), which is a
+separate, deliberate promise: see "Supported Node versions" in
+[docs/maintenance.md](docs/maintenance.md).
 
 ```bash
 corepack enable
@@ -53,9 +55,9 @@ pnpm run verify:package
 `pnpm run verify:package` builds, packs the package tarball, installs that
 tarball into a temporary prefix, and runs the installed `neal help` command.
 
-CI runs the same typecheck, test, build, and package verification gates on
-Node 26.13.0, matching the checked-in `.nvmrc` and the published package
-engine.
+CI runs the same typecheck, lint, test, build, and package verification gates
+on the `.nvmrc` version, and again on Node 22 and Node 24 to cover the range
+`engines.node` promises.
 
 For CLI behavior changes, also run the relevant `pnpm start -- ...` command from
 a disposable target repository or fixture.
