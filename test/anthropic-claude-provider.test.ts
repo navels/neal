@@ -1158,10 +1158,11 @@ test('Claude coder Bash tool results emit exactly one command_completed with the
     cwd,
   );
 
-  // Assistant text around the tool call is unchanged by the tool mapping.
+  // Assistant text around the tool call is unchanged by the tool mapping. The
+  // call is announced when it starts and reported when it completes.
   assert.deepEqual(
     events.map((event) => event.type),
-    ['session_started', 'assistant_text', 'command_completed', 'assistant_text', 'turn_completed', 'usage_reported'],
+    ['session_started', 'assistant_text', 'tool_started', 'command_completed', 'assistant_text', 'turn_completed', 'usage_reported'],
   );
   assert.deepEqual(
     events
@@ -1252,6 +1253,125 @@ test('Claude coder failed Bash tool results emit command_completed with failed s
   assert.equal(commandEvents[0]?.output, '1 failing test');
 });
 
+function isToolStarted(event: ProviderRuntimeEvent): event is Extract<ProviderRuntimeEvent, { type: 'tool_started' }> {
+  return event.type === 'tool_started';
+}
+
+async function collectAdvisorToolEvents(messages: SDKMessage[], cwd: string) {
+  const events: ProviderRuntimeEvent[] = [];
+  await anthropicClaudeProviderTestHooks.collectClaudeResult(
+    messageStream(messages),
+    cwd,
+    'review',
+    600_000,
+    (event) => {
+      events.push(event);
+    },
+    'structured-advisor',
+  );
+  return events;
+}
+
+// A reviewer round uses only read-class tools. Before this, such a round left
+// no tool events at all, so nothing in the run's event log showed which files
+// the reviewer opened.
+test('Claude reviewer read-class tool calls are announced as tool_started with their target', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-claude-provider-advisor-tools-'));
+
+  const events = await collectAdvisorToolEvents(
+    [
+      assistantToolUseMessage({ id: 'tool-read-1', name: 'Read', input: { file_path: '.neal/reviews/r1/range-diff/index.md' } }),
+      toolResultMessage({ toolUseId: 'tool-read-1', content: 'index' }),
+      assistantToolUseMessage({ id: 'tool-grep-1', name: 'Grep', input: { pattern: 'slice\\(', path: 'src' } }),
+      toolResultMessage({ toolUseId: 'tool-grep-1', content: 'src/paginate.ts:3' }),
+      assistantToolUseMessage({ id: 'tool-glob-1', name: 'Glob', input: { pattern: '**/*.ts' } }),
+      toolResultMessage({ toolUseId: 'tool-glob-1', content: 'src/paginate.ts' }),
+      resultMessage({ result: 'Done.' }),
+    ],
+    cwd,
+  );
+
+  const started = events.filter(isToolStarted);
+  assert.deepEqual(
+    started.map((event) => [event.toolName, event.itemId, (event.providerData as { target?: string }).target]),
+    [
+      ['Read', 'tool-read-1', '.neal/reviews/r1/range-diff/index.md'],
+      // Where it searched, never what it searched for: a content pattern can
+      // be a literal secret.
+      ['Grep', 'tool-grep-1', 'src'],
+      ['Glob', 'tool-glob-1', '**/*.ts'],
+    ],
+  );
+  assert.equal(JSON.stringify(started).includes('slice'), false);
+  for (const event of started) {
+    assert.equal(event.provider, 'anthropic-claude');
+    assert.equal(event.role, 'structured-advisor');
+    assert.equal(event.sessionHandle, 'claude-session-1');
+  }
+  // Reads are still not verification evidence.
+  assert.equal(events.filter(isCommandCompleted).length, 0);
+  assert.equal(events.filter(isFileChanged).length, 0);
+});
+
+test('a Claude tool call replayed after it completed, or surfaced again as a task, is still announced once', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-claude-provider-tool-replay-'));
+  const toolUse = assistantToolUseMessage({ id: 'tool-bash-bg', name: 'Bash', input: { command: 'pnpm test', run_in_background: true } });
+
+  const events = await collectToolMappingEvents(
+    [
+      toolUse,
+      // A background Bash call also arrives as a task carrying the same id.
+      systemMessage('task_started', { description: 'pnpm test', tool_use_id: 'tool-bash-bg', task_id: 'task-1' }),
+      toolResultMessage({ toolUseId: 'tool-bash-bg', content: 'started in background' }),
+      // Delivered again after the call completed.
+      toolUse,
+      // A task with no originating tool call is still announced.
+      systemMessage('task_started', { description: 'orphan task', task_id: 'task-2' }),
+      resultMessage({ result: 'Done.' }),
+    ],
+    cwd,
+  );
+
+  const started = events.filter(isToolStarted);
+  assert.deepEqual(
+    started.map((event) => [event.toolName, event.itemId ?? null]),
+    [['Bash', 'tool-bash-bg'], ['task', null]],
+  );
+  // The correlated task still reports progress.
+  assert.equal(
+    events.filter((event) => event.type === 'tool_progress' && event.toolName === 'task').length,
+    2,
+  );
+  assert.equal(events.filter(isCommandCompleted).length, 1);
+});
+
+test('a Claude tool call delivered twice is announced once, and an oversized target is bounded', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'neal-claude-provider-tool-dedupe-'));
+  const longCommand = `echo ${'x'.repeat(1_000)}`;
+  const toolUse = assistantToolUseMessage({ id: 'tool-bash-dup', name: 'Bash', input: { command: longCommand } });
+
+  const events = await collectToolMappingEvents(
+    [
+      toolUse,
+      toolUse,
+      toolResultMessage({ toolUseId: 'tool-bash-dup', content: 'ok' }),
+      assistantToolUseMessage({ id: 'tool-odd-1', name: 'TodoWrite', input: { todos: [] } }),
+      resultMessage({ result: 'Done.' }),
+    ],
+    cwd,
+  );
+
+  const started = events.filter(isToolStarted);
+  assert.deepEqual(started.map((event) => event.itemId), ['tool-bash-dup', 'tool-odd-1']);
+  const target = (started[0]!.providerData as { target?: string }).target ?? '';
+  assert.equal(target.length, 301);
+  assert.ok(target.endsWith('…'));
+  // A tool with no file, pattern or command gets no target rather than a dump of its input.
+  assert.equal('target' in (started[1]!.providerData as object), false);
+  // The full command still reaches the completion event.
+  assert.equal(events.filter(isCommandCompleted)[0]?.command, longCommand);
+});
+
 test('Claude coder read-class tool results emit no command_completed or file_changed', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'neal-claude-provider-read-'));
 
@@ -1268,7 +1388,7 @@ test('Claude coder read-class tool results emit no command_completed or file_cha
   assert.equal(events.filter(isFileChanged).length, 0);
   assert.deepEqual(
     events.map((event) => event.type),
-    ['session_started', 'turn_completed', 'usage_reported'],
+    ['session_started', 'tool_started', 'turn_completed', 'usage_reported'],
   );
 });
 
@@ -2434,7 +2554,7 @@ test('Claude thinking deltas emit a throttled assistant_thinking event for liven
   const sink = async (event: { type: string; estimatedTokens?: number }) => {
     events.push(event);
   };
-  const state = { textBuffer: '', sawTextDelta: false, lastThinkingEmitMs: 0, pendingToolUses: new Map() };
+  const state = { textBuffer: '', sawTextDelta: false, lastThinkingEmitMs: 0, pendingToolUses: new Map(), announcedToolUseIds: new Set<string>() };
   const thinkingDelta = {
     type: 'stream_event',
     session_id: 'claude-session-1',
