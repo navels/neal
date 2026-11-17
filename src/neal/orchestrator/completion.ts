@@ -204,11 +204,15 @@ function getFinalizationExpectedScratchDirs(state: OrchestrationState): string[]
   return scratchDirs;
 }
 
-// A run blocked at final completion review is terminal: the resume planner
-// keeps it blocked and `neal resume` reports that it cannot be resumed, with or
-// without `--message`. The block reason therefore must not point at resume.
+// A run blocked at final completion review can have the review run again with
+// plain `neal resume` (the resume planner's
+// `rerun_blocked_final_completion_review`). It takes no `--message`: the
+// operator's levers are the continue-execution cap, the review level and the
+// reviewer guidance, changed before resuming. The reviewer still decides.
 const FINAL_COMPLETION_BLOCK_NEXT_STEP =
-  'This run cannot be resumed. Its commits are intact: inspect with `neal status`, then put any remaining work in a new plan.';
+  'Inspect with `neal status`. To have the final review run again, use `neal resume` with HEAD still at the final commit and a clean worktree; ' +
+  'change `neal.review_level` or the reviewer guidance first if the same verdict would only repeat. ' +
+  'Otherwise the commits are intact and the remaining work can go in a new plan.';
 
 function getFinalCompletionReviewBlockReason(args: {
   reviewerAction: Exclude<FinalCompletionReviewerAction, 'accept_complete'>;
@@ -227,7 +231,7 @@ function getFinalCompletionReviewBlockReason(args: {
       'final_completion_review: reviewer requested more execution, ' +
       `but the continue_execution cap (${args.continueExecutionLimit}) is already exhausted ` +
       `after ${args.continueExecutionCount} reopen cycle(s). ${args.rationale} ` +
-      `${FINAL_COMPLETION_BLOCK_NEXT_STEP} The cap is \`neal.final_completion_continue_execution_max\`.`
+      `${FINAL_COMPLETION_BLOCK_NEXT_STEP} The cap is \`neal.final_completion_continue_execution_max\`; raising it lets a resumed review continue execution.`
     );
   }
 

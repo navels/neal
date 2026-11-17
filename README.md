@@ -549,9 +549,19 @@ neal:
   read each time the final review runs, so raising it takes effect on a run in
   progress, as long as the cap hasn't already tripped.
 
-A run blocked at the final review is terminal. `neal resume` reports that it
-can't be resumed, with or without `--message`. Its commits are intact: inspect
-it with `neal status`, then put any remaining work in a new plan.
+A run blocked at the final review can have that review run again with a plain
+`neal resume` (it takes no `--message`). The reviewer still decides, and the
+cap still holds: if it asks to continue again and the cap hasn't been raised,
+the run blocks again. So change something first if the same verdict would
+only repeat, such as the cap, `neal.review_level`, or your reviewer guidance.
+
+Resume refuses unless `HEAD` is still the run's final commit and the worktree
+is clean, because the final review resets the worktree when it finishes and
+would delete uncommitted work. An edited plan document is allowed only for a
+`--no-squash` run; the completion squash needs a clean worktree. Set the cap or the review level in
+`~/.neal/config.yml` for this, not in the repo's `neal.yml`; if the repo file
+already pins the key, this run can't pick up a change. Either way the commits
+are intact, and remaining work can always go in a new plan.
 
 ### Custom guidance
 

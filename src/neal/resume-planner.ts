@@ -1,3 +1,4 @@
+import { getHeadCommit, getWorktreeStatus } from './git.js';
 import type { RunLogger } from './logger.js';
 import { flushDerivedPlanNotifications } from './orchestrator/notifications.js';
 import { recoverPendingReviewFromCleanCommittedScope } from './orchestrator/phases/coder.js';
@@ -13,6 +14,7 @@ import {
 } from './state-views.js';
 import { saveState } from './state.js';
 import type { OrchestrationPhase, OrchestrationState } from './types.js';
+import { filterAllowedDirtyPathStatus, filterWrapperOwnedWorktreeStatus } from './worktree-status.js';
 
 type ResumableBlockedPhase =
   | 'coder_scope'
@@ -43,6 +45,15 @@ export type ResumeAction =
   | {
       kind: 'keep_blocked';
       blockedFromPhase: OrchestrationPhase | null;
+    }
+  | {
+      // A run the final completion reviewer blocked (its own
+      // `block_for_operator`, or `continue_execution` past the cap) goes back
+      // to that review. The reviewer stays the only actor that can accept, and
+      // the continue-execution count is kept, so the cap still holds.
+      kind: 'rerun_blocked_final_completion_review';
+      finalCommit: string;
+      continueExecutionCount: number;
     }
   | {
       kind: 'promote_accepted_derived_plan';
@@ -180,6 +191,9 @@ export async function applyResumeActions(
           lastHandledTurn: action.lastHandledTurn,
         });
         break;
+      case 'rerun_blocked_final_completion_review':
+        nextState = await rerunBlockedFinalCompletionReview(nextState, statePath, logger, action);
+        break;
       case 'keep_blocked':
       case 'wait_for_operator_guidance':
       case 'process_pending_operator_guidance':
@@ -203,6 +217,24 @@ function planStatusResumeAction(state: OrchestrationState): ResumeAction | null 
         sessionHandle,
       };
     }
+  }
+
+  // Only a block the final reviewer's verdict produced qualifies. A reviewer
+  // content-safety refusal at the same phase persists `blockedFromPhase: null`
+  // and stays terminal below.
+  if (
+    state.status === 'blocked' &&
+    state.phase === 'blocked' &&
+    state.blockedFromPhase === 'final_completion_review' &&
+    state.topLevelMode === 'execute' &&
+    state.finalCompletionSummary !== null &&
+    state.finalCommit !== null
+  ) {
+    return {
+      kind: 'rerun_blocked_final_completion_review',
+      finalCommit: state.finalCommit,
+      continueExecutionCount: state.finalCompletionContinueExecutionCount,
+    };
   }
 
   if (state.status === 'blocked' && state.phase === 'blocked') {
@@ -237,6 +269,8 @@ function applyPlannedStatusAction(state: OrchestrationState, action: ResumeActio
         status: 'running',
         blockerReason: null,
       };
+    case 'rerun_blocked_final_completion_review':
+      return withFinalCompletionReviewReopened(state);
     default:
       return state;
   }
@@ -318,6 +352,113 @@ async function restoreResumableBlockedPhase(
     blockedFromPhase: nextState.blockedFromPhase,
     sessionRole: action.sessionRole,
     sessionHandle: action.sessionHandle,
+  });
+  return nextState;
+}
+
+// The state a blocked final review returns to. The summary, final commit,
+// completed scopes and archived review stay: the review rebuilds its packet
+// from them. The old verdict, its resolved action and the cap flag are cleared
+// together, as the state invariants require. The reviewer handle is cleared
+// because every final review starts a fresh reviewer round. The
+// continue-execution count is deliberately kept.
+function withFinalCompletionReviewReopened(state: OrchestrationState): OrchestrationState {
+  return {
+    ...state,
+    phase: 'final_completion_review',
+    status: 'running',
+    blockedFromPhase: null,
+    blockerReason: null,
+    finalCompletionReviewVerdict: null,
+    finalCompletionResolvedAction: null,
+    finalCompletionContinueExecutionCapReached: false,
+    reviewerSessionHandle: null,
+  };
+}
+
+// The final review judges `finalCommit`, and afterwards treats every worktree
+// change outside neal's own paths and the plan document as reviewer output:
+// it runs `reset --hard` and removes untracked files. So an operator's edits
+// made while the run sat blocked would be reviewed against the wrong commit
+// and then deleted. Refuse instead, before anything is changed.
+async function assertFinalCompletionReviewCanRerun(state: OrchestrationState, finalCommit: string) {
+  const headCommit = await getHeadCommit(state.cwd);
+  if (headCommit !== finalCommit) {
+    throw new Error(
+      [
+        'Cannot re-run the final completion review: HEAD has moved since the run blocked.',
+        `HEAD is ${headCommit}; the run's final commit is ${finalCommit}.`,
+        'The review judges that commit. Check it out again, or put the remaining work in a new plan.',
+      ].join('\n'),
+    );
+  }
+
+  const statusOutput = filterAllowedDirtyPathStatus(
+    state.cwd,
+    filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(state.cwd, { untrackedFiles: 'all' })),
+    [state.planDoc],
+  );
+  if (statusOutput.trim()) {
+    throw new Error(
+      [
+        'Cannot re-run the final completion review with uncommitted changes in the worktree:',
+        statusOutput,
+        'The review discards worktree changes when it finishes, so these would be lost.',
+        'Move them out of the way first. To change the continue-execution cap or the review level for this',
+        'run, set it in ~/.neal/config.yml rather than editing the repository\'s neal.yml.',
+      ].join('\n'),
+    );
+  }
+
+  // The review preserves an edited plan document, but auto-squash does not
+  // accept one: it refuses any dirty worktree. Without this check a resumed
+  // review could accept, persist the run as done, and then fail in the
+  // squash. Same rule as validateSelectedRunForSquash, applied before the
+  // review instead of after it. The condition matches
+  // maybeAutoSquashCompletedRun: a run with no commit range (a
+  // verification-only completion) is never squashed, so its plan document
+  // may stay edited.
+  const squashBaseCommit = state.initialBaseCommit ?? state.baseCommit;
+  if (state.autoSquashOnCompletion && squashBaseCommit !== finalCommit) {
+    const squashStatusOutput = filterWrapperOwnedWorktreeStatus(await getWorktreeStatus(state.cwd));
+    if (squashStatusOutput.trim()) {
+      throw new Error(
+        [
+          'Cannot re-run the final completion review: this run squashes on completion, and the squash needs a clean worktree.',
+          squashStatusOutput,
+          'If the review accepted, the run would complete and the squash would then fail.',
+          'Restore the plan document to its committed content first.',
+        ].join('\n'),
+      );
+    }
+  }
+}
+
+// Read-only preconditions for a planned resume, checked before the resume
+// writes anything: no log event, no state, no pointer. A refused resume must
+// leave the run exactly as it was, so the caller runs this first.
+export async function assertResumeActionsCanApply(state: OrchestrationState, actions: ResumeAction[]) {
+  for (const action of actions) {
+    if (action.kind === 'rerun_blocked_final_completion_review') {
+      await assertFinalCompletionReviewCanRerun(state, action.finalCommit);
+    }
+  }
+}
+
+async function rerunBlockedFinalCompletionReview(
+  state: OrchestrationState,
+  statePath: string,
+  logger: RunLogger | undefined,
+  action: Extract<ResumeAction, { kind: 'rerun_blocked_final_completion_review' }>,
+) {
+  // Checked again here so the action is safe for any caller that applies it
+  // without going through loadRunForResume's up-front check.
+  await assertFinalCompletionReviewCanRerun(state, action.finalCommit);
+  const nextState = await saveState(statePath, withFinalCompletionReviewReopened(state));
+  await logger?.event('run.resumed_blocked_final_completion_review', {
+    statePath,
+    finalCommit: action.finalCommit,
+    continueExecutionCount: action.continueExecutionCount,
   });
   return nextState;
 }
