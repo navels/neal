@@ -2,7 +2,7 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { access, mkdir, mkdtemp, readFile, realpath, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -2636,6 +2636,146 @@ test('neal resume auto-squashes execute runs that complete after resume', async 
   assert.equal(artifact.replacementCommit, replacementCommit);
   assert.equal(artifact.metadata.planDocDisposition, 'ignored');
   assert.equal(artifact.metadata.normalizedPlanDoc, 'tmp/PLAN.md');
+});
+
+// End to end through the real command: a run the final reviewer blocked is
+// refused while the worktree holds uncommitted work, then resumes into a fresh
+// final review once it is clean.
+test('neal resume re-runs a blocked final completion review, but not over uncommitted work', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'neal-resume-blocked-final-review-cli-'));
+  const cwd = join(root, 'repo');
+  await runGit(root, 'init', 'repo');
+  await runGit(cwd, 'config', 'user.name', 'Neal Test');
+  await runGit(cwd, 'config', 'user.email', 'neal@example.com');
+  await runGit(cwd, 'config', 'commit.gpgsign', 'false');
+  await mkdir(join(cwd, 'tmp'), { recursive: true });
+  await writeFile(join(cwd, '.gitignore'), 'tmp/\n', 'utf8');
+  await writeFile(join(cwd, 'README.md'), 'bootstrap\n', 'utf8');
+  await runGit(cwd, 'add', '.gitignore', 'README.md');
+  await runGit(cwd, 'commit', '-m', 'base commit');
+  const baseCommit = await runGit(cwd, 'rev-parse', 'HEAD');
+  const planDoc = join(cwd, 'tmp', 'PLAN.md');
+  await writeFile(planDoc, '# Blocked Final Review Plan\n', 'utf8');
+  const loaded = await loadOrInitialize(planDoc, cwd, getDefaultAgentConfig(), undefined, 'execute', {
+    allowedDirtyPaths: [planDoc],
+  });
+  await writeFile(join(cwd, 'feature.txt'), 'implemented\n', 'utf8');
+  await runGit(cwd, 'add', 'feature.txt');
+  await runGit(cwd, 'commit', '-m', 'Add feature');
+  const finalCommit = await runGit(cwd, 'rev-parse', 'HEAD');
+  const blockedState = await saveState(loaded.statePath, {
+    ...loaded.state,
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'final_completion_review',
+    executionShape: 'one_shot',
+    autoSquashOnCompletion: false,
+    lastScopeMarker: 'AUTONOMY_DONE',
+    finalCommit,
+    createdCommits: [finalCommit],
+    finalCompletionSummary: {
+      planGoalSatisfied: false,
+      whatChangedOverall: 'Implemented the feature.',
+      verificationSummary: 'The fixture supplies the verification evidence.',
+      remainingKnownGaps: [],
+    },
+    finalCompletionReviewVerdict: {
+      action: 'block_for_operator',
+      summary: 'An operator decision is required.',
+      rationale: 'The plan and the implementation disagree about scope.',
+      missingWork: null,
+      squashCommitMessage: null,
+    },
+    finalCompletionResolvedAction: 'block_for_operator',
+    completedScopes: [
+      {
+        number: '1',
+        marker: 'AUTONOMY_DONE',
+        result: 'accepted',
+        baseCommit,
+        finalCommit,
+        summary: 'Implemented the feature.',
+        commitSubject: 'Add feature',
+        changedFiles: ['feature.txt'],
+        reviewRounds: 1,
+        findings: 0,
+        residualReviewDebt: [],
+        archivedReviewPath: null,
+        blocker: null,
+        derivedFromParentScope: null,
+        replacedByDerivedPlanPath: null,
+      },
+    ],
+  });
+  const runId = basename(blockedState.runDir);
+  let reviewerCalls = 0;
+
+  setProviderCapabilitiesOverrideForTesting('anthropic-claude', {
+    createStructuredAdvisorAdapter() {
+      return {
+        async runStructuredRound<TStructured>() {
+          reviewerCalls += 1;
+          return {
+            sessionHandle: 'resume-blocked-final-reviewer',
+            structured: {
+              action: 'accept_complete',
+              summary: 'The resumed review accepts the run.',
+              rationale: 'The implementation satisfies the plan.',
+              missingWork: null,
+              squashCommitMessage: {
+                subject: 'Add the feature',
+                bullets: ['Implement the feature.', 'Verify it.'],
+              },
+            } as TStructured,
+          };
+        },
+      };
+    },
+  });
+
+  try {
+    // Operator work left in the tree: the review's cleanup would delete it.
+    await writeFile(join(cwd, 'operator-notes.txt'), 'keep me\n', 'utf8');
+    const stateBeforeRefusal = await readFile(loaded.statePath, 'utf8');
+    const eventsBeforeRefusal = await readRunEventTypes(blockedState.runDir);
+    await assert.rejects(
+      withProcessCwd(cwd, () => captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId]))),
+      /uncommitted changes in the worktree[\s\S]*operator-notes\.txt/,
+    );
+    assert.equal(reviewerCalls, 0);
+    assert.equal(await readFile(join(cwd, 'operator-notes.txt'), 'utf8'), 'keep me\n');
+    const stillBlocked = await loadState(loaded.statePath);
+    assert.equal(stillBlocked.status, 'blocked');
+    assert.equal(stillBlocked.blockedFromPhase, 'final_completion_review');
+    // A refused resume leaves no trace: the state file is byte-identical and
+    // no event, `run.resumed` included, was appended.
+    assert.equal(await readFile(loaded.statePath, 'utf8'), stateBeforeRefusal);
+    assert.deepEqual(await readRunEventTypes(blockedState.runDir), eventsBeforeRefusal);
+
+    // A message is not accepted here; the plain resume is the path.
+    await assert.rejects(
+      withProcessCwd(cwd, () =>
+        captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId, '--message', 'Please accept.'])),
+      ),
+      /does not need --message/,
+    );
+
+    await rm(join(cwd, 'operator-notes.txt'));
+    const { exitCode } = await captureProcessExitCode(() =>
+      withProcessCwd(cwd, () => captureProcessOutput(() => runResumeRunCommand(['resume', '--run', runId]))),
+    );
+    assert.equal(exitCode, 0);
+  } finally {
+    clearProviderCapabilitiesOverridesForTesting();
+  }
+
+  assert.equal(reviewerCalls, 1);
+  const completedState = await loadState(loaded.statePath);
+  assert.equal(completedState.status, 'done');
+  assert.equal(completedState.phase, 'done');
+  assert.equal(completedState.finalCompletionReviewVerdict?.action, 'accept_complete');
+  const eventTypes = await readRunEventTypes(blockedState.runDir);
+  assert.ok(eventTypes.includes('run.resumed_blocked_final_completion_review'));
 });
 
 test('neal resume honors a persisted --no-squash preference instead of auto-squashing', async () => {

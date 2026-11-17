@@ -380,8 +380,12 @@ function formatFinalNextAction(
     return `Inspect failure: neal status --run ${runId}; resume when ready: neal resume --run ${runId}`;
   }
   if (finalState.status === 'blocked') {
-    if (planResumeActions(finalState).some((action) => action.kind === 'restore_resumable_blocked_phase')) {
+    const blockedResumeActions = planResumeActions(finalState);
+    if (blockedResumeActions.some((action) => action.kind === 'restore_resumable_blocked_phase')) {
       return `Address the reason above, then re-run ${formatPublicPhase(finalState.blockedFromPhase ?? finalState.phase)}: neal resume --run ${runId}`;
+    }
+    if (blockedResumeActions.some((action) => action.kind === 'rerun_blocked_final_completion_review')) {
+      return `Inspect blocked run: neal status --run ${runId}; re-run the final review, after changing the cap, review level or reviewer guidance if needed: neal resume --run ${runId}`;
     }
     return `Inspect blocked run: neal status --run ${runId}; provide guidance with neal resume --run ${runId} --message "..." only if the run is waiting for operator guidance`;
   }

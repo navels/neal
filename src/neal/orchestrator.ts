@@ -32,7 +32,7 @@ import {
 } from './orchestrator/phases/planning.js';
 import { runReviewPhase } from './orchestrator/phases/review.js';
 import { writeCheckpointRetrospective } from './retrospective.js';
-import { applyResumeActions, planResumeActions } from './resume-planner.js';
+import { applyResumeActions, assertResumeActionsCanApply, planResumeActions } from './resume-planner.js';
 import { writeCurrentRunPointer } from './run-registry.js';
 import { createInitialState, getRunStatePath, loadState, saveState } from './state.js';
 import { getNealDir, getPlanDocumentBackupPath } from './storage-paths.js';
@@ -273,6 +273,11 @@ export async function loadOrInitialize(
 
 export async function loadRunForResume(resumeStatePath: string) {
   const initialState = await loadState(resumeStatePath);
+  // Plan first and check the plan's read-only preconditions before the logger
+  // exists: a resume that is refused must not leave a `run.resumed` event or
+  // anything else behind.
+  const resumeActions = planResumeActions(initialState);
+  await assertResumeActionsCanApply(initialState, resumeActions);
   const logger = await createRunLogger({
     cwd: initialState.cwd,
     stateDir: dirname(resumeStatePath),
@@ -289,7 +294,6 @@ export async function loadRunForResume(resumeStatePath: string) {
   });
   await logUserGuidanceApplied(logger);
 
-  const resumeActions = planResumeActions(initialState);
   const state = await applyResumeActions(initialState, resumeStatePath, logger, resumeActions);
   await writeCurrentRunPointer(state);
   await writeExecutionArtifacts(state);

@@ -93,6 +93,50 @@ test('resume planner keeps non-resumable blocked runs blocked', async () => {
   assert.deepEqual(actionKinds(state), ['keep_blocked']);
 });
 
+test('resume planner sends a final-review verdict block back to the final review, and nothing else at that phase', async () => {
+  const finalCompletionSummary = {
+    planGoalSatisfied: false,
+    whatChangedOverall: 'Implemented the plan.',
+    verificationSummary: 'Ran the tests.',
+    remainingKnownGaps: [],
+  };
+  const blocked = await createPlannerState({
+    phase: 'blocked',
+    status: 'blocked',
+    blockedFromPhase: 'final_completion_review',
+    finalCommit: '2222222222222222222222222222222222222222',
+    finalCompletionSummary,
+    finalCompletionContinueExecutionCount: 2,
+  });
+  assert.deepEqual(planResumeActions(blocked), [
+    {
+      kind: 'rerun_blocked_final_completion_review',
+      finalCommit: '2222222222222222222222222222222222222222',
+      continueExecutionCount: 2,
+    },
+  ]);
+
+  // A reviewer content-safety refusal at the final review persists
+  // blockedFromPhase null and stays terminal.
+  assert.deepEqual(
+    actionKinds(await createPlannerState({ phase: 'blocked', status: 'blocked', blockedFromPhase: null, finalCompletionSummary })),
+    ['keep_blocked'],
+  );
+  // Without the summary or the final commit there is nothing to re-review.
+  assert.deepEqual(
+    actionKinds(
+      await createPlannerState({
+        phase: 'blocked',
+        status: 'blocked',
+        blockedFromPhase: 'final_completion_review',
+        finalCommit: null,
+        finalCompletionSummary,
+      }),
+    ),
+    ['keep_blocked'],
+  );
+});
+
 test('resume planner distinguishes pending and waiting operator guidance', async () => {
   const waitingState = await createPlannerState({
     phase: 'interactive_blocked_recovery',

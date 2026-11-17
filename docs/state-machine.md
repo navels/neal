@@ -102,9 +102,9 @@ behavior are visible in focused tests.
 Every operator stop lands in a controlled, operator-actionable state, and the
 writer exits with code `2` (`src/neal/commands/writer-exit-codes.ts`). Exit `2`
 means the run needs operator intervention, not that every stop accepts resume
-guidance: sites A and C below take `neal resume --message`, while site B stays
-non-mechanically blocked (`neal resume` keeps it blocked) and the operator
-inspects `neal status` and the run artifacts instead. A consumer that needs a
+guidance: sites A and C below take `neal resume --message`, while site B takes
+a plain `neal resume`, which runs the final review again, and accepts no
+message. A consumer that needs a
 hard verdict with no operator available (a benchmark harness, `neal compat`)
 treats an exit-2 operator stop as a failure itself.
 
@@ -163,9 +163,24 @@ There are three structural block sites:
   notification, bypassing the recovery chokepoint with no consultant routing;
   their own budgets (the final-completion continue-execution cap and the
   review-round/convergence cap) already bound the autonomous effort. Their
-  resume semantics differ: site B's `blockedFromPhase`
-  (`final_completion_review`) is not in `RESUMABLE_BLOCKED_PHASES`, so
-  `neal resume` reports it as keep-blocked, while site C's top-level
+  resume semantics differ. Site B's `blockedFromPhase`
+  (`final_completion_review`) is not in `RESUMABLE_BLOCKED_PHASES`; the resume
+  planner gives it its own action, `rerun_blocked_final_completion_review`,
+  which restores `phase: 'final_completion_review'`, clears the stored
+  verdict, resolved action and cap flag, and keeps the continue-execution
+  count. The reviewer then judges the same final commit again and is still
+  the only actor that can accept; a repeated `continue_execution` with the
+  cap unchanged blocks again. The operator's levers are existing settings,
+  changed before resuming: `neal.final_completion_continue_execution_max`,
+  `neal.review_level`, and the reviewer guidance file. The action refuses,
+  changing nothing, unless `HEAD` is still the run's final commit and the
+  worktree is clean apart from neal's own paths and the plan document,
+  because the final review resets and cleans the worktree when it finishes.
+  When the run squashes on completion, an edited plan document is refused
+  too, since the squash rejects any dirty worktree and would fail after an
+  accepted review.
+  A reviewer content-safety refusal at the same phase persists
+  `blockedFromPhase: null` and stays blocked. Site C's top-level
   plan-review block is recognized by the plan-review guidance path and resumes
   via `neal resume --message`. Site C is the `topLevelMode !== 'execute'`
   branch of `finalizeBlockedPlanReviewResponse`. Execute-mode
@@ -180,7 +195,8 @@ reconciliation is modeled as explicit `ResumeAction` values from
 `planResumeActions` and applied by `applyResumeActions`.
 
 Current resume actions cover stopped-status normalization, restoring a resumable
-blocked source phase, keeping non-resumable blocked runs blocked, promoting
+blocked source phase, re-running a blocked final completion review, keeping
+other non-resumable blocked runs blocked, promoting
 accepted or pending unexecuted derived plans, blocking rejected abandoned derived
 plans, flushing derived-plan notifications, recovering clean committed
 scope work that is waiting for review, waiting for operator guidance, processing
