@@ -264,6 +264,11 @@ test('release versions compare by SemVer precedence, not as strings', () => {
   assert.ok(compareReleaseVersions('1.0.0-rc.1', '1.0.0') < 0);
   assert.ok(compareReleaseVersions('1.0.0-rc.2', '1.0.0-rc.10') < 0);
   assert.ok(compareReleaseVersions('1.0.0-alpha', '1.0.0-alpha.1') < 0);
+  // Numeric identifiers have no upper bound, so they can't go through Number.
+  assert.ok(compareReleaseVersions('1.0.0-9007199254740993', '1.0.0-9007199254740992') > 0);
+  assert.ok(compareReleaseVersions('9007199254740993.0.0', '9007199254740992.0.0') > 0);
+  // Numeric identifiers rank below alphanumeric ones.
+  assert.ok(compareReleaseVersions('1.0.0-1', '1.0.0-alpha') < 0);
   assert.throws(() => compareReleaseVersions('v0.8.0', '0.8.0'), /Not a SemVer version/);
 });
 

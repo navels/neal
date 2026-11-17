@@ -36,7 +36,14 @@ PACKAGE_NAME="$(node -p "require('./package.json').name")"
 # remote and no default set. Name it from origin so every gh call below works
 # without `gh repo set-default`.
 if [ -z "${GH_REPO:-}" ]; then
-  GH_REPO="$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
+  # Every URL form git accepts for a GitHub remote: https://, http://, ssh://,
+  # git://, and the scp-style git@github.com:owner/repo.
+  GH_REPO="$(git remote get-url origin | sed -E 's#^(https?|ssh|git)://([^@/]+@)?github\.com(:[0-9]+)?/##; s#^[^@/]+@github\.com:##; s#\.git$##; s#/$##')"
+  if ! grep -qE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' <<<"$GH_REPO"; then
+    echo "release-sdk-bump: cannot work out the GitHub repository from origin ($(git remote get-url origin))." >&2
+    echo "Set GH_REPO=owner/repo and run again." >&2
+    exit 1
+  fi
   export GH_REPO
 fi
 
@@ -138,7 +145,19 @@ VERSION="$(node -pe "
 " "$CURRENT_VERSION")"
 
 # Refuse before merging anything if that still wouldn't advance npm's latest.
-NPM_LATEST="$(npm view "$PACKAGE_NAME" dist-tags.latest 2>/dev/null || true)"
+# A failed lookup stops the release too: skipping the check when npm can't be
+# reached would let the same mistake through. Only a package that has never
+# been published (E404) has no latest to compare against.
+NPM_LATEST=""
+if ! NPM_LATEST_OUTPUT="$(npm view "$PACKAGE_NAME" dist-tags.latest 2>&1)"; then
+  if ! grep -q 'E404' <<<"$NPM_LATEST_OUTPUT"; then
+    echo "release-sdk-bump: could not read the current npm latest for ${PACKAGE_NAME}:" >&2
+    echo "$NPM_LATEST_OUTPUT" >&2
+    exit 1
+  fi
+else
+  NPM_LATEST="$NPM_LATEST_OUTPUT"
+fi
 if [ -n "$NPM_LATEST" ]; then
   node --input-type=module -e "
     import { assertVersionAdvancesLatest } from './scripts/release-utils.mjs';

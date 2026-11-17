@@ -130,10 +130,16 @@ function parseReleaseVersion(version) {
   if (!match) {
     fail(`Not a SemVer version: ${JSON.stringify(version)}.`);
   }
+  // BigInt, not Number: SemVer puts no upper bound on a numeric identifier, and
+  // two values above Number.MAX_SAFE_INTEGER would otherwise compare equal.
   return {
-    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    core: [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])],
     prerelease: match[4] ? match[4].split('.') : [],
   };
+}
+
+function compareBigInt(a, b) {
+  return a === b ? 0 : a < b ? -1 : 1;
 }
 
 // SemVer precedence: negative when a < b, zero when equal, positive when a > b.
@@ -141,8 +147,9 @@ export function compareReleaseVersions(a, b) {
   const left = parseReleaseVersion(a);
   const right = parseReleaseVersion(b);
   for (let index = 0; index < 3; index += 1) {
-    if (left.core[index] !== right.core[index]) {
-      return left.core[index] - right.core[index];
+    const order = compareBigInt(left.core[index], right.core[index]);
+    if (order !== 0) {
+      return order;
     }
   }
   // A version without a prerelease outranks the same core with one.
@@ -157,8 +164,12 @@ export function compareReleaseVersions(a, b) {
     }
     const lNumeric = /^\d+$/.test(l);
     const rNumeric = /^\d+$/.test(r);
-    if (lNumeric && rNumeric && Number(l) !== Number(r)) {
-      return Number(l) - Number(r);
+    if (lNumeric && rNumeric) {
+      const order = compareBigInt(BigInt(l), BigInt(r));
+      if (order !== 0) {
+        return order;
+      }
+      continue;
     }
     if (lNumeric !== rNumeric) {
       return lNumeric ? -1 : 1;
