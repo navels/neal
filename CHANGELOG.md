@@ -10,6 +10,8 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-16
+
 ### Added
 
 - Writer runs wait for provider-reported usage resets within six hours, then
@@ -31,7 +33,6 @@ dependency-update policy.
   provider. The reviewer `git_diff` tool and pasted range diffs are removed;
   OpenAI-compatible `read_file` supports byte-offset paging. Git 2.30 or newer
   is required for artifact creation (#116).
-
 - All three adapters classify usage limits as `usage_limit`, with an optional
   reset timestamp in provider errors and status JSON. Codex usage-limit
   messages no longer consume transient API retries (#115).
@@ -42,28 +43,23 @@ dependency-update policy.
   refuses, changing nothing, unless `HEAD` is still the final commit and the
   worktree is clean, because the final review discards worktree changes when
   it finishes (an edited plan document is allowed only when the run does not
-  squash on completion). The block reason no longer suggests `neal resume --message`,
-  which this state doesn't accept, and names the config key when the
-  continue-execution cap tripped (#116).
+  squash on completion). The block reason no longer suggests
+  `neal resume --message`, which this state doesn't accept, and names the
+  config key when the continue-execution cap tripped (#116).
 - README documents `neal.max_review_rounds` (per scope, not per plan) and
   `neal.final_completion_continue_execution_max` (#116).
+- Updated `ai` from `7.0.157` to `7.0.171` and `@ai-sdk/openai-compatible`
+  from `3.0.81` to `3.0.91`.
 
 ### Fixed
-
-- The Claude adapter now emits a `tool_started` event for every tool call,
-  with the tool name and, where it has one, a bounded target: the file for
-  file tools, the directory or glob for search tools (never the search
-  pattern), the command for Bash. Before,
-  it reported only Bash and write tools, and only on completion, so a Claude
-  reviewer's reads left no trace in the run events, `neal status` saw no
-  progress while it read, and the startup-silence watchdog had nothing to
-  disarm it. Bash and write tools still produce `command_completed` and
-  `file_changed` as before.
 
 - Whole-plan reviewers receive the complete aggregate diff even when it exceeds
   the former 200,000-character inline limit, avoiding final review loops caused
   by truncated evidence (#116).
-
+- Provider failures that end a run now send a blocked notification regardless
+  of error wording, including usage limits and rejected final-completion
+  payloads. Provider-failure notification text is capped at 300 characters;
+  the event log keeps the full reason (#115).
 - `neal review` no longer fails with "neal review is read-only but the
   worktree changed outside its review artifacts" when the coder is
   `openai-compatible` and the repository does not ignore `.neal/`. Since
@@ -72,11 +68,14 @@ dependency-update policy.
   the review's own unchanged-worktree check then rejected. Review draft
   turns are never resumed, so they now run with an ephemeral session that
   writes nothing.
-
-- Provider failures that end a run now send a blocked notification regardless
-  of error wording, including usage limits and rejected final-completion
-  payloads. Provider-failure notification text is capped at 300 characters;
-  the event log keeps the full reason (#115).
+- The Claude adapter now emits a `tool_started` event for every tool call,
+  with the tool name and, where it has one, a bounded target: the file for
+  file tools, the directory or glob for search tools (never the search
+  pattern), the command for Bash. Before, it reported only Bash and write
+  tools, and only on completion, so a Claude reviewer's reads left no trace
+  in the run events, `neal status` saw no progress while it read, and the
+  startup-silence watchdog had nothing to disarm it. Bash and write tools
+  still produce `command_completed` and `file_changed` as before.
 
 ## [0.7.0] - 2026-11-04
 
