@@ -3,7 +3,7 @@ import { appendFile, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { assertReleaseStateAllowed, getChangelogSection } from './release-utils.mjs';
+import { assertReleaseStateAllowed, assertVersionAdvancesLatest, getChangelogSection } from './release-utils.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJsonPath = join(rootDir, 'package.json');
@@ -169,6 +169,25 @@ if (npmResult.status !== 0 && !isNpmNotFound(npmResult)) {
 
 if (!npmPublished) {
   console.log(`npm package ${expectedPackageName}@${releaseVersion} is available.`);
+
+  // The version being unused is not enough; it also has to come after the
+  // one npm serves as `latest`.
+  const latestArgs = ['view', expectedPackageName, 'dist-tags.latest', '--json'];
+  const latestResult = run('npm', latestArgs);
+  if (latestResult.status === 0) {
+    let latestVersion = null;
+    try {
+      latestVersion = JSON.parse(latestResult.stdout);
+    } catch {
+      // An empty reply means the package has no `latest` tag yet.
+    }
+    if (typeof latestVersion === 'string' && latestVersion) {
+      assertVersionAdvancesLatest({ version: releaseVersion, latestVersion, npmPublished });
+      console.log(`${releaseVersion} is higher than the current npm latest, ${latestVersion}.`);
+    }
+  } else if (!isNpmNotFound(latestResult)) {
+    fail(`Unable to read the current npm latest version.\n${describeCommandFailure('npm', latestArgs, latestResult)}`);
+  }
 }
 
 const remoteResult = run('git', ['remote', 'get-url', 'origin']);

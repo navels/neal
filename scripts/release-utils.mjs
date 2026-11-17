@@ -125,6 +125,78 @@ export function parseRemoteTagTarget(output, tagName) {
   return match?.split(/\s+/)[0] ?? null;
 }
 
+function parseReleaseVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
+  if (!match) {
+    fail(`Not a SemVer version: ${JSON.stringify(version)}.`);
+  }
+  // BigInt, not Number: SemVer puts no upper bound on a numeric identifier, and
+  // two values above Number.MAX_SAFE_INTEGER would otherwise compare equal.
+  return {
+    core: [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])],
+    prerelease: match[4] ? match[4].split('.') : [],
+  };
+}
+
+function compareBigInt(a, b) {
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
+// SemVer precedence: negative when a < b, zero when equal, positive when a > b.
+export function compareReleaseVersions(a, b) {
+  const left = parseReleaseVersion(a);
+  const right = parseReleaseVersion(b);
+  for (let index = 0; index < 3; index += 1) {
+    const order = compareBigInt(left.core[index], right.core[index]);
+    if (order !== 0) {
+      return order;
+    }
+  }
+  // A version without a prerelease outranks the same core with one.
+  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
+    return right.prerelease.length - left.prerelease.length;
+  }
+  for (let index = 0; index < Math.max(left.prerelease.length, right.prerelease.length); index += 1) {
+    const l = left.prerelease[index];
+    const r = right.prerelease[index];
+    if (l === undefined || r === undefined) {
+      return l === undefined ? -1 : 1;
+    }
+    const lNumeric = /^\d+$/.test(l);
+    const rNumeric = /^\d+$/.test(r);
+    if (lNumeric && rNumeric) {
+      const order = compareBigInt(BigInt(l), BigInt(r));
+      if (order !== 0) {
+        return order;
+      }
+      continue;
+    }
+    if (lNumeric !== rNumeric) {
+      return lNumeric ? -1 : 1;
+    }
+    if (!lNumeric && l !== r) {
+      return l < r ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+// A release that isn't already public must be higher than the version npm
+// currently serves as `latest`. A free version number is not enough: 0.7.1 was
+// unused when 0.8.0 was already out, and `npm publish` refuses to move `latest`
+// backwards, so that release prep could only fail after it had merged.
+export function assertVersionAdvancesLatest({ version, latestVersion, npmPublished }) {
+  if (npmPublished || !latestVersion) {
+    return;
+  }
+  if (compareReleaseVersions(version, latestVersion) <= 0) {
+    fail(
+      `Release version ${version} is not higher than ${latestVersion}, the version npm currently serves as latest. ` +
+        'Check package.json on main: the release must be numbered after the last published version.',
+    );
+  }
+}
+
 export function assertReleaseStateAllowed({ dryRun, npmPublished, tagExists, version }) {
   if (!dryRun) {
     return;

@@ -7,6 +7,8 @@ type ProvenanceStatement = Record<string, unknown>;
 
 type ReleaseUtilsModule = {
   getChangelogSection: (markdown: string, version: string) => string;
+  compareReleaseVersions: (a: string, b: string) => number;
+  assertVersionAdvancesLatest: (args: { version: string; latestVersion: string | null; npmPublished: boolean }) => void;
   parseProvenanceStatement: (response: unknown) => ProvenanceStatement;
   assertReleaseProvenance: (
     statement: ProvenanceStatement,
@@ -250,4 +252,42 @@ test('retryWhilePropagating gives up once the propagation window closes', async 
     /E404/,
   );
   assert.equal(calls, 4, 'polls through the window, then surfaces the registry error');
+});
+
+test('release versions compare by SemVer precedence, not as strings', () => {
+  const { compareReleaseVersions } = releaseUtils;
+  assert.ok(compareReleaseVersions('0.8.1', '0.8.0') > 0);
+  assert.ok(compareReleaseVersions('0.7.1', '0.8.0') < 0);
+  assert.ok(compareReleaseVersions('0.10.0', '0.9.9') > 0);
+  assert.ok(compareReleaseVersions('1.0.0', '0.99.99') > 0);
+  assert.equal(compareReleaseVersions('0.8.0', '0.8.0'), 0);
+  assert.ok(compareReleaseVersions('1.0.0-rc.1', '1.0.0') < 0);
+  assert.ok(compareReleaseVersions('1.0.0-rc.2', '1.0.0-rc.10') < 0);
+  assert.ok(compareReleaseVersions('1.0.0-alpha', '1.0.0-alpha.1') < 0);
+  // Numeric identifiers have no upper bound, so they can't go through Number.
+  assert.ok(compareReleaseVersions('1.0.0-9007199254740993', '1.0.0-9007199254740992') > 0);
+  assert.ok(compareReleaseVersions('9007199254740993.0.0', '9007199254740992.0.0') > 0);
+  // Numeric identifiers rank below alphanumeric ones.
+  assert.ok(compareReleaseVersions('1.0.0-1', '1.0.0-alpha') < 0);
+  assert.throws(() => compareReleaseVersions('v0.8.0', '0.8.0'), /Not a SemVer version/);
+});
+
+// The 0.7.1 incident: an unused version number that sits below the published
+// latest passed every check until `npm publish` refused it, after the release
+// prep had already merged.
+test('a release must be numbered after the version npm serves as latest', () => {
+  const { assertVersionAdvancesLatest } = releaseUtils;
+  assert.throws(
+    () => assertVersionAdvancesLatest({ version: '0.7.1', latestVersion: '0.8.0', npmPublished: false }),
+    /0\.7\.1 is not higher than 0\.8\.0/,
+  );
+  assert.throws(
+    () => assertVersionAdvancesLatest({ version: '0.8.0', latestVersion: '0.8.0', npmPublished: false }),
+    /not higher than/,
+  );
+  assertVersionAdvancesLatest({ version: '0.8.1', latestVersion: '0.8.0', npmPublished: false });
+  // Recovery reruns target a version that is already public.
+  assertVersionAdvancesLatest({ version: '0.8.0', latestVersion: '0.8.0', npmPublished: true });
+  // A package that has never been published has no latest.
+  assertVersionAdvancesLatest({ version: '0.1.0', latestVersion: null, npmPublished: false });
 });

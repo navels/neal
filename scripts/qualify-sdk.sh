@@ -31,6 +31,27 @@ for tool in gh git node pnpm; do
 done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# gh refuses to guess the repository when a checkout has more than one GitHub
+# remote and no default set, and this script only calls gh at the very end,
+# after the live qualification has run. Name the repository from origin up
+# front so the result can always be posted.
+if [ -z "${GH_REPO:-}" ]; then
+  # Every URL form git accepts for a GitHub remote: https://, http://, ssh://,
+  # git://, and the scp-style git@github.com:owner/repo.
+  GH_REPO="$(git -C "$REPO_ROOT" remote get-url origin | sed -E 's#^(https?|ssh|git)://([^@/]+@)?github\.com(:[0-9]+)?/##; s#^[^@/]+@github\.com:##; s#/+$##; s#\.git$##')"
+  if ! grep -qE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' <<<"$GH_REPO"; then
+    echo "qualify-sdk: cannot work out the GitHub repository from origin ($(git -C "$REPO_ROOT" remote get-url origin))." >&2
+    echo "Set GH_REPO=owner/repo and run again." >&2
+    exit 1
+  fi
+  export GH_REPO
+fi
+gh pr view "$PR" --json number >/dev/null || {
+  echo "qualify-sdk: cannot read PR #${PR} in ${GH_REPO} with gh; fix that before running the live qualification." >&2
+  exit 1
+}
+
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/neal-qualify-XXXXXX")"
 QBRANCH="qualify-pr-${PR}"
 

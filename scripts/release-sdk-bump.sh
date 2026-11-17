@@ -32,6 +32,21 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 PACKAGE_NAME="$(node -p "require('./package.json').name")"
 
+# gh refuses to guess the repository when a checkout has more than one GitHub
+# remote and no default set. Name it from origin so every gh call below works
+# without `gh repo set-default`.
+if [ -z "${GH_REPO:-}" ]; then
+  # Every URL form git accepts for a GitHub remote: https://, http://, ssh://,
+  # git://, and the scp-style git@github.com:owner/repo.
+  GH_REPO="$(git remote get-url origin | sed -E 's#^(https?|ssh|git)://([^@/]+@)?github\.com(:[0-9]+)?/##; s#^[^@/]+@github\.com:##; s#/+$##; s#\.git$##')"
+  if ! grep -qE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' <<<"$GH_REPO"; then
+    echo "release-sdk-bump: cannot work out the GitHub repository from origin ($(git remote get-url origin))." >&2
+    echo "Set GH_REPO=owner/repo and run again." >&2
+    exit 1
+  fi
+  export GH_REPO
+fi
+
 if [ -n "$(git status --porcelain)" ]; then
   echo "release-sdk-bump: working tree is not clean; commit or stash first." >&2
   exit 1
@@ -119,12 +134,41 @@ if [ "$NATIVE_COUNT" -gt 0 ]; then
 fi
 
 # --- compute the release version and changelog section ---
+# The current version comes from main, not from the dependency PR's base
+# commit. A PR opened before the last release still has the old version at its
+# base, and bumping that produced 0.7.1 when 0.8.0 was already published.
 git fetch origin main --quiet
-CURRENT_VERSION="$(node -pe "JSON.parse(process.argv[1]).version" "$BASE_PKG")"
+CURRENT_VERSION="$(git show origin/main:package.json | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
 VERSION="$(node -pe "
   const [major, minor, patch] = process.argv[1].split('.').map(Number);
   [major, minor, patch + 1].join('.')
 " "$CURRENT_VERSION")"
+
+# Refuse before merging anything if that still wouldn't advance npm's latest.
+# A failed lookup stops the release too: skipping the check when npm can't be
+# reached would let the same mistake through. Only a package that has never
+# been published (E404) has no latest to compare against.
+NPM_LATEST=""
+if ! NPM_LATEST_OUTPUT="$(npm view "$PACKAGE_NAME" dist-tags.latest 2>&1)"; then
+  if ! grep -q 'E404' <<<"$NPM_LATEST_OUTPUT"; then
+    echo "release-sdk-bump: could not read the current npm latest for ${PACKAGE_NAME}:" >&2
+    echo "$NPM_LATEST_OUTPUT" >&2
+    exit 1
+  fi
+else
+  NPM_LATEST="$NPM_LATEST_OUTPUT"
+fi
+if [ -n "$NPM_LATEST" ]; then
+  node --input-type=module -e "
+    import { assertVersionAdvancesLatest } from './scripts/release-utils.mjs';
+    try {
+      assertVersionAdvancesLatest({ version: process.argv[1], latestVersion: process.argv[2], npmPublished: false });
+    } catch (error) {
+      console.error('release-sdk-bump: ' + error.message);
+      process.exit(1);
+    }
+  " "$VERSION" "$NPM_LATEST"
+fi
 
 CHANGELOG_BULLETS="$(node -e "
   const lines = process.argv[1].split('\n').map((l) => l.split('|'));
