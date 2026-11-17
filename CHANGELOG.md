@@ -43,6 +43,16 @@ dependency-update policy.
 
 ### Fixed
 
+- The Claude adapter now emits a `tool_started` event for every tool call,
+  with the tool name and, where it has one, a bounded target: the file for
+  file tools, the directory or glob for search tools (never the search
+  pattern), the command for Bash. Before,
+  it reported only Bash and write tools, and only on completion, so a Claude
+  reviewer's reads left no trace in the run events, `neal status` saw no
+  progress while it read, and the startup-silence watchdog had nothing to
+  disarm it. Bash and write tools still produce `command_completed` and
+  `file_changed` as before.
+
 - Whole-plan reviewers receive the complete aggregate diff even when it exceeds
   the former 200,000-character inline limit, avoiding final review loops caused
   by truncated evidence (#116).

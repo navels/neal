@@ -103,6 +103,11 @@ type ClaudeLogState = {
   // see Claude tool activity. Cleared at each result message (turn boundary)
   // so a dangling tool_use cannot leak across turns.
   pendingToolUses: Map<string, ClaudePendingToolUse>;
+  // Ids of tool calls already announced as `tool_started` in this stream.
+  // Unlike pendingToolUses this is never cleared: an assistant message can be
+  // delivered again after its tool call completed, and a background Bash call
+  // also surfaces as a `task_started` system message carrying the same id.
+  announcedToolUseIds: Set<string>;
 };
 
 // Extended thinking can run for many minutes before the first visible text or
@@ -247,6 +252,41 @@ async function appendClaudeText(
   return emittedTexts;
 }
 
+const CLAUDE_TOOL_TARGET_MAX_CHARS = 300;
+
+// A short, bounded description of where a tool call is aimed, for the
+// `tool_started` event: the file for file tools, the directory or glob for
+// search tools, the command for Bash (the same command text
+// `command_completed` already records). A search tool's content pattern is
+// deliberately left out: it is whatever the model chose to look for, which can
+// be a literal secret, and where it looked is what an audit needs. Tools with
+// none of these fields (including MCP tools), and malformed inputs, yield
+// null rather than a dump of the whole input, so a target is best-effort.
+function getClaudeToolTarget(toolName: string, toolInput: unknown): string | null {
+  if (toolInput === null || typeof toolInput !== 'object') {
+    return null;
+  }
+  const input = toolInput as Record<string, unknown>;
+  const text = (key: string) => {
+    const value = input[key];
+    return typeof value === 'string' && value.trim() ? value : null;
+  };
+  const target =
+    toolName === 'Bash'
+      ? text('command')
+      : toolName === 'Grep'
+        ? [text('path'), text('glob')].filter((part): part is string => part !== null).join(' ') || null
+        : toolName === 'Glob'
+          ? [text('path'), text('pattern')].filter((part): part is string => part !== null).join(' ') || null
+          : text('file_path') ?? text('notebook_path') ?? text('path');
+  if (target === null) {
+    return null;
+  }
+  return target.length > CLAUDE_TOOL_TARGET_MAX_CHARS
+    ? `${target.slice(0, CLAUDE_TOOL_TARGET_MAX_CHARS)}…`
+    : target;
+}
+
 function getClaudeBashCommand(toolInput: unknown): string | null {
   if (toolInput === null || typeof toolInput !== 'object') {
     return null;
@@ -290,12 +330,41 @@ async function logClaudeMessage(
 ): Promise<string[]> {
   switch (message.type) {
     case 'assistant': {
-      if (state) {
-        for (const block of message.message.content) {
-          if (block.type === 'tool_use') {
-            state.pendingToolUses.set(block.id, { name: block.name, input: block.input });
-          }
+      // Every tool call is announced as `tool_started`, read-class tools
+      // (Read/Grep/Glob) included. Without this a Claude turn that only reads
+      // leaves no trace in the run events: nothing shows which files a
+      // reviewer opened, status sees no progress, and the startup-silence
+      // watchdog has nothing to disarm it. The completion mapping below is
+      // unchanged: only Bash and write tools produce `command_completed` and
+      // `file_changed`, because only those are verification evidence.
+      for (const block of message.message.content) {
+        if (block.type !== 'tool_use') {
+          continue;
         }
+        // The same assistant message can be delivered more than once, before
+        // or after its tool call completes; announce a given tool call only
+        // the first time within this stream.
+        const alreadyAnnounced = state?.announcedToolUseIds.has(block.id) === true;
+        state?.pendingToolUses.set(block.id, { name: block.name, input: block.input });
+        state?.announcedToolUseIds.add(block.id);
+        if (alreadyAnnounced) {
+          continue;
+        }
+        const target = getClaudeToolTarget(block.name, block.input);
+        await emitProviderEvent(events, {
+          type: 'tool_started',
+          provider: ANTHROPIC_CLAUDE_PROVIDER_ID,
+          role,
+          label,
+          sessionHandle,
+          itemId: block.id,
+          toolName: block.name,
+          providerData: {
+            sdkMessageType: message.type,
+            toolUseId: block.id,
+            ...(target !== null ? { target } : {}),
+          },
+        });
       }
 
       if (state?.sawTextDelta) {
@@ -327,7 +396,8 @@ async function logClaudeMessage(
       // blocks. Matching them against the turn's pending tool_use blocks maps
       // Bash runs to `command_completed` and successful write-tool calls to
       // `file_changed`. Read-class tools (Read/Grep/Glob) intentionally emit
-      // nothing here — they are not verification evidence. The mapping is
+      // nothing here — they are not verification evidence; their start was
+      // already announced as `tool_started`. The mapping is
       // role-agnostic: advisor rounds run a read-only toolset, so they never
       // produce Bash or write tool_uses.
       if (!state) {
@@ -442,15 +512,21 @@ async function logClaudeMessage(
           });
           break;
         case 'task_started':
-          await emitProviderEvent(events, {
-            type: 'tool_started',
-            provider: ANTHROPIC_CLAUDE_PROVIDER_ID,
-            role,
-            label,
-            sessionHandle,
-            toolName: 'task',
-            providerData: { sdkMessageType: message.type, subtype: message.subtype, description: message.description },
-          });
+          // A background Bash call or subagent started by a tool call was
+          // already announced from its tool_use block; the task message then
+          // only adds progress. A task with no known originating call is
+          // still announced here.
+          if (!(message.tool_use_id !== undefined && state?.announcedToolUseIds.has(message.tool_use_id) === true)) {
+            await emitProviderEvent(events, {
+              type: 'tool_started',
+              provider: ANTHROPIC_CLAUDE_PROVIDER_ID,
+              role,
+              label,
+              sessionHandle,
+              toolName: 'task',
+              providerData: { sdkMessageType: message.type, subtype: message.subtype, description: message.description },
+            });
+          }
           await emitProviderEvent(events, {
             type: 'tool_progress',
             provider: ANTHROPIC_CLAUDE_PROVIDER_ID,
@@ -705,6 +781,7 @@ async function collectClaudeResult(
     sawTextDelta: false,
     lastThinkingEmitMs: 0,
     pendingToolUses: new Map(),
+    announcedToolUseIds: new Set(),
   };
   const assistantTexts: string[] = [];
   const iterator = stream[Symbol.asyncIterator]();
