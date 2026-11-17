@@ -40,8 +40,7 @@
     "examples"
   ],
   "engines": {
-    "node": ">=26.13.1",
-    "pnpm": ">=12.20.0"
+    "node": ">=22"
   },
   "scripts": {
     "build": "rm -rf dist && node node_modules/typescript-7/bin/tsc -p tsconfig.json && chmod +x dist/neal/index.js",

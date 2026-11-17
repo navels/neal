@@ -6,7 +6,7 @@ prints. When in doubt: `neal check`, then `.neal/runs/<run-id>/stderr.log`.
 ## Install and first run
 
 **Symptom:** install or startup fails on an old Node.
-**Cause:** neal requires Node.js >= 26.13.0 (`engines`). `.nvmrc` pins `26.13.0`.
+**Cause:** neal requires Node.js >= 22 (`engines`). `.nvmrc` pins the newer version used for development.
 **Fix:** `nvm use` in this repo, or upgrade Node before `npm install -g @navels/neal`.
 
 **Symptom:** `pnpm: command not found` when running from source.

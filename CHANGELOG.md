@@ -19,6 +19,13 @@ dependency-update policy.
 
 ### Changed
 
+- neal now supports Node.js 22 and newer. `engines.node` is `>=22`, down from
+  the `>=26.13.0` that 0.7.0 required. That floor had been raised
+  automatically by weekly dependency updates, not on purpose, and npm
+  silently installs an older neal for anyone below it. CI now runs on Node 22
+  and 24 as well as the development version, and Renovate no longer updates
+  `engines`. `engines.pnpm` is removed; `packageManager` pins pnpm for
+  contributors.
 - Scope review, final completion review, and `neal review` now deliver
   commit-range diffs as an index and numbered patch files for every reviewer
   provider. The reviewer `git_diff` tool and pasted range diffs are removed;

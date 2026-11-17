@@ -110,6 +110,13 @@
       "prBodyNotes": [
         ":warning: Behavior-defining native SDKs — do not merge on green CI alone. From a checkout with authenticated Claude/Codex CLIs, run `scripts/qualify-sdk.sh <pr-number>`: it runs the full suite plus a live `neal compat --role all` pass-through on every bumped adapter, posts the matrices here, and approves on PASS. Urgent bumps (e.g. a fix neal needs today) may bypass the soak with a manual PR. See docs/maintenance.md."
       ]
+    },
+    {
+      "description": "engines is the Node range neal promises to support, not a dependency to keep current. With rangeStrategy 'bump' Renovate rewrote `engines.node` to the newest Node release every week, which silently raised the install floor (npm then gives users on older Node an older neal). The floor changes only by hand, together with the CI matrix in .github/workflows/ci.yml. .nvmrc, the workflow Node pins and packageManager are the development versions and keep updating normally. See docs/maintenance.md.",
+      "matchDepTypes": [
+        "engines"
+      ],
+      "enabled": false
     }
   ]
 }
