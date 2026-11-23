@@ -55,8 +55,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.93",
-    "@anthropic-ai/claude-agent-sdk": "0.3.325",
-    "@openai/codex-sdk": "0.169.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.330",
+    "@openai/codex-sdk": "0.171.0",
     "ai": "7.0.177",
     "dotenv": "^18.0.10",
     "yaml": "^2.9.1",
