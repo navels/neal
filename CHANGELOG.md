@@ -10,6 +10,12 @@ dependency-update policy.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-25
+
+### Changed
+
+- Updated `@anthropic-ai/claude-agent-sdk` from `0.3.325` to `0.3.330` and `@openai/codex-sdk` from `0.169.0` to `0.171.0`. Re-qualified both native adapters with `neal compat`; no behavior change.
+
 ### Changed
 
 - `docs/providers.md` has a new "What a session inherits from your setup"
