@@ -10,6 +10,14 @@ dependency-update policy.
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/providers.md` has a new "What a session inherits from your setup"
+  section: which of your own Claude Code and Codex settings, hooks, plugins,
+  and skills apply to neal's sessions on each provider. The line about
+  "external provider plugins" is reworded to say that the set of providers is
+  fixed (#132).
+
 ## [0.8.1] - 2026-11-17
 
 ### Changed

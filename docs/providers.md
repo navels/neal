@@ -14,8 +14,14 @@ neal currently ships built-in adapters for:
   for the reviewer. See
   [OpenAI-compatible provider](#openai-compatible-provider).
 
-neal does not currently load external provider plugins or discover
-npm-installed providers. Public `neal review` is a separate read-only findings
+The set of providers is fixed. neal can't load a provider adapter from outside
+its own source, so there's no way to add a model backend as a plugin or an
+npm package. That's a separate thing from Claude Code plugins, Codex plugins,
+and agent skills, which change how the agent behaves inside a session. For
+those, see
+[What a session inherits from your setup](#what-a-session-inherits-from-your-setup).
+
+Public `neal review` is a separate read-only findings
 flow that uses configured provider adapters. It is not a writer-run mode and is
 not a registered provider id.
 
@@ -232,6 +238,58 @@ reflects that verification is the coder's, trusted by the reviewer's reading.
 Write access does not affect review doctrine: reviews never instruct repository
 mutation, and no supported reviewer capability declares write access in any
 case.
+
+## What a session inherits from your setup
+
+The native providers run the same Claude Code and Codex you use
+interactively. In a normal run neal doesn't isolate them from your own
+configuration, so most of what you've set up there applies to neal's sessions
+too. neal has no settings of its own for plugins, skills, or hooks.
+
+### `anthropic-claude`
+
+neal leaves the SDK's `settingSources` option unset, so every session loads
+your user, project, and local Claude Code settings. That brings in:
+
+- `CLAUDE.md` files.
+- Hooks, including the hooks of any plugin you've enabled.
+- Your enabled plugins.
+- MCP servers, for the coder only. Reviewer turns set `strictMcpConfig` (see
+  [What the invariant does and does not cover](#what-the-invariant-does-and-does-not-cover)).
+
+Skills are the exception. neal passes a fixed tool list: `Read`, `Grep`,
+`Glob`, `Edit`, `Write`, and `Bash` for the coder, and `Read`, `Grep`, `Glob`
+for the reviewer. The `Skill` tool isn't on either list. The session still
+lists your installed skills, but the model has no way to load one.
+
+So a plugin that works through hooks takes effect, and a skill installed by
+itself doesn't. A plugin whose `SessionStart` hook adds writing rules to the
+context, for example, applies those rules to the coder and the reviewer. The
+same rules installed only as a skill reach neither.
+
+Hooks run on reviewer turns too. A hook is your own code, and it's outside
+the read-only reviewer invariant.
+
+### `openai-codex`
+
+neal passes Codex no configuration overrides, so Codex loads your own
+`~/.codex/config.toml` and whatever that enables. neal doesn't add or remove
+anything. How Codex plugins and skills behave in a neal run is up to Codex,
+and it hasn't been checked the way the Claude behavior above has.
+
+### `openai-compatible`
+
+This provider is neal's own agent loop. It loads no settings files, hooks,
+plugins, or skills. The model sees neal's prompts and neal's tools and nothing
+else.
+
+### `neal compat` is isolated
+
+`neal compat` is the one place neal does isolate the native providers, so
+that a qualification run gives the same answer on any machine. Claude
+sessions load no filesystem settings (`settingSources: []`), which drops
+`CLAUDE.md`, hooks, and plugins. Codex runs with its `notify` hook turned off
+and otherwise keeps your config.
 
 ## Runtime turns
 
